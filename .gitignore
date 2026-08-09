@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Runtime data (never commit sessions, DB, secrets, logs)
+%APPDATA%/
+runtime_data/
+*.session
+*.session-journal
+*.db
+*.dat
+*.log
+*.log.*
+
+# PyInstaller
+build/
+dist/
+*.spec.bak
+
+# IDE
+.vscode/
+.idea/
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
