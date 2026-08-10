@@ -20,7 +20,7 @@ from __future__ import annotations
 from typing import Dict, List, Optional, Tuple
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor, QFont, QTextCharFormat, QTextCursor, QTextDocument, QTextFormat
+from PySide6.QtGui import QColor, QFont, QKeySequence, QShortcut, QTextCharFormat, QTextCursor, QTextDocument, QTextFormat
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QInputDialog,
@@ -70,7 +70,13 @@ def _active_kinds(fmt: QTextCharFormat) -> Dict[str, bool]:
     return {
         "bold": fmt.fontWeight() >= QFont.Weight.Bold.value,
         "italic": fmt.fontItalic(),
-        "underline": fmt.fontUnderline(),
+        # Links are rendered with an underline purely as a visual affordance
+        # (both when freshly inserted and when an editor is repopulated by
+        # apply_content_to_editor) -- Telegram itself renders TextUrl
+        # entities underlined automatically, so that decoration must never
+        # be picked up as an independent MessageEntityUnderline here, or
+        # every link would silently gain a spurious duplicate entity.
+        "underline": fmt.fontUnderline() and not fmt.isAnchor(),
         "strike": fmt.fontStrikeOut(),
         "code": bool(fmt.property(PROP_CODE)),
         "pre": bool(fmt.property(PROP_PRE)),
@@ -151,22 +157,91 @@ def extract_message_content(document: QTextDocument) -> Tuple[str, List[TypeMess
     return del_surrogate(surrogate_text), entities
 
 
+_ENTITY_TO_KIND = {
+    MessageEntityBold: "bold",
+    MessageEntityItalic: "italic",
+    MessageEntityUnderline: "underline",
+    MessageEntityStrike: "strike",
+    MessageEntityCode: "code",
+    MessageEntityPre: "pre",
+    MessageEntitySpoiler: "spoiler",
+}
+
+
+def _format_for_kind(kind: str) -> QTextCharFormat:
+    fmt = QTextCharFormat()
+    if kind == "bold":
+        fmt.setFontWeight(QFont.Weight.Bold.value)
+    elif kind == "italic":
+        fmt.setFontItalic(True)
+    elif kind == "underline":
+        fmt.setFontUnderline(True)
+    elif kind == "strike":
+        fmt.setFontStrikeOut(True)
+    elif kind == "code":
+        fmt.setProperty(PROP_CODE, True)
+        fmt.setFontFamilies(["Consolas"])
+    elif kind == "pre":
+        fmt.setProperty(PROP_PRE, True)
+        fmt.setFontFamilies(["Consolas"])
+    elif kind == "spoiler":
+        fmt.setProperty(PROP_SPOILER, True)
+        fmt.setBackground(QColor("#4a4a4a"))
+    return fmt
+
+
+def apply_content_to_editor(text_edit: QTextEdit, text: str, entities: List[TypeMessageEntity]) -> None:
+    """Inverse of extract_message_content(): repopulate a QTextEdit from a
+    previously-extracted (text, entities) pair, preserving formatting.
+
+    Entity offsets/lengths are UTF-16 code units -- exactly the unit
+    QTextCursor positions already use internally (QString is UTF-16), so
+    they apply directly with no extra conversion. This is what lets the
+    floating editor dialog reopen with formatting intact instead of only
+    carrying plain text across.
+    """
+    text_edit.setPlainText(text)
+    cursor = text_edit.textCursor()
+    for entity in entities:
+        cursor.setPosition(entity.offset)
+        cursor.setPosition(entity.offset + entity.length, QTextCursor.MoveMode.KeepAnchor)
+        if isinstance(entity, MessageEntityTextUrl):
+            fmt = QTextCharFormat()
+            fmt.setAnchor(True)
+            fmt.setAnchorHref(entity.url)
+            fmt.setForeground(QColor("#4ea1f7"))
+            fmt.setFontUnderline(True)
+        else:
+            kind = _ENTITY_TO_KIND.get(type(entity))
+            if kind is None:
+                continue
+            fmt = _format_for_kind(kind)
+        cursor.mergeCharFormat(fmt)
+
+    reset_cursor = text_edit.textCursor()
+    reset_cursor.movePosition(QTextCursor.MoveOperation.Start)
+    text_edit.setTextCursor(reset_cursor)
+
+
 class MessageEditorWidget(QWidget):
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: Optional[QWidget] = None, compact: bool = False) -> None:
         super().__init__(parent)
+        self._toggle_buttons: Dict[str, QToolButton] = {}
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
         toolbar = QHBoxLayout()
-        toolbar.addWidget(self._make_button("B", "Жирный", self._toggle_bold))
-        toolbar.addWidget(self._make_button("I", "Курсив", self._toggle_italic))
-        toolbar.addWidget(self._make_button("U", "Подчёркнутый", self._toggle_underline))
-        toolbar.addWidget(self._make_button("S", "Зачёркнутый", self._toggle_strike))
-        toolbar.addWidget(self._make_button("Spoiler", "Спойлер", self._toggle_spoiler))
-        toolbar.addWidget(self._make_button("Code", "Код", self._toggle_code))
-        toolbar.addWidget(self._make_button("Code block", "Блок кода", self._toggle_pre))
-        toolbar.addWidget(self._make_button("🔗", "Добавить ссылку", self._insert_link))
+        toolbar.addWidget(self._make_toggle_button("bold", "B", "Жирный (Ctrl+B)", self._toggle_bold))
+        toolbar.addWidget(self._make_toggle_button("italic", "I", "Курсив (Ctrl+I)", self._toggle_italic))
+        toolbar.addWidget(
+            self._make_toggle_button("underline", "U", "Подчёркнутый (Ctrl+U)", self._toggle_underline)
+        )
+        toolbar.addWidget(self._make_toggle_button("strike", "S", "Зачёркнутый", self._toggle_strike))
+        toolbar.addWidget(self._make_toggle_button("spoiler", "🙈", "Спойлер", self._toggle_spoiler))
+        toolbar.addWidget(self._make_toggle_button("code", "<>", "Код", self._toggle_code))
+        toolbar.addWidget(self._make_toggle_button("pre", "{ }", "Блок кода", self._toggle_pre))
+        toolbar.addWidget(self._make_button("🔗", "Добавить ссылку к выделенному тексту", self._insert_link))
         toolbar.addWidget(self._make_emoji_button())
         toolbar.addStretch(1)
         layout.addLayout(toolbar)
@@ -174,13 +249,31 @@ class MessageEditorWidget(QWidget):
         self._text_edit = QTextEdit(self)
         self._text_edit.setPlaceholderText("Текст сообщения...")
         self._text_edit.setAcceptRichText(False)
+        if compact:
+            self._text_edit.setFixedHeight(90)
         layout.addWidget(self._text_edit)
+
+        self._text_edit.cursorPositionChanged.connect(self._sync_toolbar_state)
+        self._text_edit.selectionChanged.connect(self._sync_toolbar_state)
+
+        QShortcut(QKeySequence("Ctrl+B"), self._text_edit, activated=self._toggle_bold)
+        QShortcut(QKeySequence("Ctrl+I"), self._text_edit, activated=self._toggle_italic)
+        QShortcut(QKeySequence("Ctrl+U"), self._text_edit, activated=self._toggle_underline)
 
     def _make_button(self, label: str, tooltip: str, handler) -> QToolButton:
         button = QToolButton(self)
         button.setText(label)
         button.setToolTip(tooltip)
         button.clicked.connect(handler)
+        return button
+
+    def _make_toggle_button(self, kind: str, label: str, tooltip: str, handler) -> QToolButton:
+        button = QToolButton(self)
+        button.setText(label)
+        button.setToolTip(tooltip)
+        button.setCheckable(True)
+        button.clicked.connect(handler)
+        self._toggle_buttons[kind] = button
         return button
 
     def _make_emoji_button(self) -> QToolButton:
@@ -198,6 +291,13 @@ class MessageEditorWidget(QWidget):
     def _current_format(self) -> QTextCharFormat:
         return self._text_edit.textCursor().charFormat()
 
+    def _sync_toolbar_state(self) -> None:
+        kinds = _active_kinds(self._current_format())
+        for kind, button in self._toggle_buttons.items():
+            button.blockSignals(True)
+            button.setChecked(kinds.get(kind, False))
+            button.blockSignals(False)
+
     def _toggle_bold(self) -> None:
         fmt = QTextCharFormat()
         is_bold = self._current_format().fontWeight() >= QFont.Weight.Bold.value
@@ -205,21 +305,25 @@ class MessageEditorWidget(QWidget):
             QFont.Weight.Normal.value if is_bold else QFont.Weight.Bold.value
         )
         self._text_edit.mergeCurrentCharFormat(fmt)
+        self._sync_toolbar_state()
 
     def _toggle_italic(self) -> None:
         fmt = QTextCharFormat()
         fmt.setFontItalic(not self._current_format().fontItalic())
         self._text_edit.mergeCurrentCharFormat(fmt)
+        self._sync_toolbar_state()
 
     def _toggle_underline(self) -> None:
         fmt = QTextCharFormat()
         fmt.setFontUnderline(not self._current_format().fontUnderline())
         self._text_edit.mergeCurrentCharFormat(fmt)
+        self._sync_toolbar_state()
 
     def _toggle_strike(self) -> None:
         fmt = QTextCharFormat()
         fmt.setFontStrikeOut(not self._current_format().fontStrikeOut())
         self._text_edit.mergeCurrentCharFormat(fmt)
+        self._sync_toolbar_state()
 
     def _toggle_spoiler(self) -> None:
         fmt = QTextCharFormat()
@@ -227,20 +331,23 @@ class MessageEditorWidget(QWidget):
         fmt.setProperty(PROP_SPOILER, active)
         fmt.setBackground(QColor("#4a4a4a") if active else QColor(Qt.GlobalColor.transparent))
         self._text_edit.mergeCurrentCharFormat(fmt)
+        self._sync_toolbar_state()
 
     def _toggle_code(self) -> None:
         fmt = QTextCharFormat()
         active = not bool(self._current_format().property(PROP_CODE))
         fmt.setProperty(PROP_CODE, active)
-        fmt.setFontFamily("Consolas" if active else self._text_edit.document().defaultFont().family())
+        fmt.setFontFamilies(["Consolas"] if active else [self._text_edit.document().defaultFont().family()])
         self._text_edit.mergeCurrentCharFormat(fmt)
+        self._sync_toolbar_state()
 
     def _toggle_pre(self) -> None:
         fmt = QTextCharFormat()
         active = not bool(self._current_format().property(PROP_PRE))
         fmt.setProperty(PROP_PRE, active)
-        fmt.setFontFamily("Consolas" if active else self._text_edit.document().defaultFont().family())
+        fmt.setFontFamilies(["Consolas"] if active else [self._text_edit.document().defaultFont().family()])
         self._text_edit.mergeCurrentCharFormat(fmt)
+        self._sync_toolbar_state()
 
     def _insert_link(self) -> None:
         cursor = self._text_edit.textCursor()
@@ -267,8 +374,15 @@ class MessageEditorWidget(QWidget):
     def get_content(self) -> Tuple[str, List[TypeMessageEntity]]:
         return extract_message_content(self._text_edit.document())
 
+    def set_content(self, text: str, entities: List[TypeMessageEntity]) -> None:
+        apply_content_to_editor(self._text_edit, text, entities)
+        self._sync_toolbar_state()
+
     def get_plain_text(self) -> str:
         return self._text_edit.toPlainText()
+
+    def character_count(self) -> int:
+        return len(self._text_edit.toPlainText())
 
     def is_empty(self) -> bool:
         return not self._text_edit.toPlainText().strip()

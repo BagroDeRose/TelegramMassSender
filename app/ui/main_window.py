@@ -1,21 +1,25 @@
 """Main application window: wires every layer together into the
 account -> recipients -> message -> attachments -> interval -> start ->
-progress flow (spec item 68).
+progress flow (spec item 68), organized as clearly numbered sections so
+the app is understandable without reading documentation.
 """
 from __future__ import annotations
 
 import asyncio
-from typing import Optional
+from typing import List, Optional
 
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
-    QLabel,
+    QGroupBox,
+    QHBoxLayout,
     QMainWindow,
+    QPushButton,
     QScrollArea,
     QVBoxLayout,
     QWidget,
 )
+from telethon.tl.types import TypeMessageEntity
 
 from app.campaign.campaign_manager import CampaignManager
 from app.campaign.campaign_state import CampaignStatus
@@ -36,10 +40,12 @@ from app.ui.campaign_controls import CampaignControlsWidget
 from app.ui.dialogs import confirm_delete_account, confirm_exit_during_campaign, show_error, show_test_send_result
 from app.ui.log_widget import LogWidget
 from app.ui.login_dialog import LoginDialog
-from app.ui.message_editor import MessageEditorWidget
+from app.ui.message_editor_dialog import MessageEditorDialog
+from app.ui.message_preview import MessagePreviewWidget
 from app.ui.recipient_widget import RecipientWidget
 
 WINDOW_TITLE = "Telegram Mass Sender"
+_MIN_WINDOW_SIZE = (900, 700)
 
 
 def _format_duration(total_seconds: int) -> str:
@@ -49,15 +55,12 @@ def _format_duration(total_seconds: int) -> str:
     return f"{seconds} сек"
 
 
-def _section(title: str, widget: QWidget) -> QWidget:
-    container = QWidget()
-    layout = QVBoxLayout(container)
-    layout.setContentsMargins(0, 8, 0, 8)
-    label = QLabel(title)
-    label.setStyleSheet("font-weight: 600; font-size: 14px;")
-    layout.addWidget(label)
+def _card(title: str, widget: QWidget) -> QGroupBox:
+    box = QGroupBox(title)
+    box.setObjectName("sectionCard")
+    layout = QVBoxLayout(box)
     layout.addWidget(widget)
-    return container
+    return box
 
 
 class MainWindow(QMainWindow):
@@ -84,14 +87,24 @@ class MainWindow(QMainWindow):
         self._database = database if database is not None else Database()
         self._service = TelegramService(self._database)
 
+        # Source of truth for the message: the inline preview is read-only,
+        # actual editing happens in MessageEditorDialog (spec: large
+        # messages need a real resizable editor, not a cramped inline box).
+        self._message_text: str = ""
+        self._message_entities: List[TypeMessageEntity] = []
+
         self.setWindowTitle(WINDOW_TITLE)
-        self.resize(1000, 900)
+        self.resize(1020, 900)
+        self.setMinimumSize(*_MIN_WINDOW_SIZE)
         self._apply_theme()
         self._build_ui()
         self._wire_signals()
 
         settings = self._service.settings_repository.load_app_settings()
         self._campaign_controls.set_interval(settings.min_delay_seconds, settings.max_delay_seconds)
+
+        self._update_message_preview()
+        self.statusBar().showMessage("Готово")
 
         asyncio.ensure_future(self._refresh_accounts())
 
@@ -107,22 +120,40 @@ class MainWindow(QMainWindow):
     def _build_ui(self) -> None:
         self._account_widget = AccountWidget(self)
         self._recipient_widget = RecipientWidget(self)
-        self._message_editor = MessageEditorWidget(self)
+        self._message_preview = MessagePreviewWidget(self)
         self._attachments_widget = AttachmentsWidget(self)
         self._campaign_controls = CampaignControlsWidget(self)
         self._log_widget = LogWidget(self)
 
+        message_section = QWidget()
+        message_layout = QVBoxLayout(message_section)
+        message_layout.setContentsMargins(0, 0, 0, 0)
+        message_layout.addWidget(self._message_preview)
+
+        message_buttons = QHBoxLayout()
+        self._open_editor_button = QPushButton("✏ Открыть редактор", message_section)
+        self._open_editor_button.setObjectName("primaryButton")
+        self._open_editor_button.setToolTip("Полноразмерный редактор для длинных сообщений с форматированием")
+        self._open_editor_button.clicked.connect(self._on_open_editor_clicked)
+        message_buttons.addWidget(self._open_editor_button)
+        message_buttons.addStretch(1)
+        message_layout.addLayout(message_buttons)
+
         content = QWidget()
         content_layout = QVBoxLayout(content)
-        content_layout.addWidget(_section("Telegram аккаунт", self._account_widget))
-        content_layout.addWidget(_section("Получатели", self._recipient_widget))
-        content_layout.addWidget(_section("Сообщение", self._message_editor))
-        content_layout.addWidget(_section("Вложения", self._attachments_widget))
-        content_layout.addWidget(_section("Рассылка", self._campaign_controls))
-        content_layout.addWidget(_section("Журнал", self._log_widget))
+        content_layout.setContentsMargins(16, 16, 16, 16)
+        content_layout.setSpacing(16)
+        content_layout.addWidget(_card("1. Аккаунт", self._account_widget))
+        content_layout.addWidget(_card("2. Получатели", self._recipient_widget))
+        content_layout.addWidget(_card("3. Сообщение", message_section))
+        content_layout.addWidget(_card("4. Вложения", self._attachments_widget))
+        content_layout.addWidget(_card("5. Рассылка", self._campaign_controls))
+        content_layout.addWidget(_card("Журнал", self._log_widget))
+        content_layout.addStretch(1)
 
         scroll = QScrollArea(self)
         scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         scroll.setWidget(content)
         self.setCentralWidget(scroll)
 
@@ -131,11 +162,27 @@ class MainWindow(QMainWindow):
         self._account_widget.account_selected.connect(self._on_account_selected)
         self._account_widget.delete_account_requested.connect(self._on_delete_account_requested)
 
+        self._recipient_widget.recipients_changed.connect(self._on_form_state_changed)
+        self._attachments_widget.attachments_changed.connect(self._update_message_preview)
+
         self._campaign_controls.start_requested.connect(self._on_start_requested)
         self._campaign_controls.pause_requested.connect(self._on_pause_requested)
         self._campaign_controls.resume_requested.connect(self._on_resume_requested)
         self._campaign_controls.stop_requested.connect(self._on_stop_requested)
         self._campaign_controls.test_send_requested.connect(self._on_test_send_requested)
+
+    # ---- message editor / preview --------------------------------------------
+
+    def _on_open_editor_clicked(self) -> None:
+        dialog = MessageEditorDialog(self._message_text, self._message_entities, self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            self._message_text, self._message_entities = dialog.result_content()
+            self._update_message_preview()
+
+    def _update_message_preview(self) -> None:
+        attachment_names = [a.file_name for a in self._attachments_widget.get_attachments()]
+        self._message_preview.update_preview(self._message_text, self._message_entities, attachment_names)
+        self._on_form_state_changed()
 
     # ---- account management -------------------------------------------------
 
@@ -151,6 +198,7 @@ class MainWindow(QMainWindow):
         account_manager = self._service.account_manager
         if account_manager is None:
             self._account_widget.set_accounts([])
+            self._on_form_state_changed()
             return
         statuses = await account_manager.list_accounts_with_status()
         selected = select_id if select_id is not None else account_manager.active_account_id
@@ -162,6 +210,7 @@ class MainWindow(QMainWindow):
                 account_manager.switch_active_account(selected)
             except AccountSwitchBlockedError:
                 pass
+        self._on_form_state_changed()
 
     def _on_add_account_requested(self) -> None:
         if not self._can_switch_accounts():
@@ -184,6 +233,7 @@ class MainWindow(QMainWindow):
             show_error(self, "Недоступно", str(exc))
             if account_manager.active_account_id is not None:
                 self._account_widget.select_account(account_manager.active_account_id)
+        self._on_form_state_changed()
 
     def _on_delete_account_requested(self, account_id: int) -> None:
         if not self._can_switch_accounts():
@@ -209,6 +259,14 @@ class MainWindow(QMainWindow):
             return None
         return self._service.account_repository.get_by_id(account_manager.active_account_id)
 
+    # ---- proactive Start-button state -----------------------------------------
+
+    def _on_form_state_changed(self, *_args) -> None:
+        has_account = self._active_account() is not None
+        has_recipients = bool(self._recipient_widget.get_summary().valid_recipients)
+        has_content = bool(self._message_text.strip()) or not self._attachments_widget.is_empty()
+        self._campaign_controls.set_start_ready(has_account and has_recipients and has_content)
+
     # ---- campaign lifecycle ---------------------------------------------------
 
     def _on_start_requested(self) -> None:
@@ -227,7 +285,7 @@ class MainWindow(QMainWindow):
             show_error(self, "Рассылка", "Список получателей пуст или не содержит корректных значений.")
             return
 
-        text, entities = self._message_editor.get_content()
+        text, entities = self._message_text, self._message_entities
         attachments = self._attachments_widget.get_attachments()
         missing = self._attachments_widget.missing_files()
         if missing:
@@ -276,7 +334,12 @@ class MainWindow(QMainWindow):
             attachments=attachments,
             rate_limiter=rate_limiter,
             max_retries=retry_count,
-            parent=self,
+            # No Qt parent on purpose: with parent=self, Qt's ownership
+            # hierarchy would keep every past campaign alive forever as a
+            # child of MainWindow (each Start/restart leaking one more dead
+            # CampaignManager). Plain Python refcounting reclaims it as
+            # soon as self._current_campaign is reassigned to the next one.
+            parent=None,
         )
         self._current_campaign = campaign
         self._log_widget.clear()
@@ -291,14 +354,20 @@ class MainWindow(QMainWindow):
 
         campaign.start()
         self._campaign_controls.set_running_state(True, paused=False)
+        self.statusBar().showMessage("Рассылка выполняется…")
 
     def _on_campaign_state_changed(self, status_value: str) -> None:
         status = CampaignStatus(status_value)
         if status == CampaignStatus.RUNNING:
             self._campaign_controls.set_running_state(True, paused=False)
             self._campaign_controls.set_status_text("")
-        elif status in (CampaignStatus.PAUSED, CampaignStatus.WAITING_FOR_FLOOD):
+            self.statusBar().showMessage("Рассылка выполняется…")
+        elif status == CampaignStatus.PAUSED:
             self._campaign_controls.set_running_state(True, paused=True)
+            self.statusBar().showMessage("Рассылка на паузе")
+        elif status == CampaignStatus.WAITING_FOR_FLOOD:
+            self._campaign_controls.set_running_state(True, paused=True)
+            self.statusBar().showMessage("Ожидание ограничения Telegram…")
 
     def _on_flood_wait_started(self, seconds: int) -> None:
         self._campaign_controls.set_status_text(
@@ -315,12 +384,19 @@ class MainWindow(QMainWindow):
         self._campaign_controls.set_status_text("")
         self._account_widget.set_enabled_switching(True)
         status = CampaignStatus(status_value)
-        if status == CampaignStatus.ERROR:
+        if status == CampaignStatus.COMPLETED:
+            self.statusBar().showMessage("Рассылка завершена")
+        elif status == CampaignStatus.STOPPED:
+            self.statusBar().showMessage("Рассылка остановлена")
+        elif status == CampaignStatus.ERROR:
+            self.statusBar().showMessage("Рассылка остановлена из-за ошибки")
             show_error(
                 self,
                 "Рассылка остановлена",
                 "Рассылка остановлена из-за критической ошибки аккаунта. Подробности см. в журнале.",
             )
+        self._current_campaign = None
+        self._on_form_state_changed()
 
     def _on_pause_requested(self) -> None:
         if self._current_campaign is not None:
@@ -350,7 +426,7 @@ class MainWindow(QMainWindow):
             show_test_send_result(self, False, parsed.error or "Некорректный формат получателя")
             return
 
-        text, entities = self._message_editor.get_content()
+        text, entities = self._message_text, self._message_entities
         attachments = self._attachments_widget.get_attachments()
         missing = self._attachments_widget.missing_files()
         if missing:

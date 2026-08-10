@@ -18,7 +18,15 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from telethon import TelegramClient
-from telethon.tl.types import TypeMessageEntity
+from telethon import utils as telethon_utils
+from telethon.tl.functions.messages import SendMultiMediaRequest, UploadMediaRequest
+from telethon.tl.types import (
+    InputMediaPhotoExternal,
+    InputMediaUploadedDocument,
+    InputMediaUploadedPhoto,
+    InputSingleMedia,
+    TypeMessageEntity,
+)
 
 from app.logging.logger import get_logger
 from app.telegram.exceptions import AttachmentNotFoundError
@@ -147,6 +155,57 @@ def build_media_send_plan(
     return MediaSendPlan(groups=groups, leading_text=(message_text, message_entities), group_captions={})
 
 
+async def _send_album_with_entities(
+    client: TelegramClient,
+    entity,
+    files: List[str],
+    caption: str,
+    entities: List[TypeMessageEntity],
+) -> None:
+    """Send multiple files as one Telegram album, with the caption's
+    formatting entities intact.
+
+    Telethon 1.36.0's own client.send_file() silently drops
+    formatting_entities whenever `file` is list-like: that branch returns
+    straight into client._send_album(), which only knows how to derive a
+    caption's entities via `parse_mode`-parsing a plain string -- it has
+    no parameter for already-built raw entities at all. Converting our
+    entities to HTML/Markdown just to round-trip them back through
+    parse_mode would be lossy and is explicitly out of scope here.
+
+    InputSingleMedia (what an album is actually made of at the MTProto
+    level) *does* carry a raw `entities` field directly. This function
+    mirrors exactly what client._send_album() does to upload each file --
+    same helper methods, same upload-then-convert steps for freshly
+    uploaded photos/documents -- but attaches our own entities to the
+    first item instead of losing them, then sends the album with
+    SendMultiMediaRequest directly.
+    """
+    resolved_entity = await client.get_input_entity(entity)
+    media_items = []
+    for index, file_path in enumerate(files):
+        _handle, input_media, _image = await client._file_to_media(file_path, nosound_video=True)
+
+        # A freshly uploaded (not yet cached) photo/document must first be
+        # turned into a "real" media reference before it can be attached
+        # to an album -- identical to what client._send_album() does.
+        if isinstance(input_media, (InputMediaUploadedPhoto, InputMediaPhotoExternal)):
+            uploaded = await client(UploadMediaRequest(resolved_entity, media=input_media))
+            input_media = telethon_utils.get_input_media(uploaded.photo)
+        elif isinstance(input_media, InputMediaUploadedDocument):
+            uploaded = await client(UploadMediaRequest(resolved_entity, media=input_media))
+            input_media = telethon_utils.get_input_media(uploaded.document)
+
+        if index == 0:
+            item_caption, item_entities = caption, (entities or None)
+        else:
+            item_caption, item_entities = "", None
+        media_items.append(InputSingleMedia(input_media, message=item_caption, entities=item_entities))
+
+    request = SendMultiMediaRequest(resolved_entity, multi_media=media_items)
+    await client(request)
+
+
 async def send_media_plan(client: TelegramClient, entity, plan: MediaSendPlan) -> None:
     if plan.leading_text is not None:
         text, entities = plan.leading_text
@@ -155,9 +214,12 @@ async def send_media_plan(client: TelegramClient, entity, plan: MediaSendPlan) -
     for index, group in enumerate(plan.groups):
         caption_text, caption_entities = plan.group_captions.get(index, ("", []))
         files = [str(a.path) for a in group.attachments]
-        await client.send_file(
-            entity,
-            files if len(files) > 1 else files[0],
-            caption=caption_text or None,
-            formatting_entities=caption_entities or None,
-        )
+        if len(files) > 1:
+            await _send_album_with_entities(client, entity, files, caption_text, caption_entities)
+        else:
+            await client.send_file(
+                entity,
+                files[0],
+                caption=caption_text or None,
+                formatting_entities=caption_entities or None,
+            )

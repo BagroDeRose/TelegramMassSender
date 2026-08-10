@@ -36,6 +36,7 @@ class RecipientWidget(QWidget):
 
         self._text_edit = QPlainTextEdit(self)
         self._text_edit.setPlaceholderText("@username1\n@username2\n123456789\nhttps://t.me/username3")
+        self._text_edit.setToolTip("По одному получателю на строку: @username, ID или ссылка t.me/...")
         self._text_edit.textChanged.connect(self._on_text_changed)
         layout.addWidget(self._text_edit)
 
@@ -50,6 +51,8 @@ class RecipientWidget(QWidget):
         layout.addLayout(buttons)
 
         self._summary_label = QLabel(self)
+        self._summary_label.setWordWrap(True)
+        self._summary_label.setObjectName("summaryLabel")
         layout.addWidget(self._summary_label)
 
         self._debounce_timer = QTimer(self)

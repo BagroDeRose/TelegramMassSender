@@ -73,16 +73,21 @@ class LoginDialog(QDialog):
 
         self._api_id_edit = QLineEdit(page)
         self._api_id_edit.setPlaceholderText("напр. 12345678")
+        self._api_id_edit.setToolTip("Получается на my.telegram.org/apps (раздел API development tools)")
         if creds is not None:
             self._api_id_edit.setText(str(creds.api_id))
 
         self._api_hash_edit = QLineEdit(page)
         self._api_hash_edit.setPlaceholderText("32-символьный API Hash")
+        self._api_hash_edit.setToolTip(
+            "Секретный ключ приложения Telegram с my.telegram.org — никому не передавайте его"
+        )
         if creds is not None:
             self._api_hash_edit.setText(creds.api_hash)
 
         self._phone_edit = QLineEdit(page)
         self._phone_edit.setPlaceholderText("+79991234567")
+        self._phone_edit.setToolTip("Номер телефона аккаунта в международном формате, со знаком +")
 
         self._connect_error = QLabel(page)
         self._connect_error.setStyleSheet("color: #e05555;")
