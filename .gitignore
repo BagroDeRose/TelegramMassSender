@@ -21,6 +21,7 @@ runtime_data/
 build/
 dist/
 *.spec.bak
+*.zip
 
 # IDE
 .vscode/

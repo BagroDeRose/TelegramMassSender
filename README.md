@@ -46,7 +46,7 @@
 
 ### Шаг 1. Скачайте и распакуйте программу
 
-1. Скачайте файл `TelegramMassSender.zip`.
+1. Скачайте файл `TelegramMassSender-Windows.zip` со страницы [Releases](https://github.com/BagroDeRose/TelegramMassSender/releases/latest) этого репозитория.
 2. Нажмите на нём правой кнопкой мыши → **«Извлечь всё…»** (Extract All).
 3. Выберите папку, куда распаковать — например, `C:\TelegramMassSender\`.
 4. Откройте получившуюся папку `TelegramMassSender`.
