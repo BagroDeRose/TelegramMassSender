@@ -16,6 +16,7 @@ from app.campaign.campaign_state import (
 )
 from app.campaign.send_queue import SendItemStatus
 from app.recipients.parser import parse_recipient_line
+from app.telegram.media_sender import Attachment
 from tests.mocks.mock_telegram_client import MockTelegramClient, make_flood_wait
 from tests.mocks.mock_telegram_client import PERMANENT_ERROR_FACTORIES
 
@@ -221,3 +222,111 @@ async def test_double_start_raises(qapp):
     with pytest.raises(RuntimeError):
         manager.start()
     await manager.stop()
+
+
+# ---- partial multi-step send: retry/FloodWait must never resend an
+# already-delivered step (P0 regression: a recipient's plan can involve
+# more than one Telegram delivery call -- e.g. two attachments each become
+# their own single-file "step" -- and a failure on a *later* step must not
+# cause an *earlier, already-successful* step to be repeated) -------------
+
+
+def _two_document_attachments(tmp_path):
+    """Two non-album-eligible attachments -> build_media_send_plan produces
+    two separate single-file groups (steps), never combined into one album
+    call -- the simplest shape with more than one delivery step."""
+    file_a = tmp_path / "a.pdf"
+    file_a.write_bytes(b"a")
+    file_b = tmp_path / "b.pdf"
+    file_b.write_bytes(b"b")
+    return file_a, file_b, [Attachment(path=file_a), Attachment(path=file_b)]
+
+
+async def test_transient_error_after_first_of_two_steps_does_not_resend_first_step(qapp, tmp_path):
+    file_a, file_b, attachments = _two_document_attachments(tmp_path)
+
+    client = MockTelegramClient()
+    step0_sends = []
+    step1_sends = []
+    b_attempts = {"n": 0}
+
+    async def flaky_send_file(entity, files, caption=None, formatting_entities=None):
+        if files == str(file_a):
+            step0_sends.append(files)
+            return None
+        b_attempts["n"] += 1
+        if b_attempts["n"] == 1:
+            raise ConnectionError("blip")
+        step1_sends.append(files)
+        return None
+
+    client.send_file = flaky_send_file
+
+    manager = CampaignManager(
+        client=client,
+        recipients=make_recipients("alice"),
+        message_text="hi",
+        message_entities=[],
+        attachments=attachments,
+        rate_limiter=FakeRateLimiter(0.01),
+        max_retries=3,
+    )
+
+    status = await run_to_finish(manager, timeout=15)
+
+    assert status == CampaignStatus.COMPLETED.value
+    item = manager._queue.items[0]
+    assert item.status == SendItemStatus.SENT
+    assert len(step0_sends) == 1, "step 0 (already successful) must not be re-sent on retry"
+    assert len(step1_sends) == 1
+
+
+async def test_floodwait_after_first_of_two_steps_does_not_resend_first_step(qapp, tmp_path):
+    file_a, file_b, attachments = _two_document_attachments(tmp_path)
+
+    client = MockTelegramClient()
+    step0_sends = []
+    step1_sends = []
+    b_attempts = {"n": 0}
+
+    async def send_file_with_floodwait(entity, files, caption=None, formatting_entities=None):
+        if files == str(file_a):
+            step0_sends.append(files)
+            return None
+        b_attempts["n"] += 1
+        if b_attempts["n"] == 1:
+            raise make_flood_wait(1)
+        step1_sends.append(files)
+        return None
+
+    client.send_file = send_file_with_floodwait
+
+    manager = CampaignManager(
+        client=client,
+        recipients=make_recipients("alice"),
+        message_text="hi",
+        message_entities=[],
+        attachments=attachments,
+        rate_limiter=FakeRateLimiter(0.01),
+        max_retries=3,
+    )
+
+    paused = asyncio.get_event_loop().create_future()
+    manager.state_changed.connect(
+        lambda s: paused.done() or (s == CampaignStatus.PAUSED.value and paused.set_result(True))
+    )
+    manager.start()
+    await asyncio.wait_for(paused, timeout=10)
+    assert manager.status == CampaignStatus.PAUSED
+    assert len(step0_sends) == 1, "step 0 must have been sent exactly once before the flood wait"
+
+    finished = asyncio.get_event_loop().create_future()
+    manager.finished.connect(lambda s: finished.done() or finished.set_result(s))
+    manager.resume()
+    status = await asyncio.wait_for(finished, timeout=10)
+
+    assert status == CampaignStatus.COMPLETED.value
+    item = manager._queue.items[0]
+    assert item.status == SendItemStatus.SENT
+    assert len(step0_sends) == 1, "step 0 must not be repeated after resume"
+    assert len(step1_sends) == 1

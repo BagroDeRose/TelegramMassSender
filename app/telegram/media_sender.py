@@ -15,7 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Awaitable, Callable, Dict, List, Optional, Tuple
 
 from telethon import TelegramClient
 from telethon import utils as telethon_utils
@@ -206,20 +206,81 @@ async def _send_album_with_entities(
     await client(request)
 
 
-async def send_media_plan(client: TelegramClient, entity, plan: MediaSendPlan) -> None:
+@dataclass
+class SendProgress:
+    """Mutable out-parameter: how many delivery steps of a MediaSendPlan a
+    call to send_media_plan()/send_to_recipient() completed, updated
+    incrementally as each step returns -- including when a *later* step
+    then raises, so the caller can see exactly how far execution got
+    before failing, and resume from there on retry instead of repeating
+    an already-delivered step."""
+
+    completed_steps: int = 0
+
+
+SendStep = Callable[[], Awaitable[None]]
+
+
+def build_send_steps(client: TelegramClient, entity, plan: MediaSendPlan) -> List[SendStep]:
+    """Flatten a MediaSendPlan into an ordered list of steps. Each step is
+    exactly one delivery-causing Telegram RPC (client.send_message,
+    client.send_file, or the album's SendMultiMediaRequest) -- the unit a
+    retry must never repeat once it has already returned successfully.
+    Read-only/upload helper calls inside a group (get_input_entity,
+    _file_to_media, UploadMediaRequest) are not separate steps: they are
+    entirely internal to that group's single step and safe to redo."""
+    steps: List[SendStep] = []
+
     if plan.leading_text is not None:
         text, entities = plan.leading_text
-        await client.send_message(entity, text, formatting_entities=entities or None)
+
+        async def _send_leading_text(text=text, entities=entities) -> None:
+            await client.send_message(entity, text, formatting_entities=entities or None)
+
+        steps.append(_send_leading_text)
 
     for index, group in enumerate(plan.groups):
         caption_text, caption_entities = plan.group_captions.get(index, ("", []))
         files = [str(a.path) for a in group.attachments]
+
         if len(files) > 1:
-            await _send_album_with_entities(client, entity, files, caption_text, caption_entities)
+
+            async def _send_group(
+                files=files, caption_text=caption_text, caption_entities=caption_entities
+            ) -> None:
+                await _send_album_with_entities(client, entity, files, caption_text, caption_entities)
+
         else:
-            await client.send_file(
-                entity,
-                files[0],
-                caption=caption_text or None,
-                formatting_entities=caption_entities or None,
-            )
+
+            async def _send_group(
+                files=files, caption_text=caption_text, caption_entities=caption_entities
+            ) -> None:
+                await client.send_file(
+                    entity,
+                    files[0],
+                    caption=caption_text or None,
+                    formatting_entities=caption_entities or None,
+                )
+
+        steps.append(_send_group)
+
+    return steps
+
+
+async def send_media_plan(
+    client: TelegramClient,
+    entity,
+    plan: MediaSendPlan,
+    start_step: int = 0,
+    progress: Optional[SendProgress] = None,
+) -> None:
+    """Execute plan's delivery steps in order, starting at `start_step` (0
+    executes the whole plan, matching prior behaviour exactly). Each step
+    that returns successfully increments `progress.completed_steps` before
+    the next step is attempted, so a step that later raises never erases
+    the record of what already went out."""
+    steps = build_send_steps(client, entity, plan)
+    for step in steps[start_step:]:
+        await step()
+        if progress is not None:
+            progress.completed_steps += 1

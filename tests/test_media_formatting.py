@@ -44,7 +44,13 @@ from telethon.tl.types import (
     TypeMessageEntity,
 )
 
-from app.telegram.media_sender import Attachment, build_media_send_plan, send_media_plan
+from app.telegram.media_sender import (
+    CAPTION_MAX_LENGTH,
+    Attachment,
+    SendProgress,
+    build_media_send_plan,
+    send_media_plan,
+)
 from app.telegram.sender import send_to_recipient
 from tests.mocks.mock_telegram_client import MockTelegramClient
 
@@ -402,3 +408,61 @@ async def test_campaign_manager_end_to_end_preserves_formatting(qapp, tmp_path):
     requests = _multi_media_requests(client)
     assert len(requests) == 1
     assert requests[0].multi_media[0].entities == entities
+
+
+# ---------------------------------------------------------------------------
+# Resumable stepped send (P0 regression): a plan with more than one
+# delivery-causing Telegram call must be resumable from a given step, so a
+# retry after a partial failure never repeats an already-successful step.
+# ---------------------------------------------------------------------------
+
+
+async def test_send_media_plan_resumes_from_start_step(tmp_path):
+    """A 3-step plan (leading text + 2 single-file groups) started at step 1
+    must skip step 0 entirely and execute only steps 1 and 2."""
+    attachments = _make_attachments(tmp_path, ["doc1.pdf", "doc2.pdf"])
+    long_text = "x" * (CAPTION_MAX_LENGTH + 1)
+    plan = build_media_send_plan(attachments, long_text, [])
+
+    assert plan.leading_text is not None
+    assert len(plan.groups) == 2
+
+    client = MockTelegramClient()
+    await send_media_plan(client, PEER, plan, start_step=1)
+
+    message_sends = [m for m in client.sent_messages if m[0] == "message"]
+    file_sends = _file_sends(client)
+    assert not message_sends, "step 0 (leading text) must be skipped when starting at step 1"
+    assert len(file_sends) == 2
+    assert file_sends[0][2] == str(attachments[0].path)
+    assert file_sends[1][2] == str(attachments[1].path)
+
+
+@pytest.mark.parametrize(
+    "attachment_names,text_length,expected_steps",
+    [
+        ([], 10, 1),
+        (["a.jpg"], 10, 1),
+        ([f"p{i}.jpg" for i in range(10)], 10, 1),
+        ([f"p{i}.jpg" for i in range(11)], 10, 2),
+        (["doc.pdf"], CAPTION_MAX_LENGTH + 1, 2),
+    ],
+    ids=[
+        "text_only",
+        "single_attachment",
+        "ten_attachments",
+        "eleven_attachments",
+        "long_caption_plus_attachment",
+    ],
+)
+async def test_send_to_recipient_step_count_matches_plan_shape(
+    tmp_path, attachment_names, text_length, expected_steps
+):
+    attachments = _make_attachments(tmp_path, attachment_names)
+    text = "x" * text_length
+    client = MockTelegramClient()
+    progress = SendProgress()
+
+    await send_to_recipient(client, PEER, text, [], attachments, progress=progress)
+
+    assert progress.completed_steps == expected_steps

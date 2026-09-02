@@ -25,6 +25,13 @@ class SendItem:
     status: SendItemStatus = SendItemStatus.PENDING
     error: Optional[str] = None
     attempts: int = 0
+    # How many delivery steps of this item's send plan have already
+    # completed (in-memory only, this run's lifetime -- see
+    # app.campaign.campaign_manager and app.telegram.media_sender). A
+    # retry or a FloodWait resume must start from here, never from 0, so an
+    # already-delivered step (e.g. one attachment out of several) is never
+    # sent again.
+    next_step: int = 0
 
 
 class SendQueue:

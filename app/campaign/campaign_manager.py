@@ -39,7 +39,7 @@ from app.campaign.rate_limiter import RateLimiter
 from app.campaign.send_queue import SendItem, SendItemStatus, SendQueue
 from app.logging.logger import get_logger
 from app.recipients.parser import ParsedRecipient
-from app.telegram.media_sender import Attachment
+from app.telegram.media_sender import Attachment, SendProgress
 from app.telegram.recipient_resolver import RecipientResolver
 from app.telegram.sender import send_to_recipient
 
@@ -261,9 +261,16 @@ class CampaignManager(QObject):
         while True:
             attempt += 1
             item.attempts = attempt
+            progress = SendProgress()
             try:
                 await send_to_recipient(
-                    self._client, resolved.entity, self._text, self._entities, self._attachments
+                    self._client,
+                    resolved.entity,
+                    self._text,
+                    self._entities,
+                    self._attachments,
+                    start_step=item.next_step,
+                    progress=progress,
                 )
             except FloodWaitError as exc:
                 item.status = SendItemStatus.PENDING
@@ -313,3 +320,10 @@ class CampaignManager(QObject):
                 item.status = SendItemStatus.SENT
                 self._log(f"✓ {item.recipient.display_label} — отправлено")
                 return "sent"
+            finally:
+                # Record how far this attempt actually got *before* any of
+                # the branches above return/continue/retry -- so a retry
+                # (same call, transient error) or a later resume (item
+                # re-queued as PENDING after FloodWait) resumes from here
+                # instead of resending an already-delivered step.
+                item.next_step += progress.completed_steps
