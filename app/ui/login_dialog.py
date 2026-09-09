@@ -90,7 +90,7 @@ class LoginDialog(QDialog):
         self._phone_edit.setToolTip("Номер телефона аккаунта в международном формате, со знаком +")
 
         self._connect_error = QLabel(page)
-        self._connect_error.setStyleSheet("color: #e05555;")
+        self._connect_error.setObjectName("dialogErrorLabel")
         self._connect_error.setWordWrap(True)
 
         layout.addRow("API ID:", self._api_id_edit)
@@ -166,7 +166,7 @@ class LoginDialog(QDialog):
         layout.addWidget(self._code_edit)
 
         self._code_error = QLabel(page)
-        self._code_error.setStyleSheet("color: #e05555;")
+        self._code_error.setObjectName("dialogErrorLabel")
         self._code_error.setWordWrap(True)
         layout.addWidget(self._code_error)
 
@@ -226,7 +226,7 @@ class LoginDialog(QDialog):
         layout.addWidget(self._password_edit)
 
         self._password_error = QLabel(page)
-        self._password_error.setStyleSheet("color: #e05555;")
+        self._password_error.setObjectName("dialogErrorLabel")
         self._password_error.setWordWrap(True)
         layout.addWidget(self._password_error)
 

@@ -15,3 +15,16 @@ class Account:
     session_name: str
     created_at: str
     last_used_at: Optional[str]
+
+
+@dataclass
+class SavedReport:
+    id: Optional[int]
+    name: str
+    created_at: str
+    total: int
+    successful: int
+    failed: int
+    skipped: int
+    file_path: str
+    is_favorite: bool

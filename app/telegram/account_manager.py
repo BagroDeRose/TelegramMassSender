@@ -4,6 +4,7 @@ plumbing) and AccountRepository (persisted account metadata).
 """
 from __future__ import annotations
 
+import asyncio
 import uuid
 from dataclasses import dataclass
 from typing import Callable, List, Optional
@@ -17,12 +18,27 @@ from app.telegram.exceptions import AccountSwitchBlockedError
 
 logger = get_logger()
 
+# Mirrors app.campaign.campaign_manager._TRANSIENT_ERROR_TYPES: a network
+# blip while checking status must never be reported the same way as a
+# genuine "this session is no longer authorized" -- see AccountStatus
+# .connection_error below and the check_status docstring for why this
+# distinction exists (it's the fix for accounts appearing to "disappear").
+_TRANSIENT_ERROR_TYPES = (ConnectionError, OSError, asyncio.TimeoutError, TimeoutError)
+
 
 @dataclass
 class AccountStatus:
     account: Account
     is_authorized: bool
     needs_reauth: bool
+    # True when the last status check failed for a transient/network
+    # reason (no internet, Telegram unreachable, timeout) rather than
+    # because the account's session is actually no longer authorized.
+    # The UI must show this as "connection issue / Reconnect", never as
+    # "needs re-authorization" -- conflating the two is what previously
+    # made a perfectly valid, still-persisted account look like it had
+    # silently broken or vanished after a flaky connection.
+    connection_error: bool = False
 
 
 class AccountManager:
@@ -75,9 +91,16 @@ class AccountManager:
         return refreshed
 
     async def check_status(self, account: Account) -> AccountStatus:
+        """Never treat a transient connectivity failure as "needs
+        re-authorization" -- those are different problems with different
+        fixes (wait and retry vs. log in again), and the account's DB row
+        and session file are untouched by either outcome."""
         try:
             authorized = await self._client_manager.is_authorized(account.session_name)
-        except Exception as exc:
+        except _TRANSIENT_ERROR_TYPES as exc:
+            logger.warning("Проблема с подключением для аккаунта %s: %s", account.phone, exc)
+            return AccountStatus(account=account, is_authorized=False, needs_reauth=False, connection_error=True)
+        except Exception as exc:  # noqa: BLE001 - genuine auth/session failure, surfaced as needs_reauth
             logger.warning("Не удалось проверить статус аккаунта %s: %s", account.phone, exc)
             return AccountStatus(account=account, is_authorized=False, needs_reauth=True)
         return AccountStatus(account=account, is_authorized=authorized, needs_reauth=not authorized)

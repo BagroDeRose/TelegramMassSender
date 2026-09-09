@@ -44,6 +44,8 @@ from telethon.tl.types import (
     TypeMessageEntity,
 )
 
+from app.ui import theme
+
 PROP_SPOILER = QTextFormat.Property.UserProperty + 1
 PROP_CODE = QTextFormat.Property.UserProperty + 2
 PROP_PRE = QTextFormat.Property.UserProperty + 3
@@ -186,7 +188,7 @@ def _format_for_kind(kind: str) -> QTextCharFormat:
         fmt.setFontFamilies(["Consolas"])
     elif kind == "spoiler":
         fmt.setProperty(PROP_SPOILER, True)
-        fmt.setBackground(QColor("#4a4a4a"))
+        fmt.setBackground(QColor(theme.spoiler_background()))
     return fmt
 
 
@@ -209,7 +211,7 @@ def apply_content_to_editor(text_edit: QTextEdit, text: str, entities: List[Type
             fmt = QTextCharFormat()
             fmt.setAnchor(True)
             fmt.setAnchorHref(entity.url)
-            fmt.setForeground(QColor("#4ea1f7"))
+            fmt.setForeground(QColor(theme.link_color()))
             fmt.setFontUnderline(True)
         else:
             kind = _ENTITY_TO_KIND.get(type(entity))
@@ -262,6 +264,7 @@ class MessageEditorWidget(QWidget):
 
     def _make_button(self, label: str, tooltip: str, handler) -> QToolButton:
         button = QToolButton(self)
+        button.setObjectName("toolbarButton")
         button.setText(label)
         button.setToolTip(tooltip)
         button.clicked.connect(handler)
@@ -269,6 +272,7 @@ class MessageEditorWidget(QWidget):
 
     def _make_toggle_button(self, kind: str, label: str, tooltip: str, handler) -> QToolButton:
         button = QToolButton(self)
+        button.setObjectName("toolbarButton")
         button.setText(label)
         button.setToolTip(tooltip)
         button.setCheckable(True)
@@ -278,6 +282,7 @@ class MessageEditorWidget(QWidget):
 
     def _make_emoji_button(self) -> QToolButton:
         button = QToolButton(self)
+        button.setObjectName("toolbarButton")
         button.setText("🙂")
         button.setToolTip("Вставить emoji")
         button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
@@ -329,7 +334,7 @@ class MessageEditorWidget(QWidget):
         fmt = QTextCharFormat()
         active = not bool(self._current_format().property(PROP_SPOILER))
         fmt.setProperty(PROP_SPOILER, active)
-        fmt.setBackground(QColor("#4a4a4a") if active else QColor(Qt.GlobalColor.transparent))
+        fmt.setBackground(QColor(theme.spoiler_background()) if active else QColor(Qt.GlobalColor.transparent))
         self._text_edit.mergeCurrentCharFormat(fmt)
         self._sync_toolbar_state()
 
@@ -363,7 +368,7 @@ class MessageEditorWidget(QWidget):
         fmt = QTextCharFormat()
         fmt.setAnchor(True)
         fmt.setAnchorHref(url)
-        fmt.setForeground(QColor("#4ea1f7"))
+        fmt.setForeground(QColor(theme.link_color()))
         fmt.setFontUnderline(True)
         self._text_edit.mergeCurrentCharFormat(fmt)
 

@@ -32,6 +32,14 @@ class SendItem:
     # already-delivered step (e.g. one attachment out of several) is never
     # sent again.
     next_step: int = 0
+    # Populated once the recipient is successfully resolved to a Telegram
+    # user (app.campaign.campaign_manager); used only for the CSV report
+    # (app.campaign.report) -- never logged.
+    resolved_id: Optional[int] = None
+    resolved_username: Optional[str] = None
+    # ISO-8601 timestamp stamped when this item reaches a terminal status
+    # (SENT/FAILED/SKIPPED); left None for an item never attempted.
+    sent_at: Optional[str] = None
 
 
 class SendQueue:

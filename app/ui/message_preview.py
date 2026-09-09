@@ -23,7 +23,11 @@ from telethon.tl.types import (
     TypeMessageEntity,
 )
 
-_PLACEHOLDER_HTML = '<span style="color:#7d7f85;">Текст сообщения появится здесь…</span>'
+from app.ui import theme
+
+
+def _placeholder_html() -> str:
+    return f'<span style="color:{theme.placeholder_text_color()};">Текст сообщения появится здесь…</span>'
 
 
 def _wrap_segment(escaped: str, active_entities: Sequence[TypeMessageEntity]) -> str:
@@ -44,28 +48,31 @@ def _wrap_segment(escaped: str, active_entities: Sequence[TypeMessageEntity]) ->
             close_tags.insert(0, "</s>")
         elif isinstance(entity, MessageEntityCode):
             open_tags.append(
-                '<code style="background:#2b2d31;padding:1px 4px;border-radius:3px;'
+                f'<code style="background:{theme.code_background()};padding:1px 4px;border-radius:3px;'
                 'font-family:Consolas,monospace;">'
             )
             close_tags.insert(0, "</code>")
         elif isinstance(entity, MessageEntityPre):
             open_tags.append(
-                '<span style="font-family:Consolas,monospace;background:#2b2d31;'
+                f'<span style="font-family:Consolas,monospace;background:{theme.code_background()};'
                 'padding:1px 4px;border-radius:3px;display:inline-block;">'
             )
             close_tags.insert(0, "</span>")
         elif isinstance(entity, MessageEntitySpoiler):
-            open_tags.append('<span style="background:#54565c;color:#54565c;border-radius:3px;">')
+            spoiler_color = theme.spoiler_preview_color()
+            open_tags.append(
+                f'<span style="background:{spoiler_color};color:{spoiler_color};border-radius:3px;">'
+            )
             close_tags.insert(0, "</span>")
         elif isinstance(entity, MessageEntityTextUrl):
-            open_tags.append(f'<a href="{html_escape(entity.url)}" style="color:#4ea1f7;">')
+            open_tags.append(f'<a href="{html_escape(entity.url)}" style="color:{theme.link_color()};">')
             close_tags.insert(0, "</a>")
     return "".join(open_tags) + escaped + "".join(close_tags)
 
 
 def entities_to_preview_html(text: str, entities: List[TypeMessageEntity]) -> str:
     if not text:
-        return _PLACEHOLDER_HTML
+        return _placeholder_html()
 
     surrogate_text = add_surrogate(text)
     cut_points = {0, len(surrogate_text)}
@@ -83,7 +90,7 @@ def entities_to_preview_html(text: str, entities: List[TypeMessageEntity]) -> st
         active = [e for e in entities if e.offset <= start < e.offset + e.length]
         escaped = html_escape(segment).replace("\n", "<br>")
         parts.append(_wrap_segment(escaped, active))
-    return "".join(parts) or _PLACEHOLDER_HTML
+    return "".join(parts) or _placeholder_html()
 
 
 class MessagePreviewWidget(QWidget):
@@ -97,7 +104,7 @@ class MessagePreviewWidget(QWidget):
         self._browser.setReadOnly(True)
         self._browser.setOpenExternalLinks(True)
         self._browser.setFixedHeight(140)
-        self._browser.setHtml(_PLACEHOLDER_HTML)
+        self._browser.setHtml(_placeholder_html())
         layout.addWidget(self._browser)
 
         self._attachments_label = QLabel(self)

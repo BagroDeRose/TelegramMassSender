@@ -15,11 +15,16 @@ from typing import Iterable, List, Optional
 
 _USERNAME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_]{3,31}$")
 _TME_URL_RE = re.compile(r"^(?:https?://)?t\.me/([a-zA-Z0-9_]{4,32})/?$", re.IGNORECASE)
+# E.164: leading '+', 8-15 digits total, first digit non-zero. Deliberately
+# strict -- a local-format number (no '+') is rejected rather than guessed,
+# since guessing a country code would silently target the wrong person.
+_PHONE_RE = re.compile(r"^\+[1-9]\d{7,14}$")
 
 
 class RecipientKind(Enum):
     USERNAME = "username"
     USER_ID = "user_id"
+    PHONE = "phone"
 
 
 @dataclass(frozen=True)
@@ -37,6 +42,8 @@ class ParsedRecipient:
             return None
         if self.kind == RecipientKind.USERNAME:
             return f"username:{self.value.lower()}"
+        if self.kind == RecipientKind.PHONE:
+            return f"phone:{self.value}"
         return f"id:{self.value}"
 
     @property
@@ -45,6 +52,8 @@ class ParsedRecipient:
             return f"@{self.value}"
         if self.kind == RecipientKind.USER_ID:
             return str(self.value)
+        if self.kind == RecipientKind.PHONE:
+            return f"+{self.value}"
         return self.raw.strip()
 
 
@@ -52,6 +61,17 @@ def parse_recipient_line(raw_line: str) -> ParsedRecipient:
     text = raw_line.strip()
     if not text:
         return ParsedRecipient(raw=raw_line, kind=None, value=None, is_valid=False, error="Пустая строка")
+
+    if text.startswith("+"):
+        if _PHONE_RE.match(text):
+            return ParsedRecipient(raw=raw_line, kind=RecipientKind.PHONE, value=text[1:], is_valid=True)
+        return ParsedRecipient(
+            raw=raw_line,
+            kind=None,
+            value=None,
+            is_valid=False,
+            error="Некорректный номер телефона. Используйте международный формат, например +4917612345678",
+        )
 
     if text.isdigit():
         return ParsedRecipient(raw=raw_line, kind=RecipientKind.USER_ID, value=text, is_valid=True)

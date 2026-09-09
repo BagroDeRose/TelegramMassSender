@@ -33,20 +33,37 @@ def confirm_exit_during_campaign(parent: QWidget) -> bool:
     return box.clickedButton() is exit_button
 
 
-def show_test_send_result(parent: QWidget, success: bool, error: str = "") -> None:
-    if success:
-        QMessageBox.information(parent, "Тестовая отправка", "✓ Тестовое сообщение успешно отправлено")
-    else:
-        QMessageBox.warning(
-            parent,
-            "Тестовая отправка",
-            f"✗ Не удалось отправить тестовое сообщение\n\nПричина:\n{error}",
-        )
-
-
 def show_error(parent: QWidget, title: str, message: str) -> None:
     QMessageBox.warning(parent, title, message)
 
 
 def show_info(parent: QWidget, title: str, message: str) -> None:
     QMessageBox.information(parent, title, message)
+
+
+def confirm_start_campaign(parent: QWidget, recipient_count: int) -> bool:
+    """Optional pre-start confirmation, gated behind
+    AppSettings.confirm_before_start (off by default -- the app has never
+    required this, so it stays opt-in rather than new friction for
+    everyone)."""
+    box = QMessageBox(parent)
+    box.setIcon(QMessageBox.Icon.Question)
+    box.setWindowTitle("Начать рассылку?")
+    box.setText(f"Сообщение будет отправлено {recipient_count} получателям. Продолжить?")
+    yes_button = box.addButton("Начать", QMessageBox.ButtonRole.YesRole)
+    box.addButton("Отмена", QMessageBox.ButtonRole.RejectRole)
+    box.setDefaultButton(yes_button)
+    box.exec()
+    return box.clickedButton() is yes_button
+
+
+def confirm_reset_settings(parent: QWidget) -> bool:
+    box = QMessageBox(parent)
+    box.setIcon(QMessageBox.Icon.Warning)
+    box.setWindowTitle("Сбросить настройки?")
+    box.setText("Все настройки приложения будут возвращены к значениям по умолчанию. Продолжить?")
+    yes_button = box.addButton("Сбросить", QMessageBox.ButtonRole.YesRole)
+    box.addButton("Отмена", QMessageBox.ButtonRole.RejectRole)
+    box.setDefaultButton(yes_button)
+    box.exec()
+    return box.clickedButton() is yes_button

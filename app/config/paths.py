@@ -52,6 +52,28 @@ def get_config_dir() -> Path:
     return path
 
 
+def get_reports_dir() -> Path:
+    """Default local storage for explicitly saved campaign reports (see
+    app.campaign.report_library) -- a user-configured directory in
+    AppSettings.reports_directory overrides this, but this is always the
+    fallback and the one place reports live if the user never changes it."""
+    path = get_app_data_dir() / "reports"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def get_theme_assets_dir() -> Path:
+    """Small generated (not user, not bundled) images the QSS stylesheet
+    references by file path -- currently just the QSpinBox up/down arrow
+    glyphs (see app.ui.theme), which Qt's ::up-arrow/::down-arrow
+    sub-controls can only be given via `image: url(...)`, not drawn from
+    QSS colors directly. Regenerated on every theme application, so this
+    is disposable cache data, not user data."""
+    path = get_app_data_dir() / "theme_assets"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def get_database_path() -> Path:
     return get_database_dir() / "app.db"
 

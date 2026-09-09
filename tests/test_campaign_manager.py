@@ -330,3 +330,74 @@ async def test_floodwait_after_first_of_two_steps_does_not_resend_first_step(qap
     assert item.status == SendItemStatus.SENT
     assert len(step0_sends) == 1, "step 0 must not be repeated after resume"
     assert len(step1_sends) == 1
+
+
+# ---- phone-number recipients (Feature 3) ------------------------------------
+
+
+async def test_campaign_sends_to_phone_recipient(qapp):
+    from app.recipients.parser import parse_recipient_line
+
+    client = MockTelegramClient(phone_behavior={"+4917612345678": "found"})
+    manager = CampaignManager(
+        client=client,
+        recipients=[parse_recipient_line("+4917612345678")],
+        message_text="hello",
+        message_entities=[],
+        attachments=[],
+        rate_limiter=FakeRateLimiter(0.01),
+        max_retries=2,
+    )
+    status = await run_to_finish(manager)
+    assert status == CampaignStatus.COMPLETED.value
+    assert manager.snapshot().sent == 1
+    assert len(client.sent_messages) == 1
+
+
+async def test_campaign_resolve_floodwait_pauses_and_resumes_without_duplicate(qapp):
+    # Regression test: a FloodWaitError raised during recipient resolution
+    # (not just during send) must pause the whole campaign via the same
+    # mechanism as a send-time FloodWait, and resuming must not skip or
+    # duplicate the item that triggered it.
+    client = MockTelegramClient()
+    calls = {"n": 0}
+    real_get_entity = client.get_entity
+
+    async def get_entity_with_floodwait(identifier):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise make_flood_wait(1)
+        return await real_get_entity(identifier)
+
+    client.get_entity = get_entity_with_floodwait  # type: ignore[method-assign]
+    manager, client = make_manager(["alice"], client=client, delay=0.01)
+
+    paused = asyncio.get_event_loop().create_future()
+    manager.state_changed.connect(
+        lambda s: paused.done() or (s == CampaignStatus.PAUSED.value and paused.set_result(True))
+    )
+    manager.start()
+    await asyncio.wait_for(paused, timeout=10)
+    assert manager.status == CampaignStatus.PAUSED
+    assert manager._queue.items[0].status == SendItemStatus.PENDING
+
+    finished = asyncio.get_event_loop().create_future()
+    manager.finished.connect(lambda s: finished.done() or finished.set_result(s))
+    manager.resume()
+    status = await asyncio.wait_for(finished, timeout=10)
+    assert status == CampaignStatus.COMPLETED.value
+    assert manager.snapshot().sent == 1
+    assert len(client.sent_messages) == 1, "the item must be sent exactly once, not duplicated"
+
+
+# ---- {name} placeholder (Feature 1) ------------------------------------
+
+
+async def test_campaign_report_items_carry_resolved_identity_and_timestamp(qapp):
+    manager, client = make_manager(["alice"])
+    status = await run_to_finish(manager)
+    assert status == CampaignStatus.COMPLETED.value
+    item = manager.items[0]
+    assert item.resolved_username == "alice"
+    assert item.resolved_id is not None
+    assert item.sent_at is not None

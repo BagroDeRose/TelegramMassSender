@@ -9,17 +9,19 @@ numeric id).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from unittest.mock import MagicMock
 
 from telethon.errors import (
     ChatWriteForbiddenError,
     FloodWaitError,
     PeerIdInvalidError,
+    PhoneNotOccupiedError,
     UserIsBlockedError,
     UsernameNotOccupiedError,
     UserPrivacyRestrictedError,
 )
+from telethon.tl.functions.contacts import ResolvePhoneRequest
 from telethon.tl.functions.messages import UploadMediaRequest
 from telethon.tl.types import Chat, InputMediaPhoto, Photo, User
 
@@ -31,15 +33,22 @@ PERMANENT_ERROR_FACTORIES = {
     "privacy_restricted": lambda: UserPrivacyRestrictedError(request=None),
 }
 
+# Behaviors for phone_behavior, keyed by phone string (with leading '+').
+PHONE_ERROR_FACTORIES = {
+    "not_found": lambda: PhoneNotOccupiedError(request=None),
+}
+
 
 def make_flood_wait(seconds: int) -> FloodWaitError:
     return FloodWaitError(request=None, capture=seconds)
 
 
-def make_fake_user(identifier: Any) -> User:
+def make_fake_user(identifier: Any, first_name: Optional[str] = None, last_name: Optional[str] = None) -> User:
     user = MagicMock(spec=User)
     user.id = identifier if isinstance(identifier, int) else abs(hash(identifier)) % (10**8)
     user.username = identifier if isinstance(identifier, str) else None
+    user.first_name = first_name
+    user.last_name = last_name
     return user
 
 
@@ -53,7 +62,16 @@ class MockTelegramClient:
     the surface this application actually calls."""
 
     entity_behavior: Dict[Any, str] = field(default_factory=dict)
+    # Optional first_name to attach to a "found" fake user, keyed by the
+    # same identifier used in entity_behavior. Absent identifiers default
+    # to no first_name (None), matching a real user with names hidden.
+    first_name_behavior: Dict[Any, str] = field(default_factory=dict)
     send_behavior: Dict[Any, Any] = field(default_factory=dict)
+    # Keyed by phone string including leading '+'. Value is either "found"
+    # (resolves to a fake user), a key into PHONE_ERROR_FACTORIES, or an
+    # exception instance to raise directly (e.g. make_flood_wait(...)).
+    # Any phone not present defaults to "found".
+    phone_behavior: Dict[str, Any] = field(default_factory=dict)
     sent_messages: List[Tuple] = field(default_factory=list)
     connected: bool = False
     get_entity_calls: int = 0
@@ -76,7 +94,7 @@ class MockTelegramClient:
         self.get_entity_calls += 1
         behavior = self.entity_behavior.get(identifier, "found")
         if behavior == "found":
-            return make_fake_user(identifier)
+            return make_fake_user(identifier, first_name=self.first_name_behavior.get(identifier))
         if behavior == "not_a_user":
             return make_fake_chat()
         if behavior in PERMANENT_ERROR_FACTORIES:
@@ -126,4 +144,19 @@ class MockTelegramClient:
             response = MagicMock()
             response.photo = MagicMock(spec=Photo)
             return response
+        if isinstance(request, ResolvePhoneRequest):
+            behavior = self.phone_behavior.get(request.phone, "found")
+            if isinstance(behavior, BaseException):
+                raise behavior
+            if behavior == "found":
+                response = MagicMock()
+                response.users = [make_fake_user(request.phone)]
+                return response
+            if behavior in PHONE_ERROR_FACTORIES:
+                raise PHONE_ERROR_FACTORIES[behavior]()
+            if behavior == "empty":
+                response = MagicMock()
+                response.users = []
+                return response
+            raise ValueError(f"unknown phone behavior: {behavior}")
         return MagicMock()

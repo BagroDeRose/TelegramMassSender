@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from datetime import datetime
 from typing import List, Optional
 
 from PySide6.QtCore import QObject, Signal
@@ -42,6 +43,7 @@ from app.recipients.parser import ParsedRecipient
 from app.telegram.media_sender import Attachment, SendProgress
 from app.telegram.recipient_resolver import RecipientResolver
 from app.telegram.sender import send_to_recipient
+from app.telegram.template import expand_name_placeholder
 
 logger = get_logger()
 
@@ -59,6 +61,10 @@ _CRITICAL_ERROR_TYPES = (AuthKeyError, UserDeactivatedError, UserDeactivatedBanE
 _TRANSIENT_ERROR_TYPES = (ConnectionError, OSError, asyncio.TimeoutError, TimeoutError)
 
 _MAX_BACKOFF_SECONDS = 30
+
+
+def _now_iso() -> str:
+    return datetime.now().isoformat(timespec="seconds")
 
 
 @dataclass
@@ -113,6 +119,13 @@ class CampaignManager(QObject):
     @property
     def is_active(self) -> bool:
         return self._state.is_active
+
+    @property
+    def items(self) -> List[SendItem]:
+        """The current in-memory send queue, for the CSV report
+        (app.campaign.report) -- the only supported way for UI code to read
+        per-item results; SendQueue itself stays private."""
+        return self._queue.items
 
     def snapshot(self) -> ProgressSnapshot:
         counts = self._queue.counts()
@@ -249,13 +262,37 @@ class CampaignManager(QObject):
                 self._log("■ Рассылка остановлена")
             self.finished.emit(self._state.status.value)
 
+    async def _handle_flood_wait(self, item: SendItem, exc: FloodWaitError) -> str:
+        """Shared by both the resolve-step and the send-step: puts the item
+        back to PENDING (so it's retried, not skipped, on resume) and pauses
+        the whole campaign for the exact duration Telegram requires. Never
+        shortcut or bypass this wait."""
+        item.status = SendItemStatus.PENDING
+        wait_seconds = int(exc.seconds)
+        self._log(f"Telegram временно ограничил отправку. Необходимо подождать: {wait_seconds} сек.")
+        self.flood_wait_started.emit(wait_seconds)
+        self._state.transition(CampaignStatus.WAITING_FOR_FLOOD)
+        self._emit_state()
+        await self._sleep_interruptible(wait_seconds, on_tick=self.flood_wait_tick.emit)
+        return "floodwait"
+
     async def _attempt_send(self, item: SendItem) -> str:
-        resolved = await self._resolver.resolve(item.recipient)
+        try:
+            resolved = await self._resolver.resolve(item.recipient)
+        except FloodWaitError as exc:
+            return await self._handle_flood_wait(item, exc)
+
         if not resolved.is_ready:
             item.status = SendItemStatus.FAILED
             item.error = resolved.error or "Получатель недоступен"
+            item.sent_at = _now_iso()
             self._log(f"✗ {item.recipient.display_label} — {item.error}")
             return "failed"
+
+        item.resolved_id = getattr(resolved.entity, "id", None)
+        item.resolved_username = getattr(resolved.entity, "username", None)
+        first_name = getattr(resolved.entity, "first_name", None)
+        send_text, send_entities = expand_name_placeholder(self._text, self._entities, first_name)
 
         attempt = 0
         while True:
@@ -266,38 +303,32 @@ class CampaignManager(QObject):
                 await send_to_recipient(
                     self._client,
                     resolved.entity,
-                    self._text,
-                    self._entities,
+                    send_text,
+                    send_entities,
                     self._attachments,
                     start_step=item.next_step,
                     progress=progress,
                 )
             except FloodWaitError as exc:
-                item.status = SendItemStatus.PENDING
-                wait_seconds = int(exc.seconds)
-                self._log(
-                    f"Telegram временно ограничил отправку. Необходимо подождать: {wait_seconds} сек."
-                )
-                self.flood_wait_started.emit(wait_seconds)
-                self._state.transition(CampaignStatus.WAITING_FOR_FLOOD)
-                self._emit_state()
-                await self._sleep_interruptible(wait_seconds, on_tick=self.flood_wait_tick.emit)
-                return "floodwait"
+                return await self._handle_flood_wait(item, exc)
             except _CRITICAL_ERROR_TYPES as exc:
                 item.status = SendItemStatus.FAILED
                 item.error = "Аккаунт недоступен"
+                item.sent_at = _now_iso()
                 logger.error("Критическая ошибка аккаунта: %s", exc)
                 self._log(f"✗ Критическая ошибка аккаунта: {exc}")
                 return "critical"
             except _PERMANENT_ERROR_TYPES as exc:
                 item.status = SendItemStatus.FAILED
                 item.error = _PERMANENT_ERROR_MESSAGES.get(type(exc), str(exc))
+                item.sent_at = _now_iso()
                 self._log(f"✗ {item.recipient.display_label} — {item.error}")
                 return "failed"
             except _TRANSIENT_ERROR_TYPES:
                 if attempt >= self._max_retries:
                     item.status = SendItemStatus.FAILED
                     item.error = "Сетевая ошибка"
+                    item.sent_at = _now_iso()
                     self._log(f"✗ {item.recipient.display_label} — сетевая ошибка")
                     return "failed"
                 backoff = min(2 ** attempt, _MAX_BACKOFF_SECONDS)
@@ -308,16 +339,19 @@ class CampaignManager(QObject):
                 completed = await self._sleep_interruptible(backoff)
                 if not completed:
                     item.status = SendItemStatus.SKIPPED
+                    item.sent_at = _now_iso()
                     return "failed"
                 continue
             except Exception as exc:  # noqa: BLE001 - last-resort, categorized as a normal failure
                 logger.exception("Непредвиденная ошибка при отправке %s", item.recipient.display_label)
                 item.status = SendItemStatus.FAILED
                 item.error = "Непредвиденная ошибка"
+                item.sent_at = _now_iso()
                 self._log(f"✗ {item.recipient.display_label} — непредвиденная ошибка: {exc}")
                 return "failed"
             else:
                 item.status = SendItemStatus.SENT
+                item.sent_at = _now_iso()
                 self._log(f"✓ {item.recipient.display_label} — отправлено")
                 return "sent"
             finally:

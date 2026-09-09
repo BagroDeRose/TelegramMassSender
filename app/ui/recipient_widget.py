@@ -26,6 +26,19 @@ from app.recipients.parser import ParsedRecipient, ParseSummary, parse_recipient
 _DEBOUNCE_MS = 300
 
 
+def _recipient_word(count: int) -> str:
+    """Correct Russian plural form of "получатель" for `count`."""
+    remainder_100 = count % 100
+    remainder_10 = count % 10
+    if 11 <= remainder_100 <= 14:
+        return "получателей"
+    if remainder_10 == 1:
+        return "получатель"
+    if 2 <= remainder_10 <= 4:
+        return "получателя"
+    return "получателей"
+
+
 class RecipientWidget(QWidget):
     recipients_changed = Signal(object)  # ParseSummary
 
@@ -35,8 +48,13 @@ class RecipientWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
 
         self._text_edit = QPlainTextEdit(self)
-        self._text_edit.setPlaceholderText("@username1\n@username2\n123456789\nhttps://t.me/username3")
-        self._text_edit.setToolTip("По одному получателю на строку: @username, ID или ссылка t.me/...")
+        self._text_edit.setPlaceholderText(
+            "@username1\n123456789\n+4917612345678\nhttps://t.me/username3"
+        )
+        self._text_edit.setToolTip(
+            "По одному получателю на строку: @username, Telegram ID, ссылка t.me/...\n"
+            "или номер телефона в международном формате (например +4917612345678)"
+        )
         self._text_edit.textChanged.connect(self._on_text_changed)
         layout.addWidget(self._text_edit)
 
@@ -44,6 +62,7 @@ class RecipientWidget(QWidget):
         import_button = QPushButton("Импорт TXT", self)
         import_button.clicked.connect(self._on_import_clicked)
         clear_button = QPushButton("Очистить", self)
+        clear_button.setObjectName("ghostButton")
         clear_button.clicked.connect(self._on_clear_clicked)
         buttons.addWidget(import_button)
         buttons.addWidget(clear_button)
@@ -77,12 +96,20 @@ class RecipientWidget(QWidget):
         lines = self._text_edit.toPlainText().splitlines()
         summary = parse_recipient_lines(lines)
         self._last_summary = summary
-        self._summary_label.setText(
-            f"Всего получателей: {summary.total_recipients}    "
-            f"Валидных: {len(summary.valid_recipients)}    "
-            f"Ошибок формата: {summary.invalid_count}    "
-            f"Дубликатов удалено: {summary.duplicates_removed}"
-        )
+        if summary.total_recipients == 0:
+            self._summary_label.setText(
+                "Нет получателей — вставьте @username, ID, ссылки t.me/... "
+                "или номера телефонов, либо импортируйте TXT-файл"
+            )
+        else:
+            valid_count = len(summary.valid_recipients)
+            details = []
+            if summary.invalid_count:
+                details.append(f"ошибок формата: {summary.invalid_count}")
+            if summary.duplicates_removed:
+                details.append(f"дубликатов удалено: {summary.duplicates_removed}")
+            suffix = f"  ({', '.join(details)})" if details else ""
+            self._summary_label.setText(f"{valid_count} {_recipient_word(valid_count)}{suffix}")
         self.recipients_changed.emit(summary)
 
     def _on_import_clicked(self) -> None:

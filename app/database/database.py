@@ -30,6 +30,24 @@ CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+-- Metadata only for explicitly user-saved campaign reports (see
+-- app.campaign.report_library) -- deliberately NOT automatic campaign
+-- history; a row only exists here because the user clicked "Save report".
+-- The actual CSV content lives in a real file under
+-- app.config.paths.get_reports_dir() (or the user's configured reports
+-- directory); file_path just points at it.
+CREATE TABLE IF NOT EXISTS saved_reports (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    total INTEGER NOT NULL,
+    successful INTEGER NOT NULL,
+    failed INTEGER NOT NULL,
+    skipped INTEGER NOT NULL,
+    file_path TEXT NOT NULL,
+    is_favorite INTEGER NOT NULL DEFAULT 0
+);
 """
 
 
