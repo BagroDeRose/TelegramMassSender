@@ -1,14 +1,162 @@
 # TelegramMassSender
 
-Программа для Windows, которая по очереди отправляет сообщение (текст, форматирование, фото/видео/файлы) списку получателей в Telegram — от вашего собственного личного Telegram-аккаунта, как будто вы сами написали каждому человеку по очереди.
+A Windows desktop application that sends personal Telegram messages to a list of recipients, one at a time, from your own Telegram account — built with **Python**, **PySide6**, **qasync**, and **Telethon** (MTProto).
 
-Программа работает **только с личными сообщениями конкретным людям**. Она не предназначена для отправки в группы, каналы или чужие чаты, и не должна использоваться для этого.
+![Campaign page — dark theme](docs/images/campaign-dark.png)
 
-Устанавливать ничего не нужно — скачали, распаковали, запустили.
+[![Tests](https://github.com/BagroDeRose/TelegramMassSender/actions/workflows/tests.yml/badge.svg)](https://github.com/BagroDeRose/TelegramMassSender/actions/workflows/tests.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Latest release](https://img.shields.io/github/v/release/BagroDeRose/TelegramMassSender)](https://github.com/BagroDeRose/TelegramMassSender/releases/latest)
+
+> **AI-assisted development disclosure:** this project was built with extensive AI assistance (Claude Code), under my direction and verification — I defined the requirements, architecture, and scope; reviewed every change; required regression tests; investigated and reproduced bugs myself; and performed a security/privacy audit and manual packaged-build validation before each release. See [AI-Assisted Development](#ai-assisted-development) for details.
 
 ---
 
-## Быстрый старт
+## Overview
+
+TelegramMassSender sends the *same message, personally, to each recipient in a list* — one Telegram message per person, from the user's own account, the way you'd write to each of them individually. It is not a bot, not a bulk-marketing tool, and does not send to groups or channels. It integrates directly with Telegram's native **MTProto** protocol via **Telethon** — not the Bot API — and runs a real async event loop (**qasync**) bridging Qt's UI thread with `asyncio` network I/O.
+
+It supports multiple Telegram accounts, rich text formatting, media/album attachments, per-recipient `{name}` personalization, phone-number recipient resolution, light/dark themes, and campaign reporting — all backed by a 272-test automated regression suite and a real Windows-packaged build (PyInstaller).
+
+## Key Features
+
+- Personal, one-by-one messages from your own Telegram account — no bots, no group/channel sending.
+- Recipients by `@username`, numeric Telegram ID, `t.me` link, or E.164 phone number.
+- Per-recipient name personalization via a `{name}` placeholder, including inside rich-text formatting.
+- Rich text editor (bold/italic/underline/strikethrough/spoiler/monospace/code block/links/emoji).
+- Photo, video, and document attachments, with automatic album batching and image thumbnails.
+- Multiple Telegram accounts with persistent sessions and live switching.
+- Configurable randomized send interval with FloodWait-aware pausing (Telegram's own rate limits are respected, never bypassed).
+- Live campaign statistics, an event journal, and CSV report export/saving.
+- Light and dark themes, applied instantly across the whole UI.
+- Windows DPAPI-encrypted credential storage; no secrets ever written to logs.
+
+## Screenshots
+
+| Campaign — Dark | Campaign — Light |
+|---|---|
+| ![Campaign dark](docs/images/campaign-dark.png) | ![Campaign light](docs/images/campaign-light.png) |
+
+| Accounts | Settings |
+|---|---|
+| ![Accounts](docs/images/accounts.png) | ![Settings](docs/images/settings.png) |
+
+| Results & Journal |
+|---|
+| ![Results and Journal](docs/images/journal.png) |
+
+*All screenshots use synthetic demo data — no real Telegram accounts, recipients, or personal information.*
+
+## Technology Stack
+
+| Layer | Technology |
+|---|---|
+| UI | Python 3.13, PySide6 (Qt 6) |
+| Async runtime | `qasync` — bridges Qt's event loop with `asyncio` so network waits (including multi-minute FloodWait pauses) never block the UI |
+| Telegram integration | Telethon, speaking MTProto directly (not the Bot API) |
+| Persistence | SQLite (accounts, settings, saved-report metadata) |
+| Credential security | Windows DPAPI (`CryptProtectData`/`CryptUnprotectData`) |
+| Packaging | PyInstaller (portable one-folder build) |
+| Testing | pytest + pytest-asyncio, with a hand-built mock Telegram client |
+
+## Architecture
+
+```mermaid
+flowchart TD
+    UI["PySide6 UI\n(sidebar, pages, dialogs, message editor)"]
+    APP["Application / orchestration\n(MainWindow, service layer)"]
+    CAMPAIGN["Campaign & Recipient logic\n(send queue, rate limiting, retry, {name})"]
+    TG["Telegram service\n(entity resolution, media/album batching)"]
+    MTPROTO["Telethon / MTProto"]
+
+    UI --> APP --> CAMPAIGN --> TG --> MTPROTO
+
+    SQLITE[("SQLite")]
+    DPAPI["Windows DPAPI"]
+    CONFIG["Configuration\n(%APPDATA%)"]
+    REPORT["CSV Reporting"]
+
+    APP -.-> SQLITE
+    APP -.-> DPAPI
+    APP -.-> CONFIG
+    CAMPAIGN -.-> REPORT
+```
+
+The UI never talks to Telethon directly — it goes through the campaign/service layer, which is what makes the mocked-client test suite possible (see [Testing](#testing)).
+
+## Engineering Highlights
+
+A few parts of this project involved real engineering problems, not just wiring up a framework:
+
+1. **Qt + asyncio integration (`qasync`).** Qt owns its own event loop; Telethon needs `asyncio`. Running both in the same thread — without blocking the UI during a network call or a multi-minute FloodWait — is a real event-loop integration problem, not just `async def` syntax.
+2. **Telethon / MTProto integration.** Direct use of Telegram's native protocol client (not the simpler Bot API), including manual entity resolution and album/media construction.
+3. **UTF-16 entity offset handling.** Telegram's rich-text formatting offsets are defined in UTF-16 code units, not Python string indices. Splicing a variable-length `{name}` into already-formatted text — correctly, across astral-plane emoji, without corrupting bold/link boundaries — required working in UTF-16 surrogate-pair space.
+4. **Media/album batching under Telegram's constraints.** Photos/videos are grouped into albums of up to 10, and a message decides at the 1024-character boundary whether text becomes a caption or its own leading message — without ever silently dropping the user's text.
+5. **FloodWait-aware campaign handling.** Telegram's own rate-limit signal pauses the queue, surfaces the wait time, and requires an explicit manual resume — the app never auto-retries around it.
+6. **Duplicate campaign-start race protection.** A synchronous guard closes a real TOCTOU gap between a button click and an awaited network call that could otherwise let two independent send loops run over the same recipient list. Found via code review, reproduced with a failing test, then fixed.
+7. **Windows DPAPI credential protection.** API credentials are encrypted at rest via the real Windows `CryptProtectData` API, tied to the OS user account — no custom cryptography, no key management burden.
+8. **CSV formula-injection protection.** Exported report cells routinely start with `@` or `+` (this app's own recipient formats) — exactly the character set Excel/Sheets can interpret as a formula. Cells are neutralized with the standard mitigation.
+9. **Account/session persistence and switching.** Multiple independent Telegram sessions, correctly isolated, with the active account restored across restarts and switching blocked mid-campaign.
+10. **Automated regression testing** against a hand-built mock Telegram client, including reproduce-first regression tests for the bugs above.
+
+Ordinary parts — not oversold: the settings page is a straightforward form bound to a dataclass, SQLite access is plain parameterized `sqlite3`, and the CSV export itself is a standard `csv.writer`. None of that is architecturally novel; the value is in the items above.
+
+## Testing
+
+```
+pytest tests/ -v
+```
+
+**272 automated tests, 0 failures** (pytest + pytest-asyncio), run against a hand-built mock Telegram client (`tests/mocks/mock_telegram_client.py`) — no real Telegram account or network access needed. Coverage includes:
+
+- Recipient parsing (all supported formats, including phone numbers and malformed input).
+- Rich-text formatting and UTF-16 entity offset correctness, including the `{name}` placeholder.
+- Campaign lifecycle: start/pause/stop, FloodWait handling, retry/resume, the duplicate-start race fix.
+- Account persistence and switching (including the mid-campaign switch guard).
+- Reporting: CSV generation, the formula-injection guard, saved-report persistence.
+- UI behavior (button enable/disable states, theme application, settings persistence).
+- Security-relevant behavior (DPAPI round-tripping, secret scrubbing in logs).
+
+This is distinct from **manual packaged-build validation**: before each release, the actual PyInstaller-built `.exe` is launched and walked through its core flows (account load/restore, theme switching, campaign UI, clean shutdown) on a real Windows environment. The automated suite and the manual EXE check cover different failure modes — the suite verifies logic; the manual pass verifies the packaged artifact itself (bundled assets, native rendering, no dev-only paths). Neither is presented as a coverage percentage, since none is currently measured.
+
+## Security
+
+- API credentials are encrypted at rest using **Windows DPAPI**, tied to the OS user account.
+- The two-factor authentication password is never persisted — used once to complete login, then discarded.
+- Report CSV cells are sanitized against formula injection (a leading `=`, `+`, `-`, or `@` is neutralized).
+- The rotating application log has secret-scrubbing built in — API credentials are never written to it.
+- No plaintext credentials anywhere on disk; Telegram session files live under `%APPDATA%`, never in the repository.
+
+## AI-Assisted Development
+
+This project's requirements, architecture, and scope were defined and directed by the developer (BagroDeRose). Implementation was done with extensive AI assistance — primarily **Claude Code** — used for writing code, debugging, writing tests, code review, and documentation, always under human direction and verification rather than as unsupervised generation:
+
+- Every change is covered by the automated test suite (272 tests, pytest/pytest-asyncio, mocked Telegram client).
+- Bug fixes follow a reproduce → understand root cause → write a failing test → fix → regression test cycle, not guesswork.
+- A dedicated code review and security/privacy audit was performed before each public release (secret storage, log contents, session handling, git history sanitization).
+- The packaged Windows `.exe` is manually launched and validated before release — a successful build is not treated as sufficient on its own.
+
+This is not a claim that every line was hand-typed, and it is not an unsupervised AI-generated project either — it's AI used as an engineering tool, directed and checked by a human at every step.
+
+## Download
+
+Latest release: **[v1.3.0](https://github.com/BagroDeRose/TelegramMassSender/releases/latest)** — download `TelegramMassSender-Windows.zip`, extract, and run `TelegramMassSender.exe`. No installation required. Full setup instructions (including obtaining a Telegram API ID/Hash) are in the [Russian user documentation](#документация-на-русском-языке) below.
+
+## Limitations
+
+- Does not bypass or attempt to bypass Telegram's anti-spam/flood limits — it is not a policy-bypass tool.
+- Telegram itself determines what sending activity is allowed for a given account; this cannot be controlled or guaranteed by the app.
+- Recipient resolution by phone/username/ID can fail due to the recipient's own Telegram privacy settings, not an app defect.
+- Delivery and read receipts are not guaranteed — the app only sends via the official API.
+- Recipient lists must be people you have a legitimate personal reason to message — not cold/purchased contact lists, and never groups or channels.
+
+---
+
+## Документация на русском языке
+
+Полное руководство пользователя (первый запуск, получение API ID/API Hash, подключение аккаунта, все функции интерфейса, устранение неполадок) — на русском языке, ниже.
+
+### Быстрый старт
 
 1. Распакуйте ZIP-архив.
 2. Откройте папку `TelegramMassSender` и запустите `TelegramMassSender.exe`.
@@ -22,9 +170,7 @@
 
 Дальше — то же самое подробно, по шагам, с примерами и объяснением всех непонятных слов.
 
----
-
-## Содержание
+### Содержание
 
 - [Возможности](#возможности)
 - [Первый запуск и подключение Telegram](#первый-запуск-и-подключение-telegram)
@@ -47,7 +193,7 @@
 
 ---
 
-## Возможности
+### Возможности
 
 - Личные сообщения из вашего собственного Telegram-аккаунта, по одному, только тем получателям, которых вы указали сами.
 - Получатели в любом сочетании форматов: `@username`, числовой Telegram ID, ссылка `t.me/username`, номер телефона в международном формате.
@@ -62,22 +208,22 @@
 
 ---
 
-## Первый запуск и подключение Telegram
+### Первый запуск и подключение Telegram
 
-### Шаг 1. Скачайте и распакуйте программу
+#### Шаг 1. Скачайте и распакуйте программу
 
 1. Скачайте файл `TelegramMassSender-Windows.zip` со страницы [Releases](https://github.com/BagroDeRose/TelegramMassSender/releases/latest) этого репозитория.
 2. Нажмите на нём правой кнопкой мыши → **«Извлечь всё…»** (Extract All).
 3. Выберите папку, куда распаковать — например, `C:\TelegramMassSender\`.
 4. Откройте получившуюся папку `TelegramMassSender`.
 
-### Шаг 2. Запустите программу
+#### Шаг 2. Запустите программу
 
 Дважды кликните на файл **`TelegramMassSender.exe`**.
 
 > **Важно:** никакой дополнительной установки не требуется. Не нужно ставить Python, Node.js или что-либо ещё — в папке уже есть всё необходимое для работы программы. Если Windows Defender SmartScreen покажет предупреждение «Windows защитила ваш компьютер» (это стандартная реакция на новые exe-файлы без цифровой подписи) — нажмите **«Подробнее»**, затем **«Выполнить в любом случае»**.
 
-### Шаг 3. Получите доступ к Telegram-аккаунту через официальный API
+#### Шаг 3. Получите доступ к Telegram-аккаунту через официальный API
 
 Чтобы программа могла заходить в Telegram от имени вашего аккаунта (а не через стороннего бота), Telegram требует два значения, которые выдаются лично вам на официальном сайте разработчиков Telegram:
 
@@ -88,17 +234,17 @@
 
 ---
 
-## Если my.telegram.org не открывается (актуально для РФ)
+### Если my.telegram.org не открывается (актуально для РФ)
 
 Сайт, на котором выдаются API ID и API Hash — `my.telegram.org` — у части пользователей из России может не открываться напрямую (сайт долго грузится или вообще не отвечает). Это не поломка программы — это проблема с доступом к самому сайту Telegram.
 
-### Что такое файл `hosts` и зачем он нужен
+#### Что такое файл `hosts` и зачем он нужен
 
 Когда вы вводите в браузере адрес сайта (например, `my.telegram.org`), компьютер сначала должен узнать, по какому IP-адресу этот сайт находится — этим обычно занимаются серверы DNS в интернете. Файл `hosts` — это системный файл Windows, в котором можно вручную «прописать», по какому IP-адресу открывать конкретный сайт, — компьютер в первую очередь смотрит именно в этот файл, и только потом обращается к DNS в интернете. Если у вас доступ к DNS-адресу сайта заблокирован или работает нестабильно, ручное указание IP-адреса в `hosts` часто помогает открыть сайт напрямую.
 
 > На момент подготовки этой инструкции указанный ниже IP-адрес был проверен и точно рабочий (сайт открылся, страница загрузилась). **Но IP-адреса серверов Telegram могут со временем меняться** — это не постоянная гарантия на будущее. Если через какое-то время адрес перестанет работать, эту инструкцию нужно будет повторить с актуальным IP-адресом.
 
-### Пошаговая инструкция (Windows 10/11)
+#### Пошаговая инструкция (Windows 10/11)
 
 > Если у вас **и так всё открывается** — сайт `my.telegram.org` нормально загружается в браузере без этой правки — просто пропустите весь этот раздел, ничего добавлять не нужно.
 
@@ -153,7 +299,7 @@ https://my.telegram.org/apps
 
 Сайт должен открыться и предложить вход по номеру телефона — переходите к следующему разделу.
 
-### Как вернуть всё обратно (необязательно)
+#### Как вернуть всё обратно (необязательно)
 
 Правка `hosts` нужна только для того, чтобы один раз получить API ID и API Hash. После этого её можно спокойно убрать — на работу уже установленной программы TelegramMassSender это никак не влияет (программа обращается напрямую к серверам Telegram, а не к сайту `my.telegram.org`).
 
@@ -164,7 +310,7 @@ https://my.telegram.org/apps
 
 ---
 
-## Что такое API ID и API Hash и где их взять
+### Что такое API ID и API Hash и где их взять
 
 **1.** Откройте в браузере: **https://my.telegram.org/apps**
 
@@ -186,7 +332,7 @@ https://my.telegram.org/apps
 - **App api_id** — это и есть ваш **API ID**;
 - **App api_hash** — это ваш **API Hash**.
 
-### Важно про эти данные
+#### Важно про эти данные
 
 > - **API Hash — это секрет.** Его нельзя публиковать, пересылать в чатах, выкладывать на GitHub, показывать в скриншотах и т.д. — как и любой пароль.
 > - Это **не пароль от вашего Telegram-аккаунта** — это отдельный идентификатор именно приложения. Сам по себе он не даёт доступа без дальнейшей авторизации по номеру телефона и коду.
@@ -195,7 +341,7 @@ https://my.telegram.org/apps
 
 ---
 
-## Подключение Telegram-аккаунта в программе
+### Подключение Telegram-аккаунта в программе
 
 **1.** Запустите `TelegramMassSender.exe`.
 
@@ -220,7 +366,7 @@ https://my.telegram.org/apps
 
 ---
 
-## Несколько аккаунтов
+### Несколько аккаунтов
 
 Программа умеет работать с несколькими вашими личными Telegram-аккаунтами. Все они видны на странице **«Аккаунты»** — каждый в виде отдельной карточки с именем/телефоном, username и статусом подключения.
 
@@ -234,7 +380,7 @@ https://my.telegram.org/apps
 
 ---
 
-## Как добавить получателей
+### Как добавить получателей
 
 Получатели указываются в текстовом поле карточки **«Получатели»** на странице «Кампания» — **по одному на строку**. Поддерживаются такие варианты записи:
 
@@ -270,7 +416,7 @@ https://t.me/user3
 
 > **Важно:** программа предназначена **только для личной переписки** — по одному сообщению каждому получателю лично. Она не должна использоваться для отправки сообщений в группы, каналы или чужие беседы, и списки для рассылки должны состоять из ваших личных контактов, готовых получить от вас сообщение.
 
-### Если получатель не находится
+#### Если получатель не находится
 
 Даже при корректном формате строки Telegram может не дать программе найти или написать конкретному человеку — это ограничение самого Telegram, а не ошибка программы:
 
@@ -278,7 +424,7 @@ https://t.me/user3
 - **Числовой ID не срабатывает** — чтобы найти пользователя по одному только числовому ID, серверу Telegram иногда нужно, чтобы этот пользователь уже был так или иначе «виден» вашему аккаунту (например, есть в контактах или в общем чате). Попробуйте вместо ID указать `@username` или ссылку на профиль.
 - **Номер телефона не резолвится** — программа ищет пользователя по номеру напрямую, не добавляя его в контакты. Если Telegram не смог найти пользователя по номеру, программа покажет: *«Telegram не смог разрешить этот номер телефона. Пользователь может быть недоступен по номеру из-за настроек приватности Telegram.»* — это значит, что сам получатель в настройках приватности Telegram скрыл возможность находить себя по номеру телефона; программа не может и не пытается обойти это ограничение.
 
-### Импорт получателей из TXT-файла
+#### Импорт получателей из TXT-файла
 
 Если получателей много, удобнее подготовить обычный текстовый файл:
 
@@ -293,7 +439,7 @@ https://t.me/user3
 
 ---
 
-## Создание сообщения
+### Создание сообщения
 
 В карточке **«Сообщение»** на странице «Кампания» показан только краткий предпросмотр текста — само редактирование происходит в отдельном окне, чтобы длинные сообщения (на несколько тысяч символов) было удобно писать и просматривать целиком.
 
@@ -321,7 +467,7 @@ https://t.me/user3
 
 > В текущей версии нет отдельной кнопки «Тестовая отправка». Чтобы заранее проверить, как сообщение и вложения будут выглядеть на практике, добавьте в список получателей свой второй Telegram-аккаунт (или доверенного знакомого) первым — и запустите обычную рассылку на этот единственный адрес, прежде чем вставлять в список всех остальных получателей.
 
-### Добавление файлов, фото и видео
+#### Добавление файлов, фото и видео
 
 Под текстовым полем — карточка **«Вложения»**:
 
@@ -338,7 +484,7 @@ https://t.me/user3
 
 ---
 
-## Автоматическая подстановка имени ({name})
+### Автоматическая подстановка имени ({name})
 
 Текст сообщения может содержать плейсхолдер **`{name}`** — прямо в поле ввода, в любом месте текста, в том числе внутри форматированного (жирного, курсивного и т.д.) фрагмента. Подсказка об этом видна прямо в карточке «Сообщение»: *«{name} — имя получателя в Telegram, подставляется при отправке»*.
 
@@ -351,9 +497,9 @@ https://t.me/user3
 
 ---
 
-## Интервал отправки и запуск рассылки
+### Интервал отправки и запуск рассылки
 
-### Что такое интервал отправки
+#### Что такое интервал отправки
 
 Это пауза между отправкой сообщений разным получателям — программа не шлёт все сообщения одно за другим мгновенно, а ждёт какое-то время между каждым.
 
@@ -365,7 +511,7 @@ https://t.me/user3
 
 > **Важно:** интервал между отправками снижает интенсивность работы программы и делает её поведение более похожим на обычную переписку человека, но **не является гарантией** отсутствия каких-либо ограничений со стороны Telegram. Telegram сам определяет допустимую активность аккаунта, и на это может влиять множество факторов, не связанных с настройками этой программы.
 
-### Управление рассылкой
+#### Управление рассылкой
 
 - **▶ Начать рассылку** — запускает отправку всем подходящим получателям из списка по порядку.
 - **⏸ Пауза** — приостанавливает рассылку. Текущая отправка (если она уже началась) корректно завершается, а следующая не начинается, пока не нажать «▶ Продолжить». Прогресс при этом не сбрасывается.
@@ -374,7 +520,7 @@ https://t.me/user3
 - Построчный ход рассылки по каждому получателю виден в **журнале** (см. следующий раздел), а сводная статистика — на странице **«Результаты»**.
 - Если включена настройка «Подтверждать запуск рассылки» (страница «Настройки»), перед стартом программа переспросит, скольким получателям будет отправлено сообщение.
 
-### Если Telegram временно ограничивает отправку (FloodWait)
+#### Если Telegram временно ограничивает отправку (FloodWait)
 
 Иногда Telegram сам временно ограничивает частоту действий аккаунта — это стандартный защитный механизм самого Telegram, а не ошибка программы. В этом случае:
 
@@ -387,7 +533,7 @@ https://t.me/user3
 
 ---
 
-## Журнал
+### Журнал
 
 Журнал — сворачиваемая панель сбоку окна (между боковым меню и содержимым страницы), в которой построчно, с отметкой времени, появляется результат по каждому получателю во время рассылки: `✓ @user1 — отправлено`, `✗ @user3 — пользователь не найден`, а также технические отметки о повторных попытках и паузах.
 
@@ -398,15 +544,15 @@ https://t.me/user3
 
 ---
 
-## Результаты рассылки и сохранённые отчёты
+### Результаты рассылки и сохранённые отчёты
 
-### Результаты текущей рассылки
+#### Результаты текущей рассылки
 
 На странице **«Результаты»** видна статистика по карточкам: **«Всего»**, **«Успешно»**, **«Ошибок»**, **«Пропущено»** — они обновляются в реальном времени по ходу рассылки. Данные остаются на странице и после завершения или остановки рассылки — до тех пор, пока не будет запущена новая.
 
 Кнопка **«Экспорт CSV-отчёта»** сохраняет результаты текущей рассылки в CSV-файл по выбранному вами пути — это разовый экспорт, не связанный с библиотекой сохранённых отчётов ниже.
 
-### Сохранённые отчёты
+#### Сохранённые отчёты
 
 Кнопка **«Сохранить отчёт»** (появляется, как только по кампании есть хотя бы один результат) добавляет текущие результаты в постоянную библиотеку отчётов: программа спросит название (по умолчанию — «Рассылка ГГГГ-ММ-ДД ЧЧ:ММ»), запишет CSV-файл в папку отчётов (настраивается в Настройки → Отчёты) и добавит карточку в список **«Сохранённые отчёты»** на той же странице.
 
@@ -421,13 +567,13 @@ https://t.me/user3
 
 Можно включить автоматическое сохранение отчёта после каждой рассылки — переключатель **«Автоматически сохранять отчёт после рассылки»** в Настройки → Отчёты.
 
-### Формат CSV
+#### Формат CSV
 
 Файл сохраняется в кодировке UTF-8 с BOM (корректно открывается в Excel без «кракозябр»), разделитель столбцов — `;`. Столбцы: **Получатель**, **Тип** (username / Telegram ID / телефон), **Resolved ID** и **Resolved username** (реальные Telegram ID и username получателя — заполняются, если программа смогла его найти), **Статус**, **Ошибка** (если была), **Попыток**, **Шагов доставлено**, **Время**.
 
 ---
 
-## Темы оформления
+### Темы оформления
 
 Программа поддерживает светлую и тёмную тему оформления всего интерфейса.
 
@@ -437,7 +583,7 @@ https://t.me/user3
 
 ---
 
-## Настройки
+### Настройки
 
 Страница **«Настройки»** (боковое меню) собирает все параметры программы в пять карточек:
 
@@ -451,52 +597,52 @@ https://t.me/user3
 
 ---
 
-## Если что-то не работает
+### Если что-то не работает
 
-### «Не могу получить API ID/API Hash» / сайт my.telegram.org не открывается
+#### «Не могу получить API ID/API Hash» / сайт my.telegram.org не открывается
 
 1. Проверьте, открывается ли `https://my.telegram.org` в браузере в принципе.
 2. Если не открывается — пройдите инструкцию из раздела [«Если my.telegram.org не открывается»](#если-mytelegramorg-не-открывается-актуально-для-рф) выше (правка файла `hosts` и `ipconfig /flushdns`).
 3. Если и после этого не открывается — попробуйте включить VPN и повторить попытку.
 4. Убедитесь, что вы входите под своим собственным номером телефона и используете свои собственные, лично полученные API ID/API Hash — не чужие.
 
-### Ошибка при создании приложения на my.telegram.org
+#### Ошибка при создании приложения на my.telegram.org
 
 Если страница `my.telegram.org/apps` открывается, но при попытке создать приложение или войти появляется ошибка соединения — чаще всего причина та же, что и выше: нестабильный доступ к сайту. Пройдите ту же инструкцию с файлом `hosts`, указанную в разделе выше, и повторите попытку.
 
-### Ошибка «401» при входе на my.telegram.org
+#### Ошибка «401» при входе на my.telegram.org
 
 Это означает, что ваша веб-сессия на сайте `my.telegram.org` устарела или не была подтверждена до конца. Решение — обновить страницу и войти заново по номеру телефона и коду подтверждения.
 
-### «Telegram временно ограничил отправку» (FloodWait)
+#### «Telegram временно ограничил отправку» (FloodWait)
 
 Это не ошибка программы — Telegram сам временно ограничил частоту действий вашего аккаунта. Программа покажет, сколько именно нужно подождать. **Обходить это ограничение не нужно и не следует** — просто дождитесь указанного времени и нажмите «▶ Продолжить».
 
-### «Пользователь не найден» / username не найден
+#### «Пользователь не найден» / username не найден
 
 Перепроверьте правильность написания `@username` — вероятно, в имени опечатка, либо пользователь сменил username, либо аккаунта с таким именем не существует.
 
-### Числовой ID получателя не срабатывает
+#### Числовой ID получателя не срабатывает
 
 У Telegram есть техническое ограничение: чтобы найти пользователя по одному только числовому ID, серверу Telegram иногда нужно, чтобы этот пользователь уже был так или иначе «виден» вашему аккаунту (например, есть в контактах, состоит с вами в общем чате, либо у него открыт публичный username). Если голый числовой ID не срабатывает — попробуйте вместо него указать `@username` этого человека или ссылку `https://t.me/username`, если она известна.
 
-### Номер телефона получателя не находится
+#### Номер телефона получателя не находится
 
 Программа ищет пользователя Telegram по номеру телефона напрямую (без добавления его в контакты). Если получатель не находится, вы увидите сообщение: *«Telegram не смог разрешить этот номер телефона. Пользователь может быть недоступен по номеру из-за настроек приватности Telegram.»* Это, как правило, означает, что сам получатель в настройках приватности Telegram скрыл возможность находить его по номеру телефона — программа не может и не пытается обойти эту настройку. Попробуйте вместо номера указать `@username` этого человека, если он вам известен.
 
-### Файл/фото/видео не отправляется
+#### Файл/фото/видео не отправляется
 
 - Проверьте, что файл всё ещё существует по тому пути, откуда он был добавлен (если файл переместили или удалили после добавления в список — программа предупредит об этом ещё до старта рассылки).
 - Проверьте, что файл не повреждён и открывается на вашем компьютере обычным образом.
 - Слишком большие файлы могут не поддерживаться самим Telegram (ограничения на размер файла устанавливает сам Telegram, а не эта программа).
 
-### Программа не закрывается по крестику
+#### Программа не закрывается по крестику
 
 В текущей версии эта проблема исправлена: стандартный крестик Windows в правом верхнем углу окна корректно закрывает программу (если в этот момент идёт рассылка — сначала появится предупреждающее окно с вопросом, действительно ли вы хотите выйти). Если после нажатия крестика окно всё же не закрывается дольше нескольких секунд — откройте Диспетчер задач Windows (Ctrl+Shift+Esc), найдите процесс `TelegramMassSender.exe` и завершите его вручную кнопкой «Снять задачу», и, пожалуйста, сообщите об этом случае отдельно, указав, что именно вы делали перед этим.
 
 ---
 
-## Ограничения
+### Ограничения
 
 Программа не даёт и не может дать никаких гарантий сверх того, что уже описано выше по тексту — если что-то здесь звучит слишком осторожно, это осознанно:
 
@@ -509,7 +655,7 @@ https://t.me/user3
 
 ---
 
-## Безопасность
+### Безопасность
 
 - **API Hash — это секрет**, как пароль. Никому его не показывайте и не пересылайте.
 - **Пароль двухфакторной аутентификации нигде не сохраняется** — он используется один раз при входе и сразу забывается программой.
@@ -521,11 +667,11 @@ https://t.me/user3
 
 ---
 
-## Для разработчиков
+### Для разработчиков
 
 Этот раздел — для тех, кто хочет запускать программу из исходного кода, пересобирать её самостоятельно или разбираться в устройстве проекта. Обычному пользователю программы он не нужен.
 
-### Запуск из исходников
+#### Запуск из исходников
 
 ```
 python -m venv .venv
@@ -533,7 +679,7 @@ python -m venv .venv
 .venv\Scripts\python -m app.main
 ```
 
-### Сборка `.exe`
+#### Сборка `.exe`
 
 ```
 build_windows.bat
@@ -541,19 +687,19 @@ build_windows.bat
 
 Результат появится в `dist\TelegramMassSender\TelegramMassSender.exe`. Сборка выполняется через **PyInstaller** (см. `telegram_mass_sender.spec`) в портативном режиме (папка, а не один файл) — он стабильнее для используемого стека библиотек и не распаковывается заново при каждом запуске.
 
-### Автоматические тесты
+#### Автоматические тесты
 
 ```
 .venv\Scripts\python -m pytest tests/ -v
 ```
 
-На момент подготовки этой версии README полный набор тестов проходит целиком: **272 теста, 0 ошибок** (pytest + pytest-asyncio). Тесты используют собственный мок Telegram-клиента (`tests/mocks/mock_telegram_client.py`) вместо настоящего сервера Telegram, поэтому для их запуска не нужен ни интернет, ни реальный Telegram-аккаунт.
+На момент подготовки этой версии README полный набор тестов проходит целиком: **272 теста, 0 ошибок** (pytest + pytest-asyncio). Тесты используют собственный мок Telegram-клиента (`tests/mocks/mock_telegram_client.py`) вместо настоящего сервера Telegram, поэтому для их запуска не нужен ни интернет, ни реальный Telegram-аккаунт. Тесты также запускаются автоматически в GitHub Actions при каждом push/PR — см. значок «Tests» в начале README.
 
-### Технологический стек
+#### Технологический стек
 
 Windows-приложение на **Python + PySide6** (Qt для интерфейса); асинхронная часть (сеть, отправка, ожидание FloodWait) построена на **qasync**, который совмещает событийный цикл Qt с `asyncio`, не блокируя интерфейс во время сетевых операций. Подключение к Telegram — через **Telethon**, клиентскую библиотеку протокола **MTProto** (родной протокол Telegram, тот же принцип, что и в официальных приложениях, а не сторонний Bot API).
 
-### Архитектура проекта
+#### Архитектура проекта
 
 - `app/main.py` — точка входа приложения.
 - `app/ui/` — окна и виджеты PySide6: боковое меню и страницы «Кампания» / «Аккаунты» / «Результаты» / «Настройки», редактор сообщения, журнал, диалоги.
@@ -566,11 +712,11 @@ Windows-приложение на **Python + PySide6** (Qt для интерфе
 - `app/logging/` — журналирование в файл с ротацией и вычищением секретов из записей.
 - `tests/` — автоматические тесты (pytest + pytest-asyncio), включая мок Telegram-клиента.
 
-### Как разрабатывался этот проект
+#### Как разрабатывался этот проект
 
 Требования, архитектуру и объём функциональности этого проекта определял автор репозитория. AI-инструменты (Claude Code) активно использовались в реализации, отладке, написании тестов, ревью кода и подготовке документации — но под его руководством и с его проверкой на каждом шаге, а не как автономная генерация без контроля. Это не означает, что код не проверялся: каждое изменение сопровождается автоматическими тестами (сейчас это упомянутые выше 272 теста на pytest/pytest-asyncio с мок-клиентом Telegram), а исправление ошибок в проекте ведётся по принципу «сначала воспроизвести проблему → понять причину → написать тест → исправить → прогнать регрессионные тесты», а не «на глаз». Перед публикацией репозитория отдельно проведены обзор кода и проверка безопасности/приватности (хранение секретов, содержимое логов, работа с сессиями), а собранный Windows-EXE запускался и проверялся вручную, а не считался готовым сразу по факту успешной сборки.
 
-### Где на диске хранятся данные пользователя
+#### Где на диске хранятся данные пользователя
 
 Создаётся автоматически при первом запуске:
 
@@ -582,3 +728,7 @@ Windows-приложение на **Python + PySide6** (Qt для интерфе
     reports\*.csv          — сохранённые CSV-отчёты о рассылках (если папка не изменена в Настройках)
     logs\application.log   — журнал приложения (ротация, секреты не пишутся)
 ```
+
+#### Лицензия
+
+MIT — см. [LICENSE](LICENSE).
