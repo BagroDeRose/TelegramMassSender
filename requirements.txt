@@ -1,7 +1,7 @@
 # PySide6 6.7.2 and pywin32 306 (the originally pinned versions) do not
 # publish wheels for Python 3.13 -- bumped to the oldest patch of each that
 # does (6.8.0.2 / 312), keeping every other pin unchanged, so `pip install
-# -r requirements.txt` succeeds on the Python 3.13 stack CLAUDE.md targets.
+# -r requirements.txt` succeeds on the Python 3.13 stack this project targets.
 PySide6==6.8.0.2
 qasync==0.27.1
 Telethon==1.36.0

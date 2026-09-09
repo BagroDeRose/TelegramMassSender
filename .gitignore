@@ -27,6 +27,13 @@ dist/
 .vscode/
 .idea/
 
+# Local AI-assistant tooling (project rules/skills for Claude Code) --
+# useful for local development but not part of the public project;
+# kept out of the published repository.
+.claude/
+CLAUDE.md
+INSTALL_CLAUDE_SKILLS.md
+
 # Test artifacts
 .pytest_cache/
 .coverage
