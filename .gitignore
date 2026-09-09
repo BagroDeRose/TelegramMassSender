@@ -27,11 +27,10 @@ dist/
 .vscode/
 .idea/
 
-# Local AI-assistant tooling (project rules/skills for Claude Code) --
-# useful for local development but not part of the public project;
-# kept out of the published repository.
+# Local-only AI-assistant tooling (Claude Code skills/plugin setup) --
+# useful for local development but not part of the public project.
+# CLAUDE.md itself IS tracked intentionally (current project context/rules).
 .claude/
-CLAUDE.md
 INSTALL_CLAUDE_SKILLS.md
 
 # Test artifacts
