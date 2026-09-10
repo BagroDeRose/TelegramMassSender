@@ -15,11 +15,15 @@ from typing import Optional
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QImageReader, QPixmap
 
-IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
+from app.telegram.media_sender import THUMBNAILABLE_KINDS, kind_for_path
 
 
 def is_image(path: Path) -> bool:
-    return path.suffix.lower() in IMAGE_EXTENSIONS
+    """Whether Qt can plausibly decode a visual thumbnail for `path` --
+    reads from app.telegram.media_sender's single extension->kind table
+    rather than keeping an independent list here, so this and the
+    send-side album-eligibility check can never silently drift apart."""
+    return kind_for_path(path) in THUMBNAILABLE_KINDS
 
 
 def make_thumbnail(path: Path, size: int) -> Optional[QPixmap]:

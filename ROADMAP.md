@@ -1,11 +1,12 @@
 # TelegramMassSender — Product Roadmap
 
-> **This is a planning document only.** Nothing below is implemented yet.
-> Checklist items reflect ideas and intended scope, not shipped features —
-> see `README.md` for what the application actually does today, and
-> `CLAUDE.md` for the current architecture. As work lands, update the
-> relevant checkboxes here rather than letting this drift out of sync with
-> reality.
+> **This is a planning document.** Checklist items reflect intended scope;
+> a checked box means that specific item has been implemented **and**
+> verified with tests, not just planned. See `README.md` for what the
+> application actually does today, and `CLAUDE.md` for the current
+> architecture. As work lands, update the relevant checkboxes here rather
+> than letting this drift out of sync with reality — and do not check a
+> box for a feature that is only partially implemented.
 
 ## Vision
 
@@ -37,30 +38,49 @@ platform.
 
 ## Universal Attachments
 
-- [ ] Support arbitrary files as Telegram documents
-- [ ] Support JPG/JPEG
-- [ ] Support PNG
-- [ ] Support WEBP
-- [ ] Support GIF where Telegram/API semantics allow it
-- [ ] Support common video formats
-- [ ] Support PDF
-- [ ] Support DOC/DOCX
-- [ ] Support XLS/XLSX
-- [ ] Support CSV
-- [ ] Support TXT
-- [ ] Support ZIP
-- [ ] Support unknown file types through document upload fallback
-- [ ] Detect MIME type
-- [ ] Display filename
-- [ ] Display file size
-- [ ] Display appropriate document/file icon
-- [ ] Generate thumbnails where applicable
-- [ ] Validate files before campaign start
-- [ ] Detect missing files
-- [ ] Detect unreadable files
-- [ ] Preserve attachment order
-- [ ] Support mixed attachment types where Telegram allows it
-- [ ] Add comprehensive attachment tests
+- [x] Support arbitrary files as Telegram documents — any unrecognized
+      extension falls through to a generic document, never rejected
+      (`app/telegram/media_sender.py::AttachmentKind.DOCUMENT`)
+- [x] Support JPG/JPEG
+- [x] Support PNG
+- [x] Support WEBP
+- [ ] Support GIF where Telegram/API semantics allow it — GIF is already
+      accepted and sent today, but only as a generic document
+      (`AttachmentKind.ANIMATION`, deliberately not album-eligible yet).
+      Telegram's distinct "animation" send mode (`DocumentAttributeAnimated`)
+      is a separate, deferred subtask — see the note below.
+- [x] Support common video formats (MP4/MOV/AVI)
+- [x] Support PDF
+- [x] Support DOC/DOCX
+- [x] Support XLS/XLSX
+- [x] Support CSV
+- [x] Support TXT
+- [x] Support ZIP
+- [x] Support unknown file types through document upload fallback
+- [ ] Detect MIME type — deliberately not added; extension-based detection
+      already matches Telethon's own behavior, see CLAUDE.md
+- [x] Display filename
+- [x] Display file size
+- [ ] Display appropriate document/file icon — still one generic icon for
+      every non-image attachment; planned as its own step
+- [x] Generate thumbnails where applicable
+- [x] Validate files before campaign start
+- [x] Detect missing files
+- [ ] Detect unreadable files — missing-file detection exists
+      (`missing_files()`); a file that exists but can't be read (e.g.
+      permission denied) is not yet distinguished from a healthy one
+- [x] Preserve attachment order
+- [x] Support mixed attachment types where Telegram allows it
+- [ ] Add comprehensive attachment tests — classification is now covered
+      (`tests/test_attachment_kind.py`); icon and reorder coverage are
+      still pending their own steps
+
+**Deferred subtask (not v1.4 scope unless separately planned):** native
+Telegram semantics for GIF-as-animation and audio-as-voice/audio-message.
+Both are more than an extension-table change — they need `media_sender.py`
+to pass Telegram-specific attributes through `send_file`/the album path,
+which is a real enough change to warrant its own design pass rather than
+folding it into the attachment-classification work above.
 
 ## Attachment UX
 

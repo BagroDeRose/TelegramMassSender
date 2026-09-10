@@ -32,7 +32,12 @@ described below.
   - `client_manager.py`, `account_manager.py`, `authentication.py` — client
     lifecycle, multi-account session management/switching.
   - `sender.py`, `media_sender.py` — message/media sending, album batching,
-    caption-vs-leading-message logic.
+    caption-vs-leading-message logic. `media_sender.AttachmentKind` is the
+    single source of truth for local-file classification (photo/video/
+    animation/other-image/document) — extension-based, deliberately no MIME
+    sniffing; `app/ui/thumbnails.py` reads the same table rather than
+    keeping its own, so the "is this thumbnailable" and "is this
+    Telegram-album-eligible" questions can never silently disagree again.
   - `recipient_resolver.py` — resolves `@username` / numeric ID / phone
     (E.164) to a Telegram entity; phone resolution uses
     `contacts.ResolvePhoneRequest` (does not mutate the contact list).

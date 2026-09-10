@@ -37,15 +37,62 @@ CAPTION_MAX_LENGTH = 1024
 TEXT_MESSAGE_MAX_LENGTH = 4096
 MAX_ALBUM_SIZE = 10
 
-# Photo/video are the only types Telegram will group into an album; every
-# other extension (pdf/doc/docx/xls/xlsx/ppt/pptx/txt/zip/gif/anything
-# else) is sent individually as its own message -- spec item 18 asks not
-# to restrict the extension list without a technical reason, so anything
-# not in these two sets simply falls through to "sent individually",
-# never rejected.
-_PHOTO_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
-_VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi"}
-_ALBUM_ELIGIBLE_EXTENSIONS = _PHOTO_EXTENSIONS | _VIDEO_EXTENSIONS
+
+class AttachmentKind(Enum):
+    """Single source of truth for "what is this local file, for our
+    purposes" -- both the send-side album decision (this module) and the
+    UI-side thumbnail decision (app.ui.thumbnails) read from the same
+    extension table below instead of each keeping an independent list that
+    can silently drift out of sync.
+
+    PHOTO/VIDEO are Telegram's own album-eligible types. ANIMATION (.gif)
+    and IMAGE_OTHER (.bmp) are locally decodable as an image (so the UI can
+    show a real thumbnail) but are deliberately NOT album-eligible:
+    - .gif: Telegram has a distinct "animation" send mode (DocumentAttributeAnimated)
+      that this app does not yet use -- sending it through the album path would
+      be wrong, so it stays DOCUMENT-equivalent for sending until that's built
+      as its own change (see ROADMAP.md).
+    - .bmp: Telegram's own photo pipeline does not reliably accept BMP the way
+      it does JPEG/PNG/WEBP -- treating it as an album photo risks a delivery
+      failure the app can't safely predict, so it is intentionally kept out of
+      the photo set even though Qt can decode it fine for a local thumbnail.
+    Everything else, including every unrecognized extension, is DOCUMENT --
+    never rejected, matching the existing "don't restrict the extension list
+    without a technical reason" behavior.
+    """
+
+    PHOTO = "photo"
+    VIDEO = "video"
+    ANIMATION = "animation"
+    IMAGE_OTHER = "image_other"
+    DOCUMENT = "document"
+
+
+_EXTENSION_KINDS: Dict[str, AttachmentKind] = {
+    ".jpg": AttachmentKind.PHOTO,
+    ".jpeg": AttachmentKind.PHOTO,
+    ".png": AttachmentKind.PHOTO,
+    ".webp": AttachmentKind.PHOTO,
+    ".mp4": AttachmentKind.VIDEO,
+    ".mov": AttachmentKind.VIDEO,
+    ".avi": AttachmentKind.VIDEO,
+    ".gif": AttachmentKind.ANIMATION,
+    ".bmp": AttachmentKind.IMAGE_OTHER,
+}
+
+# Telegram will only group PHOTO/VIDEO into an album; everything else
+# (including ANIMATION/IMAGE_OTHER, which are locally thumbnailable but not
+# Telegram-photo-eligible) is sent individually -- see AttachmentKind above.
+_ALBUM_ELIGIBLE_KINDS = {AttachmentKind.PHOTO, AttachmentKind.VIDEO}
+
+# Kinds Qt can decode a real visual thumbnail for locally, independent of
+# whether Telegram would accept them as an album photo -- read by
+# app.ui.thumbnails so it never needs its own separate extension list.
+THUMBNAILABLE_KINDS = {AttachmentKind.PHOTO, AttachmentKind.ANIMATION, AttachmentKind.IMAGE_OTHER}
+
+
+def kind_for_path(path: Path) -> AttachmentKind:
+    return _EXTENSION_KINDS.get(path.suffix.lower(), AttachmentKind.DOCUMENT)
 
 
 class AttachmentCategory(Enum):
@@ -62,8 +109,12 @@ class Attachment:
         return self.path.name
 
     @property
+    def kind(self) -> AttachmentKind:
+        return kind_for_path(self.path)
+
+    @property
     def category(self) -> AttachmentCategory:
-        if self.path.suffix.lower() in _ALBUM_ELIGIBLE_EXTENSIONS:
+        if self.kind in _ALBUM_ELIGIBLE_KINDS:
             return AttachmentCategory.ALBUM_ELIGIBLE
         return AttachmentCategory.SINGLE
 
