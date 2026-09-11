@@ -128,6 +128,54 @@ def _draw_plus(p: QPainter) -> None:
     p.drawLine(QPointF(5, 12), QPointF(19, 12))
 
 
+def _draw_video(p: QPainter) -> None:
+    # Rounded frame + play triangle -- attachment tile glyph for video
+    # files (app.telegram.media_sender.AttachmentKind.VIDEO), which never
+    # get a decoded thumbnail in this app.
+    p.drawRoundedRect(QRectF(3.5, 5, 17, 14), 2.5, 2.5)
+    path = QPainterPath()
+    path.moveTo(10, 9)
+    path.lineTo(16, 12)
+    path.lineTo(10, 15)
+    path.closeSubpath()
+    p.drawPath(path)
+
+
+def _draw_audio(p: QPainter) -> None:
+    # Outline eighth-note -- attachment tile glyph for common audio files
+    # (AttachmentKind.AUDIO). Purely a local UI cue: audio is still sent as
+    # a plain document, same as before this kind existed.
+    p.drawEllipse(QRectF(5.5, 15, 5.5, 4.5))
+    p.drawLine(QPointF(10.8, 17.2), QPointF(10.8, 4.5))
+    flag = QPainterPath()
+    flag.moveTo(10.8, 4.5)
+    flag.cubicTo(15, 4.5, 15.5, 8, 12.5, 9.5)
+    p.drawPath(flag)
+
+
+def _draw_archive(p: QPainter) -> None:
+    # Same page silhouette as _draw_document (folded-corner page) so it
+    # reads as "a file" at a glance, with a zipper down the middle instead
+    # of text lines -- attachment tile glyph for .zip archives
+    # (AttachmentKind.ARCHIVE).
+    path = QPainterPath()
+    path.moveTo(6, 3)
+    path.lineTo(14.5, 3)
+    path.lineTo(19, 7.5)
+    path.lineTo(19, 21)
+    path.lineTo(6, 21)
+    path.closeSubpath()
+    p.drawPath(path)
+    corner = QPainterPath()
+    corner.moveTo(14.5, 3)
+    corner.lineTo(14.5, 7.5)
+    corner.lineTo(19, 7.5)
+    p.drawPath(corner)
+    p.drawLine(QPointF(12.5, 8.5), QPointF(12.5, 21))
+    for y in (10, 12.5, 15, 17.5):
+        p.drawLine(QPointF(11.3, y), QPointF(13.7, y))
+
+
 _DRAWERS: Dict[str, Callable[[QPainter], None]] = {
     "campaign": _draw_campaign,
     "accounts": _draw_accounts,
@@ -140,6 +188,9 @@ _DRAWERS: Dict[str, Callable[[QPainter], None]] = {
     "error_circle": _draw_error_circle,
     "clock": _draw_clock,
     "plus": _draw_plus,
+    "video": _draw_video,
+    "audio": _draw_audio,
+    "archive": _draw_archive,
 }
 
 

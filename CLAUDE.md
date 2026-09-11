@@ -26,18 +26,24 @@ described below.
     dialogs.
   - `theme.py` — light/dark theme tokens and QSS stylesheet generation
     (generated at runtime, not shipped as static `.qss` files).
-  - `icons.py`, `thumbnails.py` — hand-drawn `QPainter` icon set and
-    image-attachment thumbnail generation.
+  - `icons.py`, `thumbnails.py` — hand-drawn `QPainter` icon set (including
+    per-attachment-type glyphs: video/audio/archive/document, selected in
+    `attachments_widget.py` from `AttachmentKind`) and image-attachment
+    thumbnail generation.
 - `app/telegram/` — Telethon (MTProto) integration:
   - `client_manager.py`, `account_manager.py`, `authentication.py` — client
     lifecycle, multi-account session management/switching.
   - `sender.py`, `media_sender.py` — message/media sending, album batching,
-    caption-vs-leading-message logic. `media_sender.AttachmentKind` is the
-    single source of truth for local-file classification (photo/video/
-    animation/other-image/document) — extension-based, deliberately no MIME
-    sniffing; `app/ui/thumbnails.py` reads the same table rather than
-    keeping its own, so the "is this thumbnailable" and "is this
-    Telegram-album-eligible" questions can never silently disagree again.
+    caption-vs-leading-message logic. `media_sender.AttachmentKind`
+    (PHOTO/VIDEO/ANIMATION/IMAGE_OTHER/AUDIO/ARCHIVE/DOCUMENT) is the single
+    source of truth for local-file classification — extension-based,
+    deliberately no MIME sniffing; `app/ui/thumbnails.py` and
+    `app/ui/attachments_widget.py`'s icon selection both read the same
+    table rather than keeping their own. AUDIO/ARCHIVE are purely
+    descriptive (icon selection only) — adding a kind here does NOT by
+    itself change what gets sent or how; only PHOTO/VIDEO are
+    album-eligible and only PHOTO/ANIMATION/IMAGE_OTHER are thumbnailed,
+    exactly as before each kind was added.
   - `recipient_resolver.py` — resolves `@username` / numeric ID / phone
     (E.164) to a Telegram entity; phone resolution uses
     `contacts.ResolvePhoneRequest` (does not mutate the contact list).

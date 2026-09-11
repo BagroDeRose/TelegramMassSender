@@ -4,6 +4,8 @@ what app.ui.main_window and the send flow depend on.
 """
 from __future__ import annotations
 
+import pytest
+
 from app.ui.attachments_widget import AttachmentsWidget
 
 
@@ -167,3 +169,70 @@ def test_corrupted_image_extension_falls_back_to_document_tile(qapp, tmp_path):
     item = widget._list.item(0)
     tile = widget._tiles[id(item)]
     assert tile.is_image is False
+    assert tile.icon_name == "document"
+
+
+# ---- per-type attachment icons (stage 2) ------------------------------------
+
+
+@pytest.mark.parametrize(
+    "filename,expected_icon_name",
+    [
+        ("clip.mp4", "video"),
+        ("song.mp3", "audio"),
+        ("bundle.zip", "archive"),
+        ("report.pdf", "document"),
+        ("notes.txt", "document"),
+        ("weird.xyz123", "document"),  # unknown extension -> generic document, not rejected
+    ],
+)
+def test_tile_picks_icon_matching_attachment_kind(qapp, tmp_path, filename, expected_icon_name):
+    widget = AttachmentsWidget()
+    path = tmp_path / filename
+    path.write_bytes(b"x")
+
+    widget.add_file(path)
+
+    item = widget._list.item(0)
+    tile = widget._tiles[id(item)]
+    assert tile.is_image is False
+    assert tile.icon_name == expected_icon_name
+
+
+def test_theme_switch_preserves_each_tiles_own_icon_not_just_document(qapp, tmp_path):
+    # Regression guard: apply_theme() re-tints every non-image tile by
+    # re-rendering icons.icon(tile.icon_name, ...) -- before this stage it
+    # hardcoded "document", which would have silently collapsed a video/
+    # audio/archive tile back to the generic document glyph on every theme
+    # switch.
+    widget = AttachmentsWidget()
+    video_path = tmp_path / "clip.mp4"
+    video_path.write_bytes(b"x")
+    audio_path = tmp_path / "song.mp3"
+    audio_path.write_bytes(b"x")
+    widget.add_file(video_path)
+    widget.add_file(audio_path)
+
+    widget.apply_theme()
+
+    video_tile = widget._tiles[id(widget._list.item(0))]
+    audio_tile = widget._tiles[id(widget._list.item(1))]
+    assert video_tile.icon_name == "video"
+    assert audio_tile.icon_name == "audio"
+    assert not video_tile.image_label.pixmap().isNull()
+    assert not audio_tile.image_label.pixmap().isNull()
+
+
+def test_image_attachment_icon_name_stays_default_even_though_unused(qapp, tmp_path):
+    # An attachment that gets a real thumbnail never reads icon_name (see
+    # _build_tile), but the field should still hold a sane, harmless value
+    # rather than something stale or type-inconsistent.
+    widget = AttachmentsWidget()
+    path = tmp_path / "photo.png"
+    _write_minimal_png(path)
+
+    widget.add_file(path)
+
+    tile = widget._tiles[id(widget._list.item(0))]
+    assert tile.is_image is True
+    assert tile.icon_name == "document"

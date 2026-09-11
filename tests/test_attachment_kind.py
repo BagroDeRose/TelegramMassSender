@@ -34,9 +34,18 @@ from app.ui.thumbnails import is_image
         ("video.avi", AttachmentKind.VIDEO),
         ("clip.gif", AttachmentKind.ANIMATION),
         ("scan.bmp", AttachmentKind.IMAGE_OTHER),
+        ("song.mp3", AttachmentKind.AUDIO),
+        ("song.wav", AttachmentKind.AUDIO),
+        ("song.ogg", AttachmentKind.AUDIO),
+        ("song.m4a", AttachmentKind.AUDIO),
+        ("song.flac", AttachmentKind.AUDIO),
+        ("song.aac", AttachmentKind.AUDIO),
+        # Reclassified from DOCUMENT to its own ARCHIVE kind in stage 2 (icons)
+        # -- purely descriptive, see test_archive_kind_does_not_change_sending_behavior
+        # below for proof this carries no sending/thumbnail behavior change.
+        ("archive.zip", AttachmentKind.ARCHIVE),
         ("report.pdf", AttachmentKind.DOCUMENT),
         ("data.xlsx", AttachmentKind.DOCUMENT),
-        ("archive.zip", AttachmentKind.DOCUMENT),
         ("notes.txt", AttachmentKind.DOCUMENT),
         ("weird.xyz123", AttachmentKind.DOCUMENT),  # unknown extension -> document, never rejected
         ("no_extension_at_all", AttachmentKind.DOCUMENT),
@@ -103,10 +112,24 @@ def test_bmp_is_thumbnailable_but_never_treated_as_telegram_photo():
         ("video.mp4", False),  # never had a thumbnail before this refactor either
         ("report.pdf", False),
         ("weird.xyz123", False),
+        ("song.mp3", False),
+        ("archive.zip", False),
     ],
 )
 def test_is_image_matches_pre_refactor_image_extensions_exactly(filename, expected):
     assert is_image(Path(filename)) is expected
+
+
+@pytest.mark.parametrize("filename", ["song.mp3", "song.wav", "archive.zip"])
+def test_audio_and_archive_kinds_carry_no_sending_or_thumbnail_behavior_change(filename):
+    # AttachmentKind.AUDIO/ARCHIVE exist only so app.ui.attachments_widget
+    # can pick a more specific icon (stage 2) -- they must behave exactly
+    # like DOCUMENT did before this kind existed: sent individually, no
+    # thumbnail, never rejected. Introducing a classification must never by
+    # itself imply a change to what gets sent or how (see CLAUDE.md).
+    path = Path(filename)
+    assert Attachment(path=path).category == AttachmentCategory.SINGLE
+    assert is_image(path) is False
 
 
 def test_thumbnailable_kinds_and_album_eligible_kinds_are_deliberately_different_questions():

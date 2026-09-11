@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.telegram.media_sender import Attachment
+from app.telegram.media_sender import Attachment, AttachmentKind, kind_for_path
 from app.ui import icons, theme
 from app.ui.empty_state import build_empty_state
 from app.ui.theme import SPACE_SM, SPACE_XS
@@ -36,6 +36,24 @@ from app.ui.thumbnails import format_file_size, is_image, make_thumbnail
 _TILE_SIZE = 108
 _THUMBNAIL_SIZE = 84
 _REMOVE_ICON_SIZE = 11
+_FILE_ICON_SIZE = 30
+
+# Which icons.py glyph represents each AttachmentKind in a tile that isn't
+# showing a real decoded thumbnail. PHOTO/ANIMATION/IMAGE_OTHER are omitted
+# on purpose: they normally get a real thumbnail (see THUMBNAILABLE_KINDS in
+# media_sender.py) and only reach this fallback for a corrupted/unreadable
+# file, same as any other kind -- the generic document glyph is an honest,
+# unchanged-from-before fallback for that rare case, not a missing icon.
+_ICON_NAME_FOR_KIND = {
+    AttachmentKind.VIDEO: "video",
+    AttachmentKind.AUDIO: "audio",
+    AttachmentKind.ARCHIVE: "archive",
+}
+_DEFAULT_ICON_NAME = "document"
+
+
+def _icon_name_for(path: Path) -> str:
+    return _ICON_NAME_FOR_KIND.get(kind_for_path(path), _DEFAULT_ICON_NAME)
 
 
 @dataclass
@@ -43,6 +61,7 @@ class _Tile:
     image_label: QLabel  # holds either the decoded thumbnail or the file-type icon
     remove_button: QToolButton
     is_image: bool
+    icon_name: str = _DEFAULT_ICON_NAME  # which glyph is shown when is_image is False
 
 
 class AttachmentsWidget(QWidget):
@@ -145,10 +164,11 @@ class AttachmentsWidget(QWidget):
         frame.setAlignment(Qt.AlignmentFlag.AlignCenter)
         thumbnail = make_thumbnail(path, _THUMBNAIL_SIZE - 8) if is_image(path) else None
         image_is_thumbnail = thumbnail is not None
+        icon_name = _icon_name_for(path)
         if thumbnail is not None:
             frame.setPixmap(thumbnail)
         else:
-            frame.setPixmap(icons.icon("document", tokens.text_muted, 30).pixmap(30, 30))
+            frame.setPixmap(icons.icon(icon_name, tokens.text_muted, _FILE_ICON_SIZE).pixmap(_FILE_ICON_SIZE, _FILE_ICON_SIZE))
         column.addWidget(frame)
 
         name_label = QLabel(_elide(path.name), tile)
@@ -182,7 +202,9 @@ class AttachmentsWidget(QWidget):
         remove_row.addStretch(1)
         column.addLayout(remove_row)
 
-        self._tiles[id(item)] = _Tile(image_label=frame, remove_button=remove_button, is_image=image_is_thumbnail)
+        self._tiles[id(item)] = _Tile(
+            image_label=frame, remove_button=remove_button, is_image=image_is_thumbnail, icon_name=icon_name
+        )
         return tile
 
     def _sync_empty_state(self) -> None:
@@ -206,14 +228,16 @@ class AttachmentsWidget(QWidget):
     # ---- theming -------------------------------------------------------------
 
     def apply_theme(self) -> None:
-        """Re-tint baked document-icon/remove-button pixmaps after a theme
+        """Re-tint baked file-icon/remove-button pixmaps after a theme
         switch -- QSS alone can't recolor a QIcon/QPixmap, and real image
         thumbnails don't need re-decoding since they carry their own
-        colors regardless of theme."""
+        colors regardless of theme. Each tile remembers which glyph it
+        was built with (icon_name) so re-tinting doesn't collapse every
+        non-image tile back to the generic document icon."""
         color = theme.current_tokens().text_muted
         for tile in self._tiles.values():
             if not tile.is_image:
-                tile.image_label.setPixmap(icons.icon("document", color, 30).pixmap(30, 30))
+                tile.image_label.setPixmap(icons.icon(tile.icon_name, color, _FILE_ICON_SIZE).pixmap(_FILE_ICON_SIZE, _FILE_ICON_SIZE))
             tile.remove_button.setIcon(icons.icon("close", color, _REMOVE_ICON_SIZE))
 
     # ---- public API used by app.ui.main_window --------------------------------

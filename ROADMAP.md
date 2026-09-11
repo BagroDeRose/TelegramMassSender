@@ -61,8 +61,11 @@ platform.
       already matches Telethon's own behavior, see CLAUDE.md
 - [x] Display filename
 - [x] Display file size
-- [ ] Display appropriate document/file icon — still one generic icon for
-      every non-image attachment; planned as its own step
+- [x] Display appropriate document/file icon — distinct icons for
+      video/audio/archive attachments plus the existing generic document
+      glyph (`app/ui/icons.py`, wired in `app/ui/attachments_widget.py`);
+      PHOTO/ANIMATION/IMAGE_OTHER already get a real decoded thumbnail
+      instead and don't need an icon in the normal case
 - [x] Generate thumbnails where applicable
 - [x] Validate files before campaign start
 - [x] Detect missing files
@@ -71,9 +74,10 @@ platform.
       permission denied) is not yet distinguished from a healthy one
 - [x] Preserve attachment order
 - [x] Support mixed attachment types where Telegram allows it
-- [ ] Add comprehensive attachment tests — classification is now covered
-      (`tests/test_attachment_kind.py`); icon and reorder coverage are
-      still pending their own steps
+- [ ] Add comprehensive attachment tests — classification and per-type icon
+      coverage are done (`tests/test_attachment_kind.py`,
+      `tests/test_icons.py`, `tests/test_attachments_widget.py`); reorder
+      coverage is still pending its own step
 
 **Deferred subtask (not v1.4 scope unless separately planned):** native
 Telegram semantics for GIF-as-animation and audio-as-voice/audio-message.

@@ -56,6 +56,13 @@ class AttachmentKind(Enum):
       it does JPEG/PNG/WEBP -- treating it as an album photo risks a delivery
       failure the app can't safely predict, so it is intentionally kept out of
       the photo set even though Qt can decode it fine for a local thumbnail.
+    AUDIO and ARCHIVE are purely descriptive -- added so the UI can show a
+    distinct icon for common audio files and .zip archives (see
+    app.ui.attachments_widget) -- they carry NO Telegram-sending-semantics
+    change: like DOCUMENT, they are sent as a plain document, exactly as
+    every audio/zip file already was before this kind existed. Native
+    Telegram voice/audio-message semantics remain a separate deferred
+    subtask (see ROADMAP.md), same as ANIMATION above.
     Everything else, including every unrecognized extension, is DOCUMENT --
     never rejected, matching the existing "don't restrict the extension list
     without a technical reason" behavior.
@@ -65,6 +72,8 @@ class AttachmentKind(Enum):
     VIDEO = "video"
     ANIMATION = "animation"
     IMAGE_OTHER = "image_other"
+    AUDIO = "audio"
+    ARCHIVE = "archive"
     DOCUMENT = "document"
 
 
@@ -78,6 +87,13 @@ _EXTENSION_KINDS: Dict[str, AttachmentKind] = {
     ".avi": AttachmentKind.VIDEO,
     ".gif": AttachmentKind.ANIMATION,
     ".bmp": AttachmentKind.IMAGE_OTHER,
+    ".mp3": AttachmentKind.AUDIO,
+    ".wav": AttachmentKind.AUDIO,
+    ".ogg": AttachmentKind.AUDIO,
+    ".m4a": AttachmentKind.AUDIO,
+    ".flac": AttachmentKind.AUDIO,
+    ".aac": AttachmentKind.AUDIO,
+    ".zip": AttachmentKind.ARCHIVE,
 }
 
 # Telegram will only group PHOTO/VIDEO into an album; everything else
