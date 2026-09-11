@@ -7,7 +7,7 @@ from __future__ import annotations
 import pytest
 from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QWidget
 
 from app.ui.attachments_widget import AttachmentsWidget
 
@@ -432,11 +432,71 @@ def test_send_plan_consumes_attachments_in_the_reordered_display_order(qapp, tmp
 # uses, and the thing the original stage 3 implementation got wrong (it
 # listened on the QListWidget viewport's event filter instead, which never
 # sees events whose real target is a child index-widget like this tile).
+#
+# A second, subtler bug survived that first fix: _AttachmentTile called the
+# QWidget base implementation in each handler, which ignore()s the event --
+# and an ignored mouse press is redelivered by Qt to the parent (the list's
+# viewport), which accepts it to run its own default click-to-select. That
+# made the viewport (not the tile) become the effective target for the rest
+# of a real gesture, so clicking still selected a tile while dragging still
+# never reached this tile's mouseMoveEvent. The fix is a self.grabMouse() on
+# press / self.releaseMouse() on release-or-drag-start -- Qt's own
+# documented mechanism for exactly this (the QWidget docs name drag-and-drop
+# detection as its intended use), which guarantees delivery to this widget
+# regardless of hit-testing or redelivery. test_press_makes_the_tile_the_
+# mouse_grabber below verifies this directly via QWidget.mouseGrabber(),
+# Qt's own grab-state introspection -- a reliable, environment-independent
+# check, unlike a synthetic OS-level drag gesture (which this sandboxed
+# environment cannot reliably deliver either way; see the stage 3 correction
+# report for what could and couldn't be verified with real mouse input).
 
 
 def _tile_widget(widget, row):
     item = widget._list.item(row)
     return widget._tiles[id(item)].widget
+
+
+def test_press_makes_the_tile_the_mouse_grabber(qapp, tmp_path):
+    # Direct proof (via Qt's own QWidget.mouseGrabber() introspection, not
+    # inference from a synthetic gesture's side effects) that the tile
+    # becomes -- and correctly remains, until release -- Qt's exclusive
+    # mouse-event target for the whole gesture. Qt guarantees delivery to
+    # the grabbing widget regardless of hit-testing, so this is what
+    # actually settles whether a real drag can reach mouseMoveEvent here.
+    widget, paths = _make_widget_with_files(tmp_path, ["a.pdf"])
+    tile = _tile_widget(widget, 0)
+    threshold = QApplication.startDragDistance()
+
+    assert QWidget.mouseGrabber() is None
+    QTest.mousePress(tile, Qt.MouseButton.LeftButton, pos=QPoint(10, 10))
+    assert QWidget.mouseGrabber() is tile
+    # Still held after a small move that stays under the drag threshold.
+    QTest.mouseMove(tile, pos=QPoint(10 + max(threshold - 3, 1), 10))
+    assert QWidget.mouseGrabber() is tile
+    QTest.mouseRelease(tile, Qt.MouseButton.LeftButton, pos=QPoint(10 + max(threshold - 3, 1), 10))
+    assert QWidget.mouseGrabber() is None
+
+
+def test_grab_is_released_before_drag_requested_is_emitted(qapp, tmp_path):
+    # QDrag.exec() (started from _ReorderableListWidget.start_tile_drag,
+    # connected to this same signal in production) runs its own native
+    # nested event loop and manages its own input capture -- our explicit
+    # grab must already be gone by the time that happens, or it would only
+    # fight the native drag. The real start_tile_drag slot is disconnected
+    # here specifically so this check doesn't also trigger a live
+    # drag.exec() with no drop target to complete it.
+    widget, paths = _make_widget_with_files(tmp_path, ["a.pdf"])
+    tile = _tile_widget(widget, 0)
+    tile.drag_requested.disconnect(widget._list.start_tile_drag)
+    grabber_at_emit = []
+    tile.drag_requested.connect(lambda item: grabber_at_emit.append(QWidget.mouseGrabber()))
+    threshold = QApplication.startDragDistance()
+
+    QTest.mousePress(tile, Qt.MouseButton.LeftButton, pos=QPoint(10, 10))
+    assert QWidget.mouseGrabber() is tile
+    QTest.mouseMove(tile, pos=QPoint(10 + threshold + 5, 10))
+
+    assert grabber_at_emit == [None]
 
 
 def test_mouse_press_alone_does_not_reorder_or_start_a_drag(qapp, tmp_path):
@@ -478,6 +538,80 @@ def test_move_past_drag_threshold_emits_drag_requested_for_the_right_item(qapp, 
     QTest.mouseMove(tile, pos=QPoint(10 + threshold + 5, 10))
 
     assert requests == [expected_item]
+
+
+def test_real_press_and_release_without_movement_selects_the_tile(qapp, tmp_path):
+    # Exercises _AttachmentTile's own explicit click-to-select logic (not
+    # QListWidgetItem.setSelected() called directly, as the other selection
+    # tests do) -- this replaces click-to-select behavior that used to come
+    # for free via an ignored mouse press bubbling up to the QAbstractItemView
+    # parent, which is exactly the mechanism that made real dragging never
+    # reach this tile's mouseMoveEvent (see _AttachmentTile's docstring).
+    widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf"])
+    tile = _tile_widget(widget, 0)
+
+    QTest.mousePress(tile, Qt.MouseButton.LeftButton, pos=QPoint(10, 10))
+    QTest.mouseRelease(tile, Qt.MouseButton.LeftButton, pos=QPoint(10, 10))
+
+    assert widget._list.item(0).isSelected() is True
+    assert tile.property("selected") == "true"
+
+
+def test_plain_click_on_a_different_tile_replaces_the_selection(qapp, tmp_path):
+    widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf"])
+    widget._list.item(0).setSelected(True)
+    tile_1 = _tile_widget(widget, 1)
+
+    QTest.mousePress(tile_1, Qt.MouseButton.LeftButton, pos=QPoint(10, 10))
+    QTest.mouseRelease(tile_1, Qt.MouseButton.LeftButton, pos=QPoint(10, 10))
+
+    assert widget._list.item(0).isSelected() is False
+    assert widget._list.item(1).isSelected() is True
+
+
+def test_ctrl_click_toggles_selection_without_clearing_others(qapp, tmp_path):
+    widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf"])
+    widget._list.item(0).setSelected(True)
+    widget._list.setCurrentItem(widget._list.item(0))
+    tile_2 = _tile_widget(widget, 2)
+
+    QTest.mousePress(tile_2, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.ControlModifier, QPoint(10, 10))
+    QTest.mouseRelease(tile_2, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.ControlModifier, QPoint(10, 10))
+
+    assert widget._list.item(0).isSelected() is True  # untouched by Ctrl+click elsewhere
+    assert widget._list.item(2).isSelected() is True  # newly toggled on
+
+
+def test_shift_click_selects_a_range(qapp, tmp_path):
+    widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf", "d.pdf"])
+    widget._list.setCurrentItem(widget._list.item(0))
+    widget._list.item(0).setSelected(True)
+    tile_2 = _tile_widget(widget, 2)
+
+    QTest.mousePress(tile_2, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.ShiftModifier, QPoint(10, 10))
+    QTest.mouseRelease(tile_2, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.ShiftModifier, QPoint(10, 10))
+
+    assert [widget._list.item(i).isSelected() for i in range(4)] == [True, True, True, False]
+
+
+def test_completed_drag_gesture_does_not_also_apply_click_selection(qapp, tmp_path):
+    # A move past the drag threshold clears _press_pos, so the eventual
+    # mouseReleaseEvent (would normally arrive from QDrag's own native loop,
+    # not simulated here) must not re-select on top of an in-progress drag.
+    widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf"])
+    tile = _tile_widget(widget, 0)
+    threshold = QApplication.startDragDistance()
+    requests = []
+    tile.drag_requested.connect(lambda item: requests.append(item))
+
+    QTest.mousePress(tile, Qt.MouseButton.LeftButton, pos=QPoint(10, 10))
+    QTest.mouseMove(tile, pos=QPoint(10 + threshold + 5, 10))
+    QTest.mouseRelease(tile, Qt.MouseButton.LeftButton, pos=QPoint(10 + threshold + 5, 10))
+
+    assert requests == [widget._list.item(0)]
+    # Selection is untouched by the release that follows a drag -- neither
+    # selected nor deselected as a side effect of the gesture ending.
+    assert widget._list.item(0).isSelected() is False
 
 
 def test_clicking_remove_button_does_not_emit_drag_requested(qapp, tmp_path):

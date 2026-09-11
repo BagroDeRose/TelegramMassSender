@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from PySide6.QtCore import QMimeData, QPoint, QSize, Qt, Signal
+from PySide6.QtCore import QItemSelection, QItemSelectionModel, QMimeData, QPoint, QSize, Qt, Signal
 from PySide6.QtGui import QDrag
 from PySide6.QtWidgets import (
     QApplication,
@@ -81,13 +81,32 @@ class _AttachmentTile(QWidget):
     under the cursor -- for a press landing inside this tile, that target
     is this widget (or a WA_TransparentForMouseEvents decorative label
     inside it, which forwards straight to its parent, i.e. this widget),
-    never the viewport itself. A viewport-level event filter therefore
-    never sees these events at all; only mousePressEvent/mouseMoveEvent
-    overridden directly on this widget do, reliably, because Qt's normal
-    event dispatch delivers to the actual target widget. (An earlier
-    viewport-eventFilter implementation reliably saw MouseButtonPress but
-    never a subsequent MouseMove on a real desktop, for exactly this
-    reason -- confirmed by manual testing, not just tests passing.)
+    never the viewport itself.
+
+    Two things make sure this tile stays the exclusive mouse target for the
+    whole press-move-release gesture, not just the initial press:
+
+    1. Every handler explicitly accept()s the event rather than calling the
+       QWidget base implementation, which ignore()s it. An *ignored* mouse
+       press is redelivered by Qt to the parent widget (the list's
+       viewport) for a second chance to handle it -- and QAbstractItemView's
+       own default press handling DOES accept it, to run its native
+       click-to-select logic. A previous version of this class called
+       super() in each handler and hit exactly that: selection-by-click
+       kept working (via the viewport's default handling receiving the
+       redelivered press), while a real, physical mouse drag never reached
+       mouseMoveEvent here at all -- only a synthetic QTest event targeted
+       directly at this widget did, since that bypasses the redelivery path
+       entirely. Click-to-select is therefore implemented explicitly below
+       instead of relying on that redelivery.
+
+    2. self.grabMouse() on press / self.releaseMouse() on release-or-
+       drag-start, on top of (1) -- Qt's own documented mechanism for
+       exactly this (the QWidget docs name drag-and-drop detection as its
+       intended use): "While the mouse is grabbed... this widget receives
+       all mouse events." Verified directly via QWidget.mouseGrabber() in
+       tests/test_attachments_widget.py rather than inferred from a
+       synthetic gesture's side effects.
     """
 
     drag_requested = Signal(object)  # emits the QListWidgetItem this tile represents
@@ -100,7 +119,17 @@ class _AttachmentTile(QWidget):
     def mousePressEvent(self, event) -> None:  # noqa: N802 (Qt override)
         if event.button() == Qt.MouseButton.LeftButton:
             self._press_pos = event.position().toPoint()
-        super().mousePressEvent(event)
+            # Explicit grab, on top of accept() below: accept() alone stops
+            # *this* press from being redelivered to the parent, but Qt's
+            # internal "who gets the next move" tracking is a separate,
+            # less-documented mechanism this class cannot fully control by
+            # accept/ignore alone. grabMouse() is Qt's own documented
+            # mechanism for exactly this (the QWidget docs explicitly name
+            # drag-and-drop detection as its intended use): while held, ALL
+            # mouse events go to this widget regardless of hit-testing or
+            # any redelivery heuristic, full stop.
+            self.grabMouse()
+        event.accept()
 
     def mouseMoveEvent(self, event) -> None:  # noqa: N802 (Qt override)
         if (
@@ -109,13 +138,50 @@ class _AttachmentTile(QWidget):
             and (event.position().toPoint() - self._press_pos).manhattanLength() >= QApplication.startDragDistance()
         ):
             self._press_pos = None
+            # Released before starting the native drag rather than after --
+            # QDrag.exec() runs its own native nested event loop and manages
+            # its own input capture; holding our own explicit grab across
+            # that call would only fight it.
+            self.releaseMouse()
             self.drag_requested.emit(self._item)
-            return
-        super().mouseMoveEvent(event)
+        event.accept()
 
     def mouseReleaseEvent(self, event) -> None:  # noqa: N802 (Qt override)
-        self._press_pos = None
-        super().mouseReleaseEvent(event)
+        # self._press_pos is still set here for a plain click (no drag was
+        # started -- mouseMoveEvent above clears it, and releases the grab,
+        # once the drag threshold is crossed), so this is the point a
+        # click's selection change actually applies, mirroring
+        # QAbstractItemView's own click semantics (plain/Ctrl/Shift) via
+        # its selection model directly rather than reimplementing that
+        # logic by hand.
+        if event.button() == Qt.MouseButton.LeftButton:
+            if self._press_pos is not None:
+                self.releaseMouse()
+                self._apply_click_selection(event.modifiers())
+            self._press_pos = None
+        event.accept()
+
+    def _apply_click_selection(self, modifiers: Qt.KeyboardModifier) -> None:
+        list_widget = self._item.listWidget()
+        if list_widget is None:
+            return  # item was already removed from the list mid-gesture
+        selection_model = list_widget.selectionModel()
+        index = list_widget.indexFromItem(self._item)
+        if modifiers & Qt.KeyboardModifier.ShiftModifier:
+            anchor = list_widget.currentIndex()
+            if anchor.isValid():
+                selection_model.select(QItemSelection(anchor, index), QItemSelectionModel.SelectionFlag.ClearAndSelect)
+                selection_model.setCurrentIndex(index, QItemSelectionModel.SelectionFlag.Current)
+                return
+        elif modifiers & Qt.KeyboardModifier.ControlModifier:
+            # Deliberately two separate calls rather than Toggle|Current in
+            # one setCurrentIndex() -- combined, Qt's list-widget selection
+            # sync clears every other item's selection first (confirmed
+            # empirically), which defeats the entire point of Ctrl+click.
+            selection_model.select(index, QItemSelectionModel.SelectionFlag.Toggle)
+            selection_model.setCurrentIndex(index, QItemSelectionModel.SelectionFlag.Current)
+            return
+        selection_model.setCurrentIndex(index, QItemSelectionModel.SelectionFlag.ClearAndSelect)
 
 
 class _ReorderableListWidget(QListWidget):
