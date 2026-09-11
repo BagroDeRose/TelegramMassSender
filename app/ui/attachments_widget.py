@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from PySide6.QtCore import QEvent, QMimeData, QSize, Qt, Signal
+from PySide6.QtCore import QMimeData, QPoint, QSize, Qt, Signal
 from PySide6.QtGui import QDrag
 from PySide6.QtWidgets import (
     QApplication,
@@ -60,6 +60,7 @@ def _icon_name_for(path: Path) -> str:
 
 @dataclass
 class _Tile:
+    widget: QWidget  # the _AttachmentTile itself -- needed to drive its [selected] QSS property
     image_label: QLabel  # holds either the decoded thumbnail or the file-type icon
     remove_button: QToolButton
     is_image: bool
@@ -69,20 +70,68 @@ class _Tile:
 _REORDER_MIME_TYPE = "application/x-telegrammasssender-attachment-row"
 
 
+class _AttachmentTile(QWidget):
+    """A single attachment card. Detects the drag-to-reorder gesture itself
+    via its own mousePressEvent/mouseMoveEvent, rather than an event filter
+    installed on the owning QListWidget's viewport.
+
+    This tile is attached to its QListWidgetItem via setItemWidget(), which
+    makes it a genuine child widget of the list's viewport, positioned on
+    top of it. Qt delivers a mouse event to whichever widget is actually
+    under the cursor -- for a press landing inside this tile, that target
+    is this widget (or a WA_TransparentForMouseEvents decorative label
+    inside it, which forwards straight to its parent, i.e. this widget),
+    never the viewport itself. A viewport-level event filter therefore
+    never sees these events at all; only mousePressEvent/mouseMoveEvent
+    overridden directly on this widget do, reliably, because Qt's normal
+    event dispatch delivers to the actual target widget. (An earlier
+    viewport-eventFilter implementation reliably saw MouseButtonPress but
+    never a subsequent MouseMove on a real desktop, for exactly this
+    reason -- confirmed by manual testing, not just tests passing.)
+    """
+
+    drag_requested = Signal(object)  # emits the QListWidgetItem this tile represents
+
+    def __init__(self, item: QListWidgetItem, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self._item = item
+        self._press_pos: Optional[QPoint] = None
+
+    def mousePressEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._press_pos = event.position().toPoint()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        if (
+            self._press_pos is not None
+            and bool(event.buttons() & Qt.MouseButton.LeftButton)
+            and (event.position().toPoint() - self._press_pos).manhattanLength() >= QApplication.startDragDistance()
+        ):
+            self._press_pos = None
+            self.drag_requested.emit(self._item)
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        self._press_pos = None
+        super().mouseReleaseEvent(event)
+
+
 class _ReorderableListWidget(QListWidget):
-    """QListWidget with drag-to-reorder detected via plain mouse events and
-    a minimal hand-rolled QDrag, rather than Qt's built-in
+    """QListWidget whose items carry a fully custom tile widget attached
+    via setItemWidget() (thumbnail/icon, filename, remove button) and are
+    reordered via a minimal hand-rolled QDrag, rather than Qt's built-in
     setDragDropMode(InternalMove).
 
-    Every item here carries a fully custom tile widget attached via
-    setItemWidget() (thumbnail/icon, filename, remove button). Qt's
-    built-in item-view drag-and-drop reorders by round-tripping each
+    Qt's built-in item-view drag-and-drop reorders by round-tripping each
     dragged row's *model data* (text/icon/decoration roles) through
     mimeData()/dropMimeData() -- it has no mechanism to carry a
     setItemWidget()-attached widget across that round-trip, so enabling
     InternalMove here would silently drop each moved tile's thumbnail/
     icon/remove-button. Instead, a drag only ever carries the source row
-    index as private MIME data; the actual reorder is done by the owning
+    index as private MIME data (started by _AttachmentTile.drag_requested,
+    see start_tile_drag below); the actual reorder is done by the owning
     AttachmentsWidget mutating its own path list and rebuilding tiles from
     scratch (see AttachmentsWidget._rebuild_tiles), reusing the same,
     already-tested per-tile construction used for a normal add_file().
@@ -103,59 +152,19 @@ class _ReorderableListWidget(QListWidget):
         # grid. AttachmentsWidget's own setAcceptDrops(True) still handles
         # an external drop while the grid is empty/hidden.
         self.setAcceptDrops(True)
-        self._press_row: Optional[int] = None
-        self._press_pos = None
-        # QAbstractItemView's internal viewportEvent() forwards a press to
-        # this widget's own mousePressEvent() override, but does not
-        # reliably do the same for a subsequent mouse move while no
-        # QAbstractItemView-native drag is configured (confirmed
-        # empirically: mousePressEvent fired, mouseMoveEvent never did, for
-        # the same physical gesture) -- an event filter installed directly
-        # on the viewport sees the real, raw mouse events instead, so drag
-        # detection lives here rather than in a mouseMoveEvent override.
-        # The viewport is cached once here rather than re-calling
-        # self.viewport() inside eventFilter: PySide6 can hand back a fresh
-        # Python wrapper object for the same underlying C++ widget on each
-        # call, which makes an `is` identity check against a freshly
-        # re-fetched self.viewport() unreliable (confirmed empirically --
-        # the very first event matched, later ones silently didn't).
-        self._viewport = self.viewport()
-        self._viewport.installEventFilter(self)
 
-    def eventFilter(self, watched, event) -> bool:  # noqa: N802 (Qt override)
-        # No identity/equality check against self._viewport here: this
-        # filter is only ever installed on that one object, so `watched`
-        # can only be it -- an `is`/`==` re-check proved unreliable in
-        # practice (PySide6 can hand back event-delivery wrapper objects
-        # that don't compare equal to a separately-cached Python reference
-        # for the same underlying C++ widget), and checking membership by
-        # install-time guarantee instead of by comparing wrapper objects
-        # sidesteps that entirely.
-        event_type = event.type()
-        if event_type == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
-            index = self.indexAt(event.position().toPoint())
-            self._press_row = index.row() if index.isValid() else None
-            self._press_pos = event.position().toPoint()
-        elif event_type == QEvent.Type.MouseMove and self._press_row is not None:
-            if (
-                bool(event.buttons() & Qt.MouseButton.LeftButton)
-                and self._press_pos is not None
-                and (event.position().toPoint() - self._press_pos).manhattanLength()
-                >= QApplication.startDragDistance()
-            ):
-                row = self._press_row
-                self._press_row = None
-                self._press_pos = None
-                drag = QDrag(self)
-                mime = QMimeData()
-                mime.setData(_REORDER_MIME_TYPE, str(row).encode("ascii"))
-                drag.setMimeData(mime)
-                drag.exec(Qt.DropAction.MoveAction)
-                return True  # consumed -- don't let the base view also treat this as a selection drag
-        elif event_type == QEvent.Type.MouseButtonRelease:
-            self._press_row = None
-            self._press_pos = None
-        return super().eventFilter(watched, event)
+    def start_tile_drag(self, item: QListWidgetItem) -> None:
+        """Called from an _AttachmentTile's drag_requested signal once its
+        own mouseMoveEvent has confirmed a real drag gesture past Qt's
+        standard drag threshold."""
+        row = self.row(item)
+        if row < 0:
+            return  # stale signal from a tile whose item was already removed
+        drag = QDrag(self)
+        mime = QMimeData()
+        mime.setData(_REORDER_MIME_TYPE, str(row).encode("ascii"))
+        drag.setMimeData(mime)
+        drag.exec(Qt.DropAction.MoveAction)
 
     def dragEnterEvent(self, event) -> None:  # noqa: N802 (Qt override)
         if event.mimeData().hasFormat(_REORDER_MIME_TYPE) or event.mimeData().hasUrls():
@@ -200,6 +209,15 @@ class AttachmentsWidget(QWidget):
         layout.addWidget(self._empty_label)
 
         self._list = _ReorderableListWidget(self)
+        # Scoped objectName so the QSS in theme.py can neutralize the
+        # native QListWidget::item:selected paint for this list without
+        # affecting any other QListWidget in the app -- the native
+        # selection rectangle is drawn at the item's own rect, not the
+        # custom tile's rounded shape, and shows through at the edges;
+        # selection is instead drawn deliberately on the tile itself (see
+        # _AttachmentTile / #attachmentTile[selected] and
+        # _on_selection_changed below).
+        self._list.setObjectName("attachmentsList")
         self._list.setViewMode(QListView.ViewMode.IconMode)
         self._list.setFlow(QListView.Flow.LeftToRight)
         self._list.setWrapping(True)
@@ -212,6 +230,7 @@ class AttachmentsWidget(QWidget):
         self._list.hide()
         self._list.tile_reorder_requested.connect(self._on_tile_reorder_requested)
         self._list.files_dropped.connect(self._on_files_dropped_on_list)
+        self._list.itemSelectionChanged.connect(self._on_selection_changed)
         layout.addWidget(self._list)
 
         buttons = QHBoxLayout()
@@ -276,17 +295,22 @@ class AttachmentsWidget(QWidget):
     def _on_tile_reorder_requested(self, source_row: int, target_row: int) -> None:
         if not (0 <= source_row < len(self._paths)) or not (0 <= target_row < len(self._paths)):
             return  # stale/out-of-range row -- ignore rather than corrupt order
+        # Captured by path (stable identity) rather than row, since every
+        # row shifts once self._paths is mutated below.
+        selected_paths = {self._paths[self._list.row(i)] for i in self._list.selectedItems()}
         path = self._paths.pop(source_row)
         self._paths.insert(target_row, path)
-        self._rebuild_tiles()
+        self._rebuild_tiles(selected_paths=selected_paths)
 
     def _append_tile(self, path: Path) -> None:
         item = QListWidgetItem(self._list)
         item.setSizeHint(QSize(_TILE_SIZE, _TILE_SIZE + 46))
         self._list.addItem(item)
-        self._list.setItemWidget(item, self._build_tile(item, path))
+        tile = self._build_tile(item, path)
+        self._list.setItemWidget(item, tile)
+        tile.drag_requested.connect(self._list.start_tile_drag)
 
-    def _rebuild_tiles(self) -> None:
+    def _rebuild_tiles(self, *, selected_paths: Optional[set] = None) -> None:
         """Rebuild every tile from self._paths, in its current order. Used
         after a reorder rather than trying to move the existing
         QListWidgetItem/setItemWidget pair in place -- Qt's item-view
@@ -294,17 +318,47 @@ class AttachmentsWidget(QWidget):
         widget across a move (see _ReorderableListWidget), so a full
         rebuild via the same per-path tile construction add_file() already
         uses is the simplest way to guarantee the displayed tiles always
-        match self._paths exactly, without a second, parallel code path."""
+        match self._paths exactly, without a second, parallel code path.
+
+        A full clear() drops all QListWidgetItem selection state, so a
+        previously-selected tile would otherwise silently lose its
+        selection on every reorder -- selected_paths (identified by path,
+        not row, since rows shift) lets the caller ask for it back."""
         self._list.clear()
         self._tiles.clear()
         for path in self._paths:
             self._append_tile(path)
+        if selected_paths:
+            for i, path in enumerate(self._paths):
+                if path in selected_paths:
+                    self._list.item(i).setSelected(True)
         self._sync_empty_state()
         self.attachments_changed.emit()
 
-    def _build_tile(self, item: QListWidgetItem, path: Path) -> QWidget:
+    def _on_selection_changed(self) -> None:
+        """Drive each tile's own [selected] QSS state -- the native
+        QListWidget::item:selected paint is deliberately neutralized for
+        this list (see theme.py) because it draws behind the custom tile
+        at the item's own rect rather than the tile's actual rounded
+        shape."""
+        selected_ids = {id(i) for i in self._list.selectedItems()}
+        for item_id, tile in self._tiles.items():
+            is_selected = item_id in selected_ids
+            if tile.widget.property("selected") == ("true" if is_selected else "false"):
+                continue
+            tile.widget.setProperty("selected", "true" if is_selected else "false")
+            style = tile.widget.style()
+            style.unpolish(tile.widget)
+            style.polish(tile.widget)
+
+    def _build_tile(self, item: QListWidgetItem, path: Path) -> _AttachmentTile:
         tokens = theme.current_tokens()
-        tile = QWidget(self._list)
+        tile = _AttachmentTile(item, self._list)
+        tile.setObjectName("attachmentTile")
+        # A plain QWidget doesn't paint QSS background-color/border on its
+        # own -- only QFrame-derived widgets do that automatically.
+        tile.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        tile.setProperty("selected", "false")
         tile.setFixedWidth(_TILE_SIZE)
         column = QVBoxLayout(tile)
         column.setContentsMargins(0, 0, 0, 0)
@@ -315,9 +369,9 @@ class AttachmentsWidget(QWidget):
         frame.setFixedSize(_TILE_SIZE, _THUMBNAIL_SIZE)
         frame.setAlignment(Qt.AlignmentFlag.AlignCenter)
         # Purely decorative -- let a press/drag started here pass through to
-        # the list widget underneath instead of being swallowed by the
-        # label, so dragging by the thumbnail (the most natural place to
-        # grab a tile) actually reaches _ReorderableListWidget's handlers.
+        # the tile underneath instead of being swallowed by the label, so
+        # dragging by the thumbnail (the most natural place to grab a
+        # tile) actually reaches _AttachmentTile's own mouse handlers.
         frame.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         thumbnail = make_thumbnail(path, _THUMBNAIL_SIZE - 8) if is_image(path) else None
         image_is_thumbnail = thumbnail is not None
@@ -362,7 +416,7 @@ class AttachmentsWidget(QWidget):
         column.addLayout(remove_row)
 
         self._tiles[id(item)] = _Tile(
-            image_label=frame, remove_button=remove_button, is_image=image_is_thumbnail, icon_name=icon_name
+            widget=tile, image_label=frame, remove_button=remove_button, is_image=image_is_thumbnail, icon_name=icon_name
         )
         return tile
 

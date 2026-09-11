@@ -734,6 +734,18 @@ QListWidget::item:selected {
     color: $on_accent;
 }
 
+/* attachmentsList uses fully custom setItemWidget() tiles that already
+   draw their own deliberate [selected] state (see #attachmentTile below)
+   -- the native item-selected paint above is drawn behind the tile at the
+   item's own rect rather than the tile's actual rounded shape, so it's
+   neutralized here rather than left to show through at the edges. */
+QListWidget#attachmentsList::item,
+QListWidget#attachmentsList::item:selected,
+QListWidget#attachmentsList::item:hover {
+    background-color: transparent;
+    border: none;
+}
+
 /* ---- attachment chips ---------------------------------------------------- */
 
 QFrame#attachmentChip {
@@ -908,6 +920,15 @@ QLabel#thumbnailName {
 QLabel#thumbnailMeta {
     color: $text_muted;
     font-size: ${font_caption}px;
+}
+
+QWidget#attachmentTile {
+    background-color: transparent;
+    border-radius: ${radius_md}px;
+}
+
+QWidget#attachmentTile[selected="true"] {
+    background-color: $accent_soft;
 }
 
 /* ---- saved report cards ----------------------------------------------------- */

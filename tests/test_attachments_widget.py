@@ -5,6 +5,9 @@ what app.ui.main_window and the send flow depend on.
 from __future__ import annotations
 
 import pytest
+from PySide6.QtCore import QPoint, Qt
+from PySide6.QtTest import QTest
+from PySide6.QtWidgets import QApplication
 
 from app.ui.attachments_widget import AttachmentsWidget
 
@@ -240,19 +243,36 @@ def test_image_attachment_icon_name_stays_default_even_though_unused(qapp, tmp_p
 
 # ---- drag-to-reorder (stage 3) -----------------------------------------------
 #
-# A real mouse-driven QDrag gesture (_ReorderableListWidget.mousePressEvent /
-# mouseMoveEvent / QDrag.exec()) does not simulate reliably under pytest --
-# there is no real OS input queue and QDrag.exec() runs its own native nested
-# event loop. Per the task's own guidance, these tests instead drive the
-# underlying reorder operation directly -- _on_tile_reorder_requested is
-# exactly what _ReorderableListWidget's dropEvent calls once a real drag
-# completes, so this exercises the actual state-synchronization logic, not a
-# reimplementation of it. One test below also emits the Qt signal itself
-# (rather than calling the handler method) to prove the signal-to-handler
-# wiring is actually connected, not just that the handler works in isolation.
-# The real mouse-driven gesture is verified separately, visually, against the
-# running app (see the stage 3 commit/report) -- not part of the automated
-# suite.
+# The full gesture has two halves:
+#   1. mouse press + move past the drag threshold on an _AttachmentTile ->
+#      it emits drag_requested, which _ReorderableListWidget.start_tile_drag
+#      turns into a QDrag.exec() call.
+#   2. a completed drop -> _ReorderableListWidget.dropEvent emits
+#      tile_reorder_requested -> AttachmentsWidget._on_tile_reorder_requested
+#      does the actual reorder.
+#
+# QDrag.exec() itself runs its own native nested event loop and cannot be
+# driven under pytest (there is no real OS input queue to complete a native
+# drag against), so half 2 is exercised directly by calling
+# _on_tile_reorder_requested / emitting tile_reorder_requested -- this is
+# exactly what a completed drop calls, so it exercises the real
+# state-synchronization logic, not a reimplementation of it. Half 1 (does a
+# real mouse gesture on a tile actually reach the code that starts the drag,
+# and does the remove button correctly NOT trigger it) IS exercised here via
+# PySide6.QtTest.QTest, which delivers genuine QMouseEvents through Qt's own
+# event dispatch (qApp.notify) -- unlike a real OS-injected drag, this does
+# not depend on the platform's native input queue, so it reliably tests the
+# actual mousePressEvent/mouseMoveEvent logic on _AttachmentTile.
+#
+# What this suite cannot prove: that a physical mouse drag on a real Windows
+# desktop feels natural, targets the right drop position, or is visually
+# glitch-free (no flicker/stale widgets). That was verified separately,
+# manually, against the real running app for the parts that could be (see
+# the stage 3 correction commit/report) -- real OS-level drag-move injection
+# did not register in this sandboxed environment even after the fix (a
+# press+release did, confirming events reach the tile correctly), consistent
+# with the same synthetic-input limitation identified in the original stage
+# 3 session. That specific gap should be verified manually on a real machine.
 
 
 def _make_widget_with_files(tmp_path, names):
@@ -402,3 +422,154 @@ def test_send_plan_consumes_attachments_in_the_reordered_display_order(qapp, tmp
     assert len(plan.groups) == 2
     assert plan.groups[0].is_album is False  # b.pdf, alone
     assert plan.groups[1].is_album is True  # c.jpg + a.jpg, now adjacent
+
+
+# ---- drag-gesture interaction boundary (stage 3 correction pass) ------------
+#
+# These exercise _AttachmentTile's own mousePressEvent/mouseMoveEvent
+# directly via QTest, which delivers real QMouseEvents through Qt's normal
+# event dispatch -- the same delivery path a genuine mouse press on the tile
+# uses, and the thing the original stage 3 implementation got wrong (it
+# listened on the QListWidget viewport's event filter instead, which never
+# sees events whose real target is a child index-widget like this tile).
+
+
+def _tile_widget(widget, row):
+    item = widget._list.item(row)
+    return widget._tiles[id(item)].widget
+
+
+def test_mouse_press_alone_does_not_reorder_or_start_a_drag(qapp, tmp_path):
+    widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf"])
+    tile = _tile_widget(widget, 0)
+    requests = []
+    tile.drag_requested.connect(lambda item: requests.append(item))
+
+    QTest.mousePress(tile, Qt.MouseButton.LeftButton, pos=QPoint(10, 10))
+
+    assert requests == []
+    assert [a.path for a in widget.get_attachments()] == paths
+
+
+def test_move_below_drag_threshold_does_not_start_a_drag(qapp, tmp_path):
+    widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf"])
+    tile = _tile_widget(widget, 0)
+    requests = []
+    tile.drag_requested.connect(lambda item: requests.append(item))
+    threshold = QApplication.startDragDistance()
+
+    QTest.mousePress(tile, Qt.MouseButton.LeftButton, pos=QPoint(10, 10))
+    # Move by less than the platform's own drag threshold -- must not be
+    # mistaken for a drag gesture (a click/small jitter, not a drag).
+    QTest.mouseMove(tile, pos=QPoint(10 + max(threshold - 2, 1), 10))
+
+    assert requests == []
+
+
+def test_move_past_drag_threshold_emits_drag_requested_for_the_right_item(qapp, tmp_path):
+    widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf"])
+    tile = _tile_widget(widget, 1)
+    expected_item = widget._list.item(1)
+    requests = []
+    tile.drag_requested.connect(lambda item: requests.append(item))
+    threshold = QApplication.startDragDistance()
+
+    QTest.mousePress(tile, Qt.MouseButton.LeftButton, pos=QPoint(10, 10))
+    QTest.mouseMove(tile, pos=QPoint(10 + threshold + 5, 10))
+
+    assert requests == [expected_item]
+
+
+def test_clicking_remove_button_does_not_emit_drag_requested(qapp, tmp_path):
+    widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf"])
+    tile = _tile_widget(widget, 0)
+    requests = []
+    tile.drag_requested.connect(lambda item: requests.append(item))
+
+    widget._tiles[id(widget._list.item(0))].remove_button.click()
+
+    assert requests == []
+    assert [a.path for a in widget.get_attachments()] == [paths[1]]
+
+
+# ---- selection rendering (stage 3 correction pass) ---------------------------
+
+
+def test_clicking_a_tile_marks_it_selected_via_the_selected_property(qapp, tmp_path):
+    widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf"])
+    item = widget._list.item(0)
+    tile = widget._tiles[id(item)].widget
+    assert tile.property("selected") == "false"
+
+    item.setSelected(True)
+
+    assert tile.property("selected") == "true"
+    other_tile = widget._tiles[id(widget._list.item(1))].widget
+    assert other_tile.property("selected") == "false"
+
+
+def test_deselecting_a_tile_clears_the_selected_property(qapp, tmp_path):
+    widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf"])
+    item = widget._list.item(0)
+    tile = widget._tiles[id(item)].widget
+    item.setSelected(True)
+    assert tile.property("selected") == "true"
+
+    item.setSelected(False)
+
+    assert tile.property("selected") == "false"
+
+
+def test_selection_survives_reorder(qapp, tmp_path):
+    widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf"])
+    widget._list.item(0).setSelected(True)  # select "a.pdf"
+
+    widget._on_tile_reorder_requested(0, 2)  # -> b, c, a
+
+    # "a.pdf" is now the last tile (index 2) and must still be selected.
+    new_order = [a.path for a in widget.get_attachments()]
+    assert new_order == [paths[1], paths[2], paths[0]]
+    selected_tile = widget._tiles[id(widget._list.item(2))].widget
+    assert selected_tile.property("selected") == "true"
+    unselected_tiles = [widget._tiles[id(widget._list.item(i))].widget for i in (0, 1)]
+    assert all(t.property("selected") == "false" for t in unselected_tiles)
+
+
+def test_selection_property_unaffected_by_theme_apply(qapp, tmp_path):
+    widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf"])
+    widget._list.item(0).setSelected(True)
+
+    widget.apply_theme()
+
+    tile = widget._tiles[id(widget._list.item(0))].widget
+    assert tile.property("selected") == "true"
+
+
+def test_removing_the_selected_tile_leaves_a_valid_selection_state(qapp, tmp_path):
+    widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf"])
+    item = widget._list.item(0)
+    item.setSelected(True)
+
+    widget._remove_item(item)  # must not raise
+
+    assert [a.path for a in widget.get_attachments()] == [paths[1]]
+    assert len(widget._tiles) == 1
+    remaining_tile = widget._tiles[id(widget._list.item(0))].widget
+    assert remaining_tile.property("selected") == "false"
+
+
+def test_repeated_add_reorder_remove_leaves_no_stale_tile_widgets(qapp, tmp_path):
+    widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf"])
+    widget._on_tile_reorder_requested(0, 2)
+    extra = tmp_path / "d.pdf"
+    extra.write_bytes(b"x")
+    widget.add_file(extra)
+    widget._on_tile_reorder_requested(1, 3)
+    widget._remove_item(widget._list.item(0))
+
+    assert widget._list.count() == len(widget._paths) == len(widget._tiles)
+    for i in range(widget._list.count()):
+        item = widget._list.item(i)
+        assert id(item) in widget._tiles
+        tile = widget._tiles[id(item)]
+        assert tile.widget is widget._list.itemWidget(item)
