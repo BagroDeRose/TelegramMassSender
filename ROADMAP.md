@@ -74,10 +74,9 @@ platform.
       permission denied) is not yet distinguished from a healthy one
 - [x] Preserve attachment order
 - [x] Support mixed attachment types where Telegram allows it
-- [ ] Add comprehensive attachment tests — classification and per-type icon
-      coverage are done (`tests/test_attachment_kind.py`,
-      `tests/test_icons.py`, `tests/test_attachments_widget.py`); reorder
-      coverage is still pending its own step
+- [x] Add comprehensive attachment tests — classification, per-type icon,
+      and drag-to-reorder coverage are all done (`tests/test_attachment_kind.py`,
+      `tests/test_icons.py`, `tests/test_attachments_widget.py`)
 
 **Deferred subtask (not v1.4 scope unless separately planned):** native
 Telegram semantics for GIF-as-animation and audio-as-voice/audio-message.
@@ -88,10 +87,18 @@ folding it into the attachment-classification work above.
 
 ## Attachment UX
 
-- [ ] Drag & Drop files into the message/campaign area
-- [ ] Drag & Drop to reorder attachments
-- [ ] Remove attachments individually
-- [ ] Clear attachment queue
+- [x] Drag & Drop files into the message/campaign area — dropping local
+      files (e.g. from Explorer) directly onto the attachments tile grid
+      adds them, in addition to the existing "choose files" dialog
+      (`app/ui/attachments_widget.py::_ReorderableListWidget.dropEvent`)
+- [x] Drag & Drop to reorder attachments — dragging a tile to a new
+      position updates `self._paths` (the single source of truth for send
+      order) and rebuilds the tile grid to match; the campaign pipeline
+      already consumed `get_attachments()` order with no separate ordering
+      mechanism to keep in sync
+      (`app/ui/attachments_widget.py::_ReorderableListWidget`)
+- [x] Remove attachments individually
+- [x] Clear attachment queue
 - [ ] Improve attachment preview
 - [ ] Show file type and size
 - [ ] Show useful validation errors

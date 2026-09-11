@@ -236,3 +236,169 @@ def test_image_attachment_icon_name_stays_default_even_though_unused(qapp, tmp_p
     tile = widget._tiles[id(widget._list.item(0))]
     assert tile.is_image is True
     assert tile.icon_name == "document"
+
+
+# ---- drag-to-reorder (stage 3) -----------------------------------------------
+#
+# A real mouse-driven QDrag gesture (_ReorderableListWidget.mousePressEvent /
+# mouseMoveEvent / QDrag.exec()) does not simulate reliably under pytest --
+# there is no real OS input queue and QDrag.exec() runs its own native nested
+# event loop. Per the task's own guidance, these tests instead drive the
+# underlying reorder operation directly -- _on_tile_reorder_requested is
+# exactly what _ReorderableListWidget's dropEvent calls once a real drag
+# completes, so this exercises the actual state-synchronization logic, not a
+# reimplementation of it. One test below also emits the Qt signal itself
+# (rather than calling the handler method) to prove the signal-to-handler
+# wiring is actually connected, not just that the handler works in isolation.
+# The real mouse-driven gesture is verified separately, visually, against the
+# running app (see the stage 3 commit/report) -- not part of the automated
+# suite.
+
+
+def _make_widget_with_files(tmp_path, names):
+    widget = AttachmentsWidget()
+    paths = []
+    for name in names:
+        path = tmp_path / name
+        path.write_bytes(b"x")
+        paths.append(path)
+        widget.add_file(path)
+    return widget, paths
+
+
+def test_initial_order_matches_add_order_before_any_reorder(qapp, tmp_path):
+    widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf"])
+    assert [a.path for a in widget.get_attachments()] == paths
+
+
+def test_moving_first_item_to_end(qapp, tmp_path):
+    widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf"])
+    widget._on_tile_reorder_requested(0, 2)
+    assert [a.path for a in widget.get_attachments()] == [paths[1], paths[2], paths[0]]
+
+
+def test_moving_last_item_to_beginning(qapp, tmp_path):
+    widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf"])
+    widget._on_tile_reorder_requested(2, 0)
+    assert [a.path for a in widget.get_attachments()] == [paths[2], paths[0], paths[1]]
+
+
+def test_moving_item_to_the_middle(qapp, tmp_path):
+    widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf", "d.pdf"])
+    widget._on_tile_reorder_requested(0, 2)
+    assert [a.path for a in widget.get_attachments()] == [paths[1], paths[2], paths[0], paths[3]]
+
+
+def test_multiple_reorders_compose_to_the_correct_final_order(qapp, tmp_path):
+    widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf", "d.pdf"])
+    # a b c d
+    widget._on_tile_reorder_requested(0, 3)  # -> b c d a
+    widget._on_tile_reorder_requested(1, 0)  # -> c b d a
+    widget._on_tile_reorder_requested(3, 1)  # -> c a b d
+    expected = [paths[2], paths[0], paths[1], paths[3]]
+    assert [a.path for a in widget.get_attachments()] == expected
+
+
+def test_reorder_via_actual_qt_signal_not_just_direct_handler_call(qapp, tmp_path):
+    # Proves the wiring itself (connect() in __init__), not just that the
+    # handler function works when called directly.
+    widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf"])
+    widget._list.tile_reorder_requested.emit(0, 2)
+    assert [a.path for a in widget.get_attachments()] == [paths[1], paths[2], paths[0]]
+
+
+def test_reorder_rebuilds_tiles_dict_with_no_stale_entries(qapp, tmp_path):
+    widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf"])
+    old_tile_ids = set(widget._tiles.keys())
+
+    widget._on_tile_reorder_requested(0, 2)
+
+    assert widget._list.count() == 3
+    assert len(widget._tiles) == 3
+    new_tile_ids = set(widget._tiles.keys())
+    # _rebuild_tiles clears and recreates every QListWidgetItem, so the old
+    # id(item) keys must not linger -- a stale entry here would mean a
+    # memory leak / dangling reference, not just a display glitch.
+    assert old_tile_ids.isdisjoint(new_tile_ids)
+    for item_id, tile in widget._tiles.items():
+        assert not tile.image_label.pixmap().isNull()
+
+
+def test_reorder_with_out_of_range_rows_is_ignored_not_corrupting_order(qapp, tmp_path):
+    widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf"])
+    widget._on_tile_reorder_requested(0, 5)  # target well past the end
+    widget._on_tile_reorder_requested(-1, 1)  # negative source
+    assert [a.path for a in widget.get_attachments()] == paths
+
+
+def test_remove_after_reorder_removes_the_correct_file(qapp, tmp_path):
+    widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf"])
+    widget._on_tile_reorder_requested(0, 2)  # -> b c a
+    # Displayed order is now [b, c, a]; removing row 1 must remove c.
+    item = widget._list.item(1)
+    widget._remove_item(item)
+    assert [a.path for a in widget.get_attachments()] == [paths[1], paths[0]]
+
+
+def test_add_after_reorder_appends_without_corrupting_existing_order(qapp, tmp_path):
+    widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf"])
+    widget._on_tile_reorder_requested(0, 2)  # -> b c a
+    new_path = tmp_path / "d.pdf"
+    new_path.write_bytes(b"x")
+    widget.add_file(new_path)
+    assert [a.path for a in widget.get_attachments()] == [paths[1], paths[2], paths[0], new_path]
+
+
+def test_clear_after_reorder_leaves_widget_empty(qapp, tmp_path):
+    widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf"])
+    widget._on_tile_reorder_requested(0, 2)
+
+    widget._on_clear_clicked()
+
+    assert widget.is_empty() is True
+    assert widget.get_attachments() == []
+    assert widget._tiles == {}
+    assert widget._list.count() == 0
+
+
+def test_missing_file_validation_after_reorder_reports_correct_paths(qapp, tmp_path):
+    widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf"])
+    widget._on_tile_reorder_requested(0, 2)  # -> b c a
+    paths[0].unlink()  # "a.pdf" -- now at the end of the displayed order
+
+    assert widget.missing_files() == [paths[0]]
+
+
+def test_theme_apply_after_reorder_does_not_raise_and_keeps_correct_icons(qapp, tmp_path):
+    widget, paths = _make_widget_with_files(tmp_path, ["clip.mp4", "song.mp3", "c.pdf"])
+    widget._on_tile_reorder_requested(0, 2)  # -> song.mp3, c.pdf, clip.mp4
+
+    widget.apply_theme()  # must not raise, and must re-tint the rebuilt tiles
+
+    icon_names = [widget._tiles[id(widget._list.item(i))].icon_name for i in range(3)]
+    assert icon_names == ["audio", "document", "video"]
+
+
+def test_send_plan_consumes_attachments_in_the_reordered_display_order(qapp, tmp_path):
+    # End-to-end proof that the visual order becomes the actual send order,
+    # through the real production functions (not a reimplementation of
+    # album-grouping logic in this test). Before the reorder the order is
+    # [a.jpg, b.pdf, c.jpg] -- the two photos are NOT adjacent (b.pdf sits
+    # between them), so they would NOT be album-grouped. The reorder below
+    # moves a.jpg to the end, making the order [b.pdf, c.jpg, a.jpg] --
+    # now c.jpg and a.jpg ARE adjacent, so build_send_groups (unchanged,
+    # unmodified production code) correctly groups them into one album.
+    # This is deliberately a case where reordering changes grouping, not
+    # just delivery sequence -- proving grouping follows the NEW order.
+    from app.telegram.media_sender import build_media_send_plan
+
+    widget, paths = _make_widget_with_files(tmp_path, ["a.jpg", "b.pdf", "c.jpg"])
+    widget._on_tile_reorder_requested(0, 2)  # -> b.pdf, c.jpg, a.jpg
+
+    plan = build_media_send_plan(widget.get_attachments(), "caption", [])
+
+    sent_paths = [a.path for group in plan.groups for a in group.attachments]
+    assert sent_paths == [paths[1], paths[2], paths[0]]
+    assert len(plan.groups) == 2
+    assert plan.groups[0].is_album is False  # b.pdf, alone
+    assert plan.groups[1].is_album is True  # c.jpg + a.jpg, now adjacent
