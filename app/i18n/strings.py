@@ -94,6 +94,49 @@ STRINGS: Dict[str, Dict[str, str]] = {
     },
     "main_window.campaign_page.attachments_card": {"ru": "Вложения", "en": "Attachments"},
     "main_window.campaign_page.campaign_card": {"ru": "Рассылка", "en": "Campaign"},
+    "main_window.campaign_page.open_wizard_button": {"ru": "Мастер кампании", "en": "Campaign Wizard"},
+
+    # ---- app/ui/campaign_wizard.py -------------------------------------------
+    "campaign_wizard.title": {"ru": "Мастер кампании", "en": "Campaign Wizard"},
+    "campaign_wizard.step_label": {"ru": "Шаг {current} из {total}: {title}", "en": "Step {current} of {total}: {title}"},
+    "campaign_wizard.step.recipients": {"ru": "Получатели", "en": "Recipients"},
+    "campaign_wizard.step.message": {"ru": "Сообщение", "en": "Message"},
+    "campaign_wizard.step.attachments": {"ru": "Вложения", "en": "Attachments"},
+    "campaign_wizard.step.sending_options": {"ru": "Параметры отправки", "en": "Sending options"},
+    "campaign_wizard.step.preview": {"ru": "Предпросмотр", "en": "Preview"},
+    "campaign_wizard.step.confirmation": {"ru": "Подтверждение", "en": "Confirmation"},
+    "campaign_wizard.back_button": {"ru": "Назад", "en": "Back"},
+    "campaign_wizard.next_button": {"ru": "Далее", "en": "Next"},
+    "campaign_wizard.cancel_button": {"ru": "Отмена", "en": "Cancel"},
+    "campaign_wizard.start_button": {"ru": "Начать рассылку", "en": "Start campaign"},
+    "campaign_wizard.recipients.hint": {
+        "ru": "Добавьте получателей: @username, ID, ссылки t.me или номера телефонов в международном формате.",
+        "en": "Add recipients: @username, ID, t.me links, or international-format phone numbers.",
+    },
+    "campaign_wizard.message.hint": {
+        "ru": "Составьте текст сообщения. {{name}} будет заменено на имя получателя при отправке.",
+        "en": "Write the message text. {{name}} will be replaced with the recipient's name when sending.",
+    },
+    "campaign_wizard.message.open_editor_button": {"ru": "✏  Открыть редактор", "en": "✏  Open editor"},
+    "campaign_wizard.message.empty": {"ru": "Сообщение ещё не задано.", "en": "No message text yet."},
+    "campaign_wizard.sending_options.hint": {
+        "ru": "Интервал между отправками сообщений (в секундах). Это общая настройка приложения.",
+        "en": "The interval between sends, in seconds. This is a shared application setting.",
+    },
+    "campaign_wizard.confirmation.summary": {
+        "ru": (
+            "Получателей: {recipients}\n"
+            "Вложений: {attachments}\n"
+            "Интервал между отправками: {min}–{max} сек\n\n"
+            "Нажмите «Начать рассылку», чтобы запустить кампанию."
+        ),
+        "en": (
+            "Recipients: {recipients}\n"
+            "Attachments: {attachments}\n"
+            "Interval between sends: {min}–{max}s\n\n"
+            "Click “Start campaign” to launch the campaign."
+        ),
+    },
 
     # ---- main_window: accounts page ----------------------------------------
     "main_window.accounts_page.title": {"ru": "Аккаунты", "en": "Accounts"},

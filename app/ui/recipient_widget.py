@@ -133,6 +133,13 @@ class RecipientWidget(QWidget):
     def valid_recipients(self) -> List[ParsedRecipient]:
         return self._last_summary.valid_recipients
 
+    def get_text(self) -> str:
+        return self._text_edit.toPlainText()
+
+    def set_text(self, text: str) -> None:
+        self._text_edit.setPlainText(text)
+        self.flush()
+
     def retranslate_ui(self) -> None:
         self._text_edit.setPlaceholderText(tr("recipient_widget.placeholder"))
         self._text_edit.setToolTip(tr("recipient_widget.tooltip"))

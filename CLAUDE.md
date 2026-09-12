@@ -24,6 +24,15 @@ described below.
     — rich-text message editor and its preview.
   - `login_dialog.py`, `dialogs.py` — account connection and confirmation
     dialogs.
+  - `campaign_wizard.py` — optional step-by-step Campaign Wizard (a modal
+    dialog reusing `RecipientWidget`/`MessageEditorDialog`/
+    `AttachmentsWidget`/`MessagePreviewWidget` instances, one per step, so
+    it holds no parsing/validation/formatting logic of its own). On
+    confirm it hands its collected state back to
+    `MainWindow._on_open_campaign_wizard_clicked`, which writes that state
+    into the same live Campaign-page widgets the fast single-page workflow
+    uses and calls the same `_on_start_requested` — both workflows share
+    one validation/start path and one live-progress UI.
   - `theme.py` — light/dark theme tokens and QSS stylesheet generation
     (generated at runtime, not shipped as static `.qss` files).
   - `icons.py`, `thumbnails.py` — hand-drawn `QPainter` icon set (including
@@ -85,7 +94,7 @@ described below.
   `MainWindow.retranslate_ui()` the same way theme switching already
   dispatches `apply_theme()`. Deliberately not gettext or Qt Linguist
   (.ts/.qm + lupdate/lrelease) — this app has no other use for either.
-- `tests/` — pytest + pytest-asyncio (`asyncio_mode = auto`), 442 tests,
+- `tests/` — pytest + pytest-asyncio (`asyncio_mode = auto`), 456 tests,
   using `tests/mocks/mock_telegram_client.py` and
   `tests/mocks/fake_client_manager.py` instead of a real Telegram
   connection. CI runs this suite on `windows-latest` with
@@ -111,7 +120,7 @@ reproduced with a failing test first, then fixed.
 
 **Tests.** After any code change, run the targeted test file, then the
 full suite (`pytest tests/ -v`). Don't delete or weaken existing tests just
-to make the suite pass. The current baseline is 442 passed, 0 failures —
+to make the suite pass. The current baseline is 456 passed, 0 failures —
 if that number changes, know exactly why before saying the change is done.
 
 **GUI.** Never block the Qt event loop or the asyncio event loop.

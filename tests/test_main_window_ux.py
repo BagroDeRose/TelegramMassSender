@@ -284,6 +284,50 @@ async def test_delete_preset_declined_keeps_it(qapp, tmp_path):
     assert len(presets.list_presets(window._preset_repo)) == 1
 
 
+async def test_campaign_wizard_accept_writes_state_and_reuses_start_path(qapp, tmp_path):
+    # The wizard must never start a campaign itself -- it hands its
+    # collected state to the exact same _on_start_requested the fast
+    # (single-page) workflow's Start button calls, so both paths share one
+    # validation/start implementation.
+    from app.ui.campaign_wizard import WizardResult
+
+    window = _make_window(tmp_path)
+    photo = tmp_path / "photo.jpg"
+    photo.write_bytes(b"x")
+    result = WizardResult(
+        recipients_text="@testuser",
+        message_text="Hello {name}",
+        message_entities=[],
+        attachment_paths=[photo],
+    )
+
+    with patch("app.ui.main_window.CampaignWizardDialog") as mock_wizard_cls, \
+         patch.object(window, "_on_start_requested") as mock_start:
+        instance = mock_wizard_cls.return_value
+        instance.exec.return_value = QDialog.DialogCode.Accepted
+        instance.result_state.return_value = result
+        window._on_open_campaign_wizard_clicked()
+
+    assert window._recipient_widget.get_text() == "@testuser"
+    assert window._message_text == "Hello {name}"
+    assert [a.path for a in window._attachments_widget.get_attachments()] == [photo]
+    mock_start.assert_called_once()
+
+
+async def test_campaign_wizard_cancelled_does_not_touch_state_or_start(qapp, tmp_path):
+    window = _make_window(tmp_path)
+    window._message_text = "unchanged"
+
+    with patch("app.ui.main_window.CampaignWizardDialog") as mock_wizard_cls, \
+         patch.object(window, "_on_start_requested") as mock_start:
+        instance = mock_wizard_cls.return_value
+        instance.exec.return_value = QDialog.DialogCode.Rejected
+        window._on_open_campaign_wizard_clicked()
+
+    assert window._message_text == "unchanged"
+    mock_start.assert_not_called()
+
+
 async def test_start_button_disabled_while_campaign_running(qapp, tmp_path):
     # Test Send was removed (redundant with adding a test recipient and
     # starting a real campaign, per the second UX pass) -- this replaces

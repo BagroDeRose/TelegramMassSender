@@ -64,6 +64,7 @@ from app.ui import theme
 from app.ui.account_widget import AccountWidget
 from app.ui.attachments_widget import AttachmentsWidget
 from app.ui.campaign_controls import CampaignControlsWidget
+from app.ui.campaign_wizard import CampaignWizardDialog
 from app.ui.dialogs import (
     confirm_delete_account,
     confirm_delete_preset,
@@ -298,6 +299,7 @@ class MainWindow(QMainWindow):
         _retranslate_page_header(
             self._campaign_page_header, tr("main_window.campaign_page.title"), tr("main_window.campaign_page.subtitle")
         )
+        self._open_wizard_button.setText(tr("main_window.campaign_page.open_wizard_button"))
         _retranslate_card_title(self._recipients_card, tr("main_window.campaign_page.recipients_card"))
         self._open_editor_button.setText(tr("main_window.campaign_page.open_editor_button"))
         self._open_editor_button.setToolTip(tr("main_window.campaign_page.open_editor_tooltip"))
@@ -450,7 +452,16 @@ class MainWindow(QMainWindow):
         self._campaign_page_header = _page_header(
             tr("main_window.campaign_page.title"), tr("main_window.campaign_page.subtitle")
         )
-        layout.addWidget(self._campaign_page_header)
+        header_row = QHBoxLayout()
+        header_row.addWidget(self._campaign_page_header, 1)
+        # Optional entry point into the step-by-step wizard -- the cards
+        # below (Recipients/Message/Attachments/Campaign) are the existing
+        # fast, single-page workflow and are completely untouched by this.
+        self._open_wizard_button = QPushButton(tr("main_window.campaign_page.open_wizard_button"), page)
+        self._open_wizard_button.setObjectName("ghostButton")
+        self._open_wizard_button.clicked.connect(self._on_open_campaign_wizard_clicked)
+        header_row.addWidget(self._open_wizard_button, 0, Qt.AlignmentFlag.AlignTop)
+        layout.addLayout(header_row)
 
         self._recipient_count_label = QLabel("0", page)
         self._recipient_count_label.setObjectName("cardCount")
@@ -972,6 +983,30 @@ class MainWindow(QMainWindow):
             return
         presets.delete_preset(self._preset_repo, preset.id)
         self._refresh_presets_combo()
+
+    # ---- campaign wizard ---------------------------------------------------
+
+    def _on_open_campaign_wizard_clicked(self) -> None:
+        dialog = CampaignWizardDialog(self._service.settings_repository, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        result = dialog.result_state()
+        # Write the wizard's collected state into the exact same live
+        # widgets/fields the fast workflow uses, then reuse its own Start
+        # path -- so both workflows validate and start a campaign through
+        # one code path (_on_start_requested), never two.
+        self._recipient_widget.set_text(result.recipients_text)
+        self._message_text = result.message_text
+        self._message_entities = result.message_entities
+        self._attachments_widget.clear()
+        for path in result.attachment_paths:
+            self._attachments_widget.add_file(path)
+        self._update_message_preview()
+        self._navigate_to_page(_PAGE_CAMPAIGN)
+        settings = self._service.settings_repository.load_app_settings()
+        self._campaign_controls.set_interval_summary(settings.min_delay_seconds, settings.max_delay_seconds)
+        self._load_settings_into_page(settings)
+        self._on_start_requested()
 
     def _on_recipients_changed(self, summary) -> None:
         self._recipient_count_label.setText(str(len(summary.valid_recipients)))

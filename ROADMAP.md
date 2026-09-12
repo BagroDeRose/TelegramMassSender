@@ -260,16 +260,39 @@ Still deferred.
 
 ## Campaign Wizard
 
-- [ ] Introduce optional step-by-step campaign workflow
-- [ ] Recipients
-- [ ] Message
-- [ ] Attachments
-- [ ] Sending options
-- [ ] Preview
-- [ ] Confirmation
-- [ ] Sending
-- [ ] Results
-- [ ] Preserve a fast workflow for experienced users
+- [x] Introduce optional step-by-step campaign workflow — new
+      `app/ui/campaign_wizard.py::CampaignWizardDialog`, opened via a
+      "Мастер кампании" / "Campaign Wizard" button on the Campaign page
+      header (`app/ui/main_window.py`). Every step reuses the exact
+      widget classes the existing single-page workflow already uses
+      (`RecipientWidget`, `MessageEditorDialog`, `AttachmentsWidget`,
+      `MessagePreviewWidget`) — no parsing/validation/formatting logic is
+      duplicated in the wizard
+- [x] Recipients
+- [x] Message
+- [x] Attachments
+- [x] Sending options — the shared interval (min/max delay) setting;
+      there is no other per-campaign "sending option" in this app today
+- [x] Preview
+- [x] Confirmation
+- [x] Sending
+- [x] Results
+- [x] Preserve a fast workflow for experienced users — interpretation:
+      "Sending" and "Results" are the spec's last two steps, but are
+      deliberately **not** separate wizard-internal pages. MainWindow
+      already owns one live-progress UI (`CampaignControlsWidget` + the
+      journal + the Results page) wired to pause/resume/stop and
+      FloodWait handling; duplicating that inside a modal wizard dialog
+      would either re-implement that machinery or run two UIs off the
+      same `CampaignManager` signals at once. Instead, confirming the
+      wizard closes it and hands its collected state to `MainWindow`
+      (`_on_open_campaign_wizard_clicked`), which writes that state into
+      the same live Campaign-page widgets the fast workflow uses and
+      calls the exact same start path (`_on_start_requested`) — so
+      Sending/Results are the existing Campaign/Results pages, and both
+      workflows share one validation/start implementation. The fast,
+      single-page workflow itself (Recipients/Message/Attachments/
+      Campaign cards) is completely untouched by this feature
 
 ---
 
