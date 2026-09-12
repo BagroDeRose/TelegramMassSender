@@ -707,3 +707,83 @@ def test_repeated_add_reorder_remove_leaves_no_stale_tile_widgets(qapp, tmp_path
         assert id(item) in widget._tiles
         tile = widget._tiles[id(item)]
         assert tile.widget is widget._list.itemWidget(item)
+
+
+# ---- external file drag-and-drop (stage 3 correction pass) ------------------
+#
+# This behavior (dropping local files, e.g. from Explorer, onto the
+# attachments area) already existed since the original stage 3 commit but had
+# no test coverage at all -- added here per the explicit requirement that it
+# must keep working through the drag-to-reorder fixes.
+
+
+def _make_drop_event(paths, pos=None):
+    from PySide6.QtCore import QMimeData, QPointF, QUrl
+    from PySide6.QtCore import Qt as QtC
+    from PySide6.QtGui import QDropEvent
+    from PySide6.QtWidgets import QApplication as QApp
+
+    mime = QMimeData()
+    mime.setUrls([QUrl.fromLocalFile(str(p)) for p in paths])
+    event = QDropEvent(
+        pos or QPointF(5, 5),
+        QtC.DropAction.CopyAction,
+        mime,
+        QApp.mouseButtons(),
+        QApp.keyboardModifiers(),
+    )
+    # QDropEvent only holds a raw pointer to the QMimeData it's given, not
+    # a reference that keeps it alive -- without this, `mime` is garbage
+    # collected as soon as this function returns (nothing else in Python
+    # holds it), and the event's own mimeData() access later becomes a
+    # real Windows access violation (use-after-free), not a Python
+    # exception. Tying its lifetime to the event object it's used with is
+    # the simplest fix.
+    event._mime_keepalive = mime
+    return event
+
+
+def test_dropping_external_files_onto_empty_widget_adds_them(qapp, tmp_path):
+    widget = AttachmentsWidget()
+    a = tmp_path / "a.pdf"
+    a.write_bytes(b"x")
+    b = tmp_path / "b.pdf"
+    b.write_bytes(b"x")
+
+    event = _make_drop_event([a, b])
+    widget.dropEvent(event)
+
+    assert [x.path for x in widget.get_attachments()] == [a, b]
+
+
+def test_dropping_external_files_onto_populated_list_adds_them(qapp, tmp_path):
+    widget, paths = _make_widget_with_files(tmp_path, ["a.pdf"])
+    new_file = tmp_path / "b.pdf"
+    new_file.write_bytes(b"x")
+
+    event = _make_drop_event([new_file])
+    widget._list.dropEvent(event)
+
+    assert [x.path for x in widget.get_attachments()] == [paths[0], new_file]
+
+
+def test_dropping_a_duplicate_external_file_is_ignored(qapp, tmp_path):
+    widget, paths = _make_widget_with_files(tmp_path, ["a.pdf"])
+
+    event = _make_drop_event([paths[0]])
+    widget._list.dropEvent(event)
+
+    assert [x.path for x in widget.get_attachments()] == [paths[0]]
+
+
+def test_files_dropped_signal_is_wired_to_add_file(qapp, tmp_path):
+    # Proves the _ReorderableListWidget.files_dropped -> AttachmentsWidget
+    # wiring itself (connect() in __init__), not just that
+    # _on_files_dropped_on_list works when called directly.
+    widget, paths = _make_widget_with_files(tmp_path, ["a.pdf"])
+    new_file = tmp_path / "b.pdf"
+    new_file.write_bytes(b"x")
+
+    widget._list.files_dropped.emit([str(new_file)])
+
+    assert [x.path for x in widget.get_attachments()] == [paths[0], new_file]
