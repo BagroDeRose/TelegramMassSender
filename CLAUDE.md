@@ -17,12 +17,18 @@ described below.
 - `app/ui/` — PySide6 widgets/dialogs/pages:
   - `main_window.py` — top-level window, orchestrates the service layer and
     all pages; sidebar navigation between Campaign/Accounts/Results/Settings.
-    The Results page's Retry (v1.6) lists only `SendItemStatus.FAILED`
-    items from `_report_source` and relaunches a retry through the exact
-    same `_start_campaign` every other start path (fast workflow,
-    Campaign Wizard) already shares, reusing the message/attachments/
-    account captured in `_last_campaign_context` when that campaign
-    originally started -- never whatever is currently in the page's boxes.
+    The Results page's recipient-results list (v1.6 Retry, v1.7 Filter
+    results) shows `_report_source`'s items filtered by a combo (default:
+    Failed, preserving Retry's original behavior) -- only FAILED rows are
+    ever checkable, regardless of the active filter. Retry relaunches
+    through the exact same `_start_campaign` every other start path (fast
+    workflow, Campaign Wizard) already shares, reusing the message/
+    attachments/account captured in `_last_campaign_context` when that
+    campaign originally started -- never whatever is currently in the
+    page's boxes; "retry all failures" always means every actual failure,
+    independent of the filter. Duration is frozen once at completion
+    (`_last_campaign_duration_seconds`) since `CampaignControlsWidget.
+    elapsed_seconds()` keeps counting up and can't be re-read later.
   - `sidebar.py`, `account_widget.py`, `recipient_widget.py`,
     `attachments_widget.py`, `journal_widget.py`, `stat_card.py`,
     `empty_state.py` — page/widget components.
@@ -118,7 +124,7 @@ described below.
   `MainWindow.retranslate_ui()` the same way theme switching already
   dispatches `apply_theme()`. Deliberately not gettext or Qt Linguist
   (.ts/.qm + lupdate/lrelease) — this app has no other use for either.
-- `tests/` — pytest + pytest-asyncio (`asyncio_mode = auto`), 512 tests,
+- `tests/` — pytest + pytest-asyncio (`asyncio_mode = auto`), 521 tests,
   using `tests/mocks/mock_telegram_client.py` and
   `tests/mocks/fake_client_manager.py` instead of a real Telegram
   connection. CI runs this suite on `windows-latest` with
@@ -144,7 +150,7 @@ reproduced with a failing test first, then fixed.
 
 **Tests.** After any code change, run the targeted test file, then the
 full suite (`pytest tests/ -v`). Don't delete or weaken existing tests just
-to make the suite pass. The current baseline is 512 passed, 0 failures —
+to make the suite pass. The current baseline is 521 passed, 0 failures —
 if that number changes, know exactly why before saying the change is done.
 
 **GUI.** Never block the Qt event loop or the asyncio event loop.

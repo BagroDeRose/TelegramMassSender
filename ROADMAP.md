@@ -449,16 +449,36 @@ Still deferred.
 
 ## Results
 
-- [ ] Improve campaign statistics
-- [ ] Sent count
-- [ ] Failed count
-- [ ] Skipped count
-- [ ] Duration
-- [ ] Detailed failure categories
-- [ ] Filter results
-- [ ] Export all results
-- [ ] Export only failures
-- [ ] Retry failed recipients from Results
+- [x] Improve campaign statistics
+- [x] Sent count — already shown via the existing stat cards; unchanged
+- [x] Failed count — already shown via the existing stat cards; unchanged
+- [x] Skipped count — already shown via the existing stat cards; unchanged
+- [x] Duration — frozen once, right when the campaign finishes
+      (`CampaignControlsWidget.elapsed_seconds()`, read into
+      `MainWindow._last_campaign_duration_seconds` since the live timer
+      keeps counting up afterward and can't be re-read later); shown on
+      the Results page, survives a language switch
+- [x] Detailed failure categories — the current campaign's FAILED items
+      grouped by their (already-localized) error message, e.g.
+      "Пользователь не найден: 2; Заблокирован: 1" — reuses the exact
+      error text already produced by `app.campaign.campaign_manager`, no
+      new categorization taxonomy invented
+- [x] Filter results — the Retry section (v1.6) is now a general
+      recipient-results browser: a filter combo (Все/Отправлено/Ошибки/
+      Пропущено), defaulting to "Ошибки" to preserve Retry's original
+      behavior exactly. Only FAILED rows are ever checkable, regardless
+      of which filter is active, so "select failures to retry" stays well
+      defined even under the "Все" filter
+- [x] Export all results — already implemented before this stage
+      (`_on_export_report_requested`/"Экспорт CSV-отчёта"); unchanged
+- [x] Export only failures — new "Экспортировать только ошибки" button,
+      reuses the existing `write_csv_report` (already generic over any
+      `List[SendItem]`) over just the FAILED subset -- no new export
+      implementation
+- [x] Retry failed recipients from Results — already implemented in the
+      Campaign Controls/Retry stages (v1.6); "Повторить все ошибки" now
+      always retries every actual failure regardless of the active
+      filter, not just what happens to be visible
 
 ## Structured Logging
 

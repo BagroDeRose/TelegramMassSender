@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from PySide6.QtCore import QUrl, Qt
 from PySide6.QtGui import QDesktopServices
@@ -68,7 +68,7 @@ from app.telegram.template import expand_name_placeholder
 from app.ui import theme
 from app.ui.account_widget import AccountWidget
 from app.ui.attachments_widget import AttachmentsWidget
-from app.ui.campaign_controls import CampaignControlsWidget
+from app.ui.campaign_controls import CampaignControlsWidget, format_duration
 from app.ui.campaign_wizard import CampaignWizardDialog
 from app.ui.dialogs import (
     confirm_delete_account,
@@ -94,6 +94,19 @@ WINDOW_TITLE = "Telegram Mass Sender"
 _MIN_WINDOW_SIZE = (1040, 760)
 
 _PAGE_CAMPAIGN, _PAGE_ACCOUNTS, _PAGE_RESULTS, _PAGE_SETTINGS = range(4)
+
+# Results page recipient-list filter values (v1.7) -- _RESULTS_FILTER_FAILED
+# is the default, preserving the exact "failed recipients only" behavior
+# Retry (v1.6) originally shipped with.
+_RESULTS_FILTER_ALL = "all"
+_RESULTS_FILTER_SENT = "sent"
+_RESULTS_FILTER_FAILED = "failed"
+_RESULTS_FILTER_SKIPPED = "skipped"
+_RESULTS_FILTER_STATUS = {
+    _RESULTS_FILTER_SENT: SendItemStatus.SENT,
+    _RESULTS_FILTER_FAILED: SendItemStatus.FAILED,
+    _RESULTS_FILTER_SKIPPED: SendItemStatus.SKIPPED,
+}
 
 
 def _format_duration(total_seconds: int) -> str:
@@ -188,6 +201,11 @@ class MainWindow(QMainWindow):
         # a smaller recipient list. Also not cleared on finish, same
         # reasoning as _report_source.
         self._last_campaign_context: Optional[tuple] = None
+        # Frozen at the moment the campaign finished -- CampaignControlsWidget.
+        # elapsed_seconds() keeps growing after that point (it just reads
+        # wall-clock time since start), so it can't be re-read later for
+        # display (e.g. on a language switch); this is the one snapshot.
+        self._last_campaign_duration_seconds: Optional[float] = None
         # Guards against a second "Использовать" click starting a new
         # switch while one is still in flight -- see _switch_account.
         self._account_switch_in_progress = False
@@ -352,10 +370,17 @@ class MainWindow(QMainWindow):
         self._stat_failed.set_label(tr("main_window.results_page.stat_failed"))
         self._stat_skipped.set_label(tr("main_window.results_page.stat_skipped"))
         self._results_export_button.setText(tr("main_window.results_page.export_csv_button"))
+        self._export_failures_button.setText(tr("main_window.results_page.export_failures_button"))
         self._save_report_button.setText(tr("main_window.results_page.save_report_button"))
-        self._failed_section_title.setText(tr("main_window.results_page.failed_section").upper())
+        self._failed_section_title.setText(tr("main_window.results_page.recipients_section").upper())
+        self._results_filter_label.setText(tr("main_window.results_page.filter_label"))
+        self._results_filter_combo.setItemText(0, tr("main_window.results_page.filter_all"))
+        self._results_filter_combo.setItemText(1, tr("main_window.results_page.filter_sent"))
+        self._results_filter_combo.setItemText(2, tr("main_window.results_page.filter_failed"))
+        self._results_filter_combo.setItemText(3, tr("main_window.results_page.filter_skipped"))
         self._retry_selected_button.setText(tr("main_window.results_page.retry_selected_button"))
         self._retry_all_button.setText(tr("main_window.results_page.retry_all_button"))
+        self._update_duration_label()
         self._refresh_failed_items()  # row text is baked in per-item, like saved-report cards
         self._saved_reports_section_title.setText(tr("main_window.results_page.saved_reports_section").upper())
         retranslate_empty_state(
@@ -605,6 +630,10 @@ class MainWindow(QMainWindow):
         self._results_status_label.setObjectName("statusLabel")
         layout.addWidget(self._results_status_label)
 
+        self._results_duration_label = QLabel("", page)
+        self._results_duration_label.setObjectName("helperText")
+        layout.addWidget(self._results_duration_label)
+
         stats_row = QHBoxLayout()
         stats_row.setSpacing(SPACE_MD)
         self._stat_total = StatCard(tr("main_window.results_page.stat_total"))
@@ -617,22 +646,49 @@ class MainWindow(QMainWindow):
         self._results_stats_widget.setLayout(stats_row)
         layout.addWidget(self._results_stats_widget)
 
+        self._failure_categories_label = QLabel("", page)
+        self._failure_categories_label.setWordWrap(True)
+        self._failure_categories_label.setObjectName("helperText")
+        self._failure_categories_label.setVisible(False)
+        layout.addWidget(self._failure_categories_label)
+
         export_row = QHBoxLayout()
         self._results_export_button = QPushButton(tr("main_window.results_page.export_csv_button"), page)
         self._results_export_button.setObjectName("primaryButton")
         self._results_export_button.setEnabled(False)
         self._results_export_button.clicked.connect(self._on_export_report_requested)
+        self._export_failures_button = QPushButton(tr("main_window.results_page.export_failures_button"), page)
+        self._export_failures_button.setEnabled(False)
+        self._export_failures_button.clicked.connect(self._on_export_failures_clicked)
         self._save_report_button = QPushButton(tr("main_window.results_page.save_report_button"), page)
         self._save_report_button.setEnabled(False)
         self._save_report_button.clicked.connect(self._on_save_report_clicked)
         export_row.addWidget(self._results_export_button)
+        export_row.addWidget(self._export_failures_button)
         export_row.addWidget(self._save_report_button)
         export_row.addStretch(1)
         layout.addLayout(export_row)
 
-        self._failed_section_title = _section_title(tr("main_window.results_page.failed_section"))
+        self._failed_section_title = _section_title(tr("main_window.results_page.recipients_section"))
         self._failed_section_title.setVisible(False)
         layout.addWidget(self._failed_section_title)
+
+        filter_row = QHBoxLayout()
+        self._results_filter_label = QLabel(tr("main_window.results_page.filter_label"), page)
+        filter_row.addWidget(self._results_filter_label)
+        self._results_filter_combo = QComboBox(page)
+        self._results_filter_combo.addItem(tr("main_window.results_page.filter_all"), _RESULTS_FILTER_ALL)
+        self._results_filter_combo.addItem(tr("main_window.results_page.filter_sent"), _RESULTS_FILTER_SENT)
+        self._results_filter_combo.addItem(tr("main_window.results_page.filter_failed"), _RESULTS_FILTER_FAILED)
+        self._results_filter_combo.addItem(tr("main_window.results_page.filter_skipped"), _RESULTS_FILTER_SKIPPED)
+        self._results_filter_combo.setCurrentIndex(2)  # Failed -- the original Retry (v1.6) default
+        self._results_filter_combo.currentIndexChanged.connect(lambda _i: self._refresh_failed_items())
+        filter_row.addWidget(self._results_filter_combo)
+        filter_row.addStretch(1)
+        self._results_filter_row_widget = QWidget(page)
+        self._results_filter_row_widget.setLayout(filter_row)
+        self._results_filter_row_widget.setVisible(False)
+        layout.addWidget(self._results_filter_row_widget)
 
         self._failed_items_list = QListWidget(page)
         self._failed_items_list.setMaximumHeight(180)
@@ -1451,6 +1507,8 @@ class MainWindow(QMainWindow):
 
     def _on_campaign_finished(self, status_value: str) -> None:
         self._campaign_controls.stop_elapsed_timer()
+        self._last_campaign_duration_seconds = self._campaign_controls.elapsed_seconds()
+        self._update_duration_label()
         self._campaign_controls.set_running_state(False)
         self._campaign_controls.set_status_text("")
         self._account_widget.set_enabled_switching(True)
@@ -1530,35 +1588,72 @@ class MainWindow(QMainWindow):
 
     # ---- retry --------------------------------------------------------------
 
+    def _update_duration_label(self) -> None:
+        if self._last_campaign_duration_seconds is not None:
+            self._results_duration_label.setText(
+                tr("main_window.results_page.duration_label", duration=format_duration(self._last_campaign_duration_seconds))
+            )
+        else:
+            self._results_duration_label.setText("")
+
     def _refresh_failed_items(self) -> None:
+        all_items = self._report_source.items if self._report_source is not None else []
+        failed_items = [item for item in all_items if item.status == SendItemStatus.FAILED]
+
+        filter_value = self._results_filter_combo.currentData()
+        if filter_value == _RESULTS_FILTER_ALL:
+            displayed_items = all_items
+        else:
+            target_status = _RESULTS_FILTER_STATUS.get(filter_value, SendItemStatus.FAILED)
+            displayed_items = [item for item in all_items if item.status == target_status]
+
         self._failed_items_list.blockSignals(True)
         self._failed_items_list.clear()
-        failed_items = (
-            [item for item in self._report_source.items if item.status == SendItemStatus.FAILED]
-            if self._report_source is not None
-            else []
-        )
-        for item in failed_items:
-            list_item = QListWidgetItem(f"{item.recipient.display_label}  —  {item.error or ''}")
-            list_item.setFlags(list_item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            list_item.setCheckState(Qt.CheckState.Unchecked)
+        for item in displayed_items:
+            text = item.recipient.display_label
+            if item.error:
+                text += f"  —  {item.error}"
+            list_item = QListWidgetItem(text)
+            if item.status == SendItemStatus.FAILED:
+                list_item.setFlags(list_item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+                list_item.setCheckState(Qt.CheckState.Unchecked)
+            else:
+                list_item.setFlags(list_item.flags() & ~Qt.ItemFlag.ItemIsUserCheckable)
             list_item.setData(Qt.ItemDataRole.UserRole, item)
             self._failed_items_list.addItem(list_item)
         self._failed_items_list.blockSignals(False)
 
-        has_failed = bool(failed_items)
-        self._failed_section_title.setVisible(has_failed)
-        self._failed_items_list.setVisible(has_failed)
-        self._retry_row_widget.setVisible(has_failed)
-        self._retry_all_button.setEnabled(has_failed)
+        has_any = bool(all_items)
+        self._failed_section_title.setVisible(has_any)
+        self._results_filter_row_widget.setVisible(has_any)
+        self._failed_items_list.setVisible(has_any)
+        self._retry_row_widget.setVisible(bool(failed_items))
+        self._retry_all_button.setEnabled(bool(failed_items))
+        self._export_failures_button.setEnabled(bool(failed_items))
         self._update_retry_selected_enabled()
+        self._update_failure_categories(failed_items)
+
+    def _update_failure_categories(self, failed_items: List) -> None:
+        if not failed_items:
+            self._failure_categories_label.setVisible(False)
+            return
+        counts: Dict[str, int] = {}
+        for item in failed_items:
+            reason = item.error or tr("main_window.results_page.unknown_error")
+            counts[reason] = counts.get(reason, 0) + 1
+        parts = [f"{reason}: {count}" for reason, count in sorted(counts.items(), key=lambda kv: -kv[1])]
+        self._failure_categories_label.setText(
+            tr("main_window.results_page.failure_categories", categories="; ".join(parts))
+        )
+        self._failure_categories_label.setVisible(True)
 
     def _on_failed_item_check_changed(self, _item: QListWidgetItem) -> None:
         self._update_retry_selected_enabled()
 
     def _update_retry_selected_enabled(self) -> None:
         any_checked = any(
-            self._failed_items_list.item(i).checkState() == Qt.CheckState.Checked
+            self._failed_items_list.item(i).flags() & Qt.ItemFlag.ItemIsUserCheckable
+            and self._failed_items_list.item(i).checkState() == Qt.CheckState.Checked
             for i in range(self._failed_items_list.count())
         )
         self._retry_selected_button.setEnabled(any_checked)
@@ -1567,15 +1662,19 @@ class MainWindow(QMainWindow):
         recipients = [
             self._failed_items_list.item(i).data(Qt.ItemDataRole.UserRole).recipient
             for i in range(self._failed_items_list.count())
-            if self._failed_items_list.item(i).checkState() == Qt.CheckState.Checked
+            if self._failed_items_list.item(i).flags() & Qt.ItemFlag.ItemIsUserCheckable
+            and self._failed_items_list.item(i).checkState() == Qt.CheckState.Checked
         ]
         self._retry_recipients(recipients)
 
     def _on_retry_all_failures_clicked(self) -> None:
-        recipients = [
-            self._failed_items_list.item(i).data(Qt.ItemDataRole.UserRole).recipient
-            for i in range(self._failed_items_list.count())
-        ]
+        # Reads directly from _report_source rather than the (possibly
+        # differently-filtered) list widget, so "retry all failures"
+        # always means every actual failure regardless of what the
+        # results filter above happens to be showing right now.
+        if self._report_source is None:
+            return
+        recipients = [item.recipient for item in self._report_source.items if item.status == SendItemStatus.FAILED]
         self._retry_recipients(recipients)
 
     def _retry_recipients(self, recipients) -> None:
@@ -1760,6 +1859,24 @@ class MainWindow(QMainWindow):
             return
         try:
             write_csv_report(self._report_source.items, Path(path_str))
+        except OSError as exc:
+            show_error(self, tr("main_window.dialogs.export_report_title"), tr("main_window.dialogs.export_report_write_failed", error=exc))
+            return
+        show_info(self, tr("main_window.dialogs.export_report_title"), tr("main_window.dialogs.export_report_saved", path=path_str))
+
+    def _on_export_failures_clicked(self) -> None:
+        if self._report_source is None:
+            return
+        failed = [item for item in self._report_source.items if item.status == SendItemStatus.FAILED]
+        if not failed:
+            return
+        path_str, _ = QFileDialog.getSaveFileName(
+            self, tr("main_window.dialogs.export_report_title"), suggest_report_filename(), tr("main_window.dialogs.export_report_file_filter")
+        )
+        if not path_str:
+            return
+        try:
+            write_csv_report(failed, Path(path_str))
         except OSError as exc:
             show_error(self, tr("main_window.dialogs.export_report_title"), tr("main_window.dialogs.export_report_write_failed", error=exc))
             return

@@ -6,6 +6,7 @@ wiring into the preview, and the CampaignManager Qt-parent leak fix.
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -936,3 +937,106 @@ async def test_retry_blocked_while_a_campaign_is_already_running(qapp, tmp_path)
 
     mock_start.assert_not_called()
     mock_show_error.assert_called_once()
+
+
+async def test_results_filter_defaults_to_failed_only(qapp, tmp_path):
+    window = _make_window(tmp_path)
+    assert window._results_filter_combo.currentData() == "failed"
+
+
+async def test_results_filter_all_shows_every_item_but_only_failed_rows_are_checkable(qapp, tmp_path):
+    from PySide6.QtCore import Qt
+
+    window = _make_window(tmp_path)
+    window._report_source = _fake_report_source_with_two_failures()
+    window._refresh_failed_items()
+
+    window._results_filter_combo.setCurrentIndex(0)  # "All"
+    assert window._failed_items_list.count() == 3
+
+    checkable = [
+        bool(window._failed_items_list.item(i).flags() & Qt.ItemFlag.ItemIsUserCheckable)
+        for i in range(3)
+    ]
+    assert sum(checkable) == 2  # only the two FAILED rows
+
+
+async def test_results_filter_sent_shows_only_sent_items(qapp, tmp_path):
+    window = _make_window(tmp_path)
+    window._report_source = _fake_report_source_with_two_failures()
+    window._refresh_failed_items()
+
+    window._results_filter_combo.setCurrentIndex(1)  # "Sent"
+    assert window._failed_items_list.count() == 1
+    assert "alice_test" in window._failed_items_list.item(0).text()
+
+
+async def test_retry_all_ignores_the_current_filter(qapp, tmp_path):
+    # "Retry all failures" must always mean every actual failure, not just
+    # whatever the results filter happens to be showing right now.
+    window = _make_window(tmp_path)
+    window._report_source = _fake_report_source_with_two_failures()
+    window._refresh_failed_items()
+    window._results_filter_combo.setCurrentIndex(0)  # "All" -- not "Failed"
+    window._last_campaign_context = (MagicMock(), "hello", [], [], {})
+
+    with patch.object(window, "_start_campaign", new=AsyncMock()) as mock_start:
+        window._on_retry_all_failures_clicked()
+        await asyncio.sleep(0)
+
+    recipients_arg = mock_start.call_args[0][1]
+    assert sorted(r.value for r in recipients_arg) == ["bob_test", "carol_test"]
+
+
+async def test_failure_categories_groups_by_error_message(qapp, tmp_path):
+    window = _make_window(tmp_path)
+    window._report_source = _fake_report_source_with_two_failures()
+
+    window._refresh_failed_items()
+
+    assert window._failure_categories_label.isHidden() is False
+    text = window._failure_categories_label.text()
+    assert "Пользователь не найден: 1" in text
+    assert "Заблокирован: 1" in text
+
+
+async def test_failure_categories_hidden_without_failures(qapp, tmp_path):
+    window = _make_window(tmp_path)
+    assert window._failure_categories_label.isHidden() is True
+
+
+async def test_duration_label_set_on_campaign_finished(qapp, tmp_path):
+    from app.campaign.campaign_state import CampaignStatus
+
+    window = _make_window(tmp_path)
+    window._campaign_controls.start_elapsed_timer()
+    window._campaign_controls._campaign_start_time = datetime.now() - timedelta(seconds=90)
+
+    window._on_campaign_finished(CampaignStatus.COMPLETED.value)
+
+    assert "1 мин 30 сек" in window._results_duration_label.text() or "мин" in window._results_duration_label.text()
+
+
+async def test_export_failures_button_enabled_only_with_failures(qapp, tmp_path):
+    window = _make_window(tmp_path)
+    assert window._export_failures_button.isEnabled() is False
+
+    window._report_source = _fake_report_source_with_two_failures()
+    window._refresh_failed_items()
+    assert window._export_failures_button.isEnabled() is True
+
+
+async def test_export_failures_writes_only_failed_items(qapp, tmp_path):
+    window = _make_window(tmp_path)
+    window._report_source = _fake_report_source_with_two_failures()
+    window._refresh_failed_items()
+
+    out_path = tmp_path / "failures.csv"
+    with patch("app.ui.main_window.QFileDialog.getSaveFileName", return_value=(str(out_path), "")), \
+         patch("app.ui.main_window.show_info"):
+        window._on_export_failures_clicked()
+
+    content = out_path.read_text(encoding="utf-8-sig")
+    assert "bob_test" in content
+    assert "carol_test" in content
+    assert "alice_test" not in content

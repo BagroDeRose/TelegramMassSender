@@ -202,6 +202,15 @@ class CampaignControlsWidget(QWidget):
         self._tick_elapsed()  # one last update so the final elapsed time is accurate
         self._elapsed_timer.stop()
 
+    def elapsed_seconds(self) -> Optional[float]:
+        """Wall-clock time since start_elapsed_timer() was last called, or
+        None if it never has been -- read once by MainWindow right after
+        stop_elapsed_timer() to capture a campaign's final duration for
+        the Results page (v1.7)."""
+        if self._campaign_start_time is None:
+            return None
+        return (datetime.now() - self._campaign_start_time).total_seconds()
+
     def _tick_elapsed(self) -> None:
         if self._campaign_start_time is None:
             return
