@@ -482,17 +482,44 @@ Still deferred.
 
 ## Structured Logging
 
-- [ ] Use structured event types
-- [ ] CAMPAIGN_STARTED
-- [ ] RECIPIENT_RESOLVED
-- [ ] MESSAGE_SENT
-- [ ] ATTACHMENT_SENT
-- [ ] FLOOD_WAIT
-- [ ] RECIPIENT_FAILED
-- [ ] CAMPAIGN_COMPLETED
-- [ ] Never log credentials
-- [ ] Never log message contents
-- [ ] Never log sensitive session data
+- [x] Use structured event types — new `app/logging/events.py`
+      (`EventType` enum + `log_event()`); one JSON object per log line,
+      written through the exact same rotating, secret-scrubbing handler
+      `app/logging/logger.py` already sets up -- one logging pipeline,
+      not a second log file. Wired into `app/campaign/campaign_manager.py`
+      alongside (not replacing) its existing human-readable journal
+      messages
+- [x] CAMPAIGN_STARTED — recipient count, configured interval, max
+      retries, emitted once at the top of `_run()`
+- [x] RECIPIENT_RESOLVED — emitted right after a recipient successfully
+      resolves, before the send is attempted
+- [x] MESSAGE_SENT — emitted once a `SendItem` reaches `SENT`
+- [x] ATTACHMENT_SENT — emitted alongside `MESSAGE_SENT` whenever the
+      campaign has attachments, with the delivered-step count; this app's
+      send pipeline doesn't expose a separate per-attachment callback
+      (attachments are sent as part of one recipient's send, not as
+      discrete steps CampaignManager watches individually), so this is
+      the honest granularity available without a deeper rework of
+      `app.telegram.sender`/`media_sender`
+- [x] FLOOD_WAIT — wait duration + the recipient in flight when it hit,
+      emitted from the same `_handle_flood_wait` both the resolve-step
+      and the send-step already share
+- [x] RECIPIENT_FAILED — emitted once a `SendItem` reaches `FAILED`
+      (covers resolve failure, permanent errors, exhausted retries, and
+      the critical-error path), with the same already-localized error
+      text the journal already shows
+- [x] CAMPAIGN_COMPLETED — emitted once per run in `_run()`'s `finally`
+      block (covers COMPLETED/STOPPED/ERROR alike, not just the
+      happy-path finish), with final sent/failed/skipped/total counts
+- [x] Never log credentials — no event ever carries API ID/Hash, a
+      password, or session data; verified by a dedicated test asserting
+      no event's fields include `password`/`api_hash`/`session`
+- [x] Never log message contents — no event field ever carries the
+      message text/entities, only counts and recipient display labels
+      (already logged today via the existing journal messages)
+- [x] Never log sensitive session data — same `SecretScrubbingFilter`
+      every other log line already goes through applies to these lines
+      too, since they're written via the same logger
 
 ## Diagnostics
 

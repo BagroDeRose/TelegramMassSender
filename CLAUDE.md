@@ -113,7 +113,11 @@ described below.
 - `app/database/` — SQLite via `database.py`; `models.py`/`repositories.py`
   for accounts, settings, saved-report metadata, named presets, and named
   recipient groups.
-- `app/logging/` — rotating file logging with secret scrubbing.
+- `app/logging/` — `logger.py` (rotating file logging + secret scrubbing);
+  `events.py` (v1.7 structured logging — `EventType`/`log_event()`, one
+  JSON object per log line through the same rotating/scrubbing handler,
+  wired into `app/campaign/campaign_manager.py` alongside its existing
+  human-readable journal messages, never message text/credentials).
 - `app/i18n/` — Russian/English translation catalog and lookup:
   `translator.py` (`tr()`/`trn()`, active-language state following the
   same pattern as `app/ui/theme.py`'s active-theme state), `strings.py`
@@ -124,7 +128,7 @@ described below.
   `MainWindow.retranslate_ui()` the same way theme switching already
   dispatches `apply_theme()`. Deliberately not gettext or Qt Linguist
   (.ts/.qm + lupdate/lrelease) — this app has no other use for either.
-- `tests/` — pytest + pytest-asyncio (`asyncio_mode = auto`), 521 tests,
+- `tests/` — pytest + pytest-asyncio (`asyncio_mode = auto`), 527 tests,
   using `tests/mocks/mock_telegram_client.py` and
   `tests/mocks/fake_client_manager.py` instead of a real Telegram
   connection. CI runs this suite on `windows-latest` with
@@ -150,7 +154,7 @@ reproduced with a failing test first, then fixed.
 
 **Tests.** After any code change, run the targeted test file, then the
 full suite (`pytest tests/ -v`). Don't delete or weaken existing tests just
-to make the suite pass. The current baseline is 521 passed, 0 failures —
+to make the suite pass. The current baseline is 527 passed, 0 failures —
 if that number changes, know exactly why before saying the change is done.
 
 **GUI.** Never block the Qt event loop or the asyncio event loop.

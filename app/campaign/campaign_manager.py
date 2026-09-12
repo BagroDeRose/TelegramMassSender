@@ -39,6 +39,7 @@ from app.campaign.campaign_state import CampaignStateMachine, CampaignStatus
 from app.campaign.rate_limiter import RateLimiter
 from app.campaign.send_queue import SendItem, SendItemStatus, SendQueue
 from app.i18n import tr
+from app.logging.events import EventType, log_event
 from app.logging.logger import get_logger
 from app.recipients.parser import ParsedRecipient
 from app.telegram.media_sender import Attachment, SendProgress
@@ -221,6 +222,17 @@ class CampaignManager(QObject):
         self._state.transition(CampaignStatus.RUNNING)
         self._emit_state()
         self._log(tr("campaign_manager.journal.started", count=len(self._queue)))
+        log_event(
+            EventType.CAMPAIGN_STARTED,
+            recipient_count=len(self._queue),
+            # rate_limiter is duck-typed (only .next_delay() is a hard
+            # requirement -- see tests/test_campaign_manager.py's
+            # FakeRateLimiter), so these are read defensively rather than
+            # imposing a new required attribute on every caller.
+            min_delay_seconds=getattr(self._rate_limiter, "min_delay_seconds", None),
+            max_delay_seconds=getattr(self._rate_limiter, "max_delay_seconds", None),
+            max_retries=self._max_retries,
+        )
 
         try:
             while not self._stop_event.is_set():
@@ -242,6 +254,7 @@ class CampaignManager(QObject):
                 outcome = await self._attempt_send(item)
 
                 if outcome == "critical":
+                    log_event(EventType.RECIPIENT_FAILED, recipient=item.recipient.display_label, error=item.error)
                     self._state.transition(CampaignStatus.ERROR)
                     self._emit_state()
                     self._emit_progress(item)
@@ -256,6 +269,18 @@ class CampaignManager(QObject):
                     self._log(tr("campaign_manager.journal.paused_after_flood"))
                     self._emit_progress(item)
                     continue
+
+                if item.status == SendItemStatus.SENT:
+                    log_event(EventType.MESSAGE_SENT, recipient=item.recipient.display_label, attempts=item.attempts)
+                    if self._attachments:
+                        log_event(
+                            EventType.ATTACHMENT_SENT,
+                            recipient=item.recipient.display_label,
+                            attachment_count=len(self._attachments),
+                            steps_delivered=item.next_step,
+                        )
+                elif item.status == SendItemStatus.FAILED:
+                    log_event(EventType.RECIPIENT_FAILED, recipient=item.recipient.display_label, error=item.error)
 
                 self._emit_progress(item)
 
@@ -280,6 +305,15 @@ class CampaignManager(QObject):
                     self._state.transition(CampaignStatus.STOPPED)
                 self._emit_state()
                 self._log(tr("campaign_manager.journal.stopped"))
+            snapshot = self.snapshot()
+            log_event(
+                EventType.CAMPAIGN_COMPLETED,
+                status=self._state.status.value,
+                sent=snapshot.sent,
+                failed=snapshot.failed,
+                skipped=snapshot.skipped,
+                total=snapshot.total,
+            )
             self.finished.emit(self._state.status.value)
 
     async def _handle_flood_wait(self, item: SendItem, exc: FloodWaitError) -> str:
@@ -290,6 +324,7 @@ class CampaignManager(QObject):
         item.status = SendItemStatus.PENDING
         wait_seconds = int(exc.seconds)
         self._log(tr("campaign_manager.journal.flood_wait", seconds=wait_seconds))
+        log_event(EventType.FLOOD_WAIT, wait_seconds=wait_seconds, recipient=item.recipient.display_label)
         self.flood_wait_started.emit(wait_seconds)
         self._state.transition(CampaignStatus.WAITING_FOR_FLOOD)
         self._emit_state()
@@ -311,6 +346,7 @@ class CampaignManager(QObject):
 
         item.resolved_id = getattr(resolved.entity, "id", None)
         item.resolved_username = getattr(resolved.entity, "username", None)
+        log_event(EventType.RECIPIENT_RESOLVED, recipient=item.recipient.display_label, resolved_id=item.resolved_id)
         override_name = self._recipient_names.get(item.recipient.normalized_key)
         first_name = override_name or getattr(resolved.entity, "first_name", None)
         send_text, send_entities = expand_name_placeholder(self._text, self._entities, first_name)

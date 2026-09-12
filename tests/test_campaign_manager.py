@@ -112,6 +112,82 @@ async def test_current_item_changed_fires_once_per_recipient_in_order(qapp):
     assert seen == [("alice", 1, 3), ("bobby", 2, 3), ("carol", 3, 3)]
 
 
+def _logged_events(caplog):
+    import json
+
+    from app.logging.logger import LOGGER_NAME
+
+    events = []
+    for record in caplog.records:
+        if record.name == LOGGER_NAME and record.getMessage().startswith("EVENT "):
+            events.append(json.loads(record.getMessage()[len("EVENT "):]))
+    return events
+
+
+async def test_structured_events_fire_for_a_successful_campaign(qapp, caplog):
+    import logging
+
+    from app.logging.logger import LOGGER_NAME
+
+    manager, client = make_manager(["alice", "bobby"])
+    with caplog.at_level(logging.INFO, logger=LOGGER_NAME):
+        await run_to_finish(manager)
+
+    events = _logged_events(caplog)
+    kinds = [e["event"] for e in events]
+    assert kinds.count("CAMPAIGN_STARTED") == 1
+    assert kinds.count("RECIPIENT_RESOLVED") == 2
+    assert kinds.count("MESSAGE_SENT") == 2
+    assert kinds.count("CAMPAIGN_COMPLETED") == 1
+    completed = next(e for e in events if e["event"] == "CAMPAIGN_COMPLETED")
+    assert completed["sent"] == 2 and completed["failed"] == 0
+    # Never message text or credentials in any event's fields.
+    for event in events:
+        assert "text" not in event and "message" not in event
+        assert "password" not in event and "api_hash" not in event and "session" not in event
+
+
+async def test_structured_event_fires_for_a_failed_recipient(qapp, caplog):
+    import logging
+
+    from app.logging.logger import LOGGER_NAME
+
+    client = MockTelegramClient()
+    manager, client = make_manager(["alice", "bobby"], client=client)
+    client.entity_behavior["bobby"] = "not_found"
+    with caplog.at_level(logging.INFO, logger=LOGGER_NAME):
+        await run_to_finish(manager)
+
+    events = _logged_events(caplog)
+    failed_events = [e for e in events if e["event"] == "RECIPIENT_FAILED"]
+    assert len(failed_events) == 1
+    assert failed_events[0]["recipient"] == "@bobby"
+
+
+async def test_structured_flood_wait_event_fires(qapp, caplog):
+    import logging
+
+    from app.logging.logger import LOGGER_NAME
+
+    client = MockTelegramClient()
+
+    async def send_with_floodwait(entity, text, formatting_entities=None):
+        raise make_flood_wait(1)
+
+    client.send_message = send_with_floodwait
+    manager, client = make_manager(["alice"], client=client, delay=0.01)
+
+    with caplog.at_level(logging.INFO, logger=LOGGER_NAME):
+        manager.start()
+        await asyncio.sleep(0.05)
+        await manager.stop()
+
+    events = _logged_events(caplog)
+    flood_events = [e for e in events if e["event"] == "FLOOD_WAIT"]
+    assert len(flood_events) == 1
+    assert flood_events[0]["wait_seconds"] == 1
+
+
 async def test_permanent_error_marks_failed_but_continues(qapp):
     client = MockTelegramClient()
     manager, client = make_manager(["alice", "bobby", "carol"], client=client)
