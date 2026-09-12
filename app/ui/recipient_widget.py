@@ -1,12 +1,12 @@
-"""Recipient list input: paste/edit, import TXT, live validation summary
-(spec items 12-15, 44). Large lists are re-parsed on a short debounce
-timer rather than on every keystroke, so pasting/importing thousands of
-lines doesn't stall the UI thread.
+"""Recipient list input: paste/edit, import TXT/CSV, live validation
+summary (spec items 12-15, 44). Large lists are re-parsed on a short
+debounce timer rather than on every keystroke, so pasting/importing
+thousands of lines doesn't stall the UI thread.
 """
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from PySide6.QtCore import QTimer, Signal
 from PySide6.QtWidgets import (
@@ -21,8 +21,10 @@ from PySide6.QtWidgets import (
 )
 
 from app.i18n import tr, trn
+from app.recipients.csv_importer import CsvImportError, import_recipients_from_csv
 from app.recipients.importer import import_recipients_from_txt
 from app.recipients.parser import ParsedRecipient, ParseSummary, parse_recipient_lines
+from app.ui.dialogs import show_invalid_rows
 
 _DEBOUNCE_MS = 300
 
@@ -44,22 +46,40 @@ class RecipientWidget(QWidget):
         buttons = QHBoxLayout()
         self._import_button = QPushButton(tr("recipient_widget.import_txt_button"), self)
         self._import_button.clicked.connect(self._on_import_clicked)
+        self._import_csv_button = QPushButton(tr("recipient_widget.import_csv_button"), self)
+        self._import_csv_button.clicked.connect(self._on_import_csv_clicked)
         self._clear_button = QPushButton(tr("recipient_widget.clear_button"), self)
         self._clear_button.setObjectName("ghostButton")
         self._clear_button.clicked.connect(self._on_clear_clicked)
         buttons.addWidget(self._import_button)
+        buttons.addWidget(self._import_csv_button)
         buttons.addWidget(self._clear_button)
         buttons.addStretch(1)
         layout.addLayout(buttons)
 
+        summary_row = QHBoxLayout()
         self._summary_label = QLabel(self)
         self._summary_label.setWordWrap(True)
         self._summary_label.setObjectName("summaryLabel")
-        layout.addWidget(self._summary_label)
+        summary_row.addWidget(self._summary_label, 1)
+        self._review_invalid_button = QPushButton(tr("recipient_widget.review_invalid_button"), self)
+        self._review_invalid_button.setObjectName("ghostButton")
+        self._review_invalid_button.clicked.connect(self._on_review_invalid_clicked)
+        self._review_invalid_button.setVisible(False)
+        summary_row.addWidget(self._review_invalid_button)
+        layout.addLayout(summary_row)
 
         self._debounce_timer = QTimer(self)
         self._debounce_timer.setSingleShot(True)
         self._debounce_timer.timeout.connect(self._recompute_summary)
+
+        # normalized_key -> display name, from a CSV column that didn't
+        # parse as a recipient identifier itself (see app.recipients.
+        # csv_importer) -- overrides the {name} placeholder for that
+        # specific recipient at send time. Pruned in _recompute_summary()
+        # to only keys still present among the current valid recipients,
+        # so an override never outlives the row it came from.
+        self._name_overrides: Dict[str, str] = {}
 
         self._last_summary: ParseSummary = ParseSummary()
         self._recompute_summary()
@@ -90,6 +110,11 @@ class RecipientWidget(QWidget):
                 details.append(tr("recipient_widget.summary_duplicates_removed", count=summary.duplicates_removed))
             suffix = f"  ({', '.join(details)})" if details else ""
             self._summary_label.setText(f"{trn('recipient_widget.recipient_count', valid_count)}{suffix}")
+        self._review_invalid_button.setVisible(summary.invalid_count > 0)
+
+        surviving_keys = {p.normalized_key for p in summary.valid_recipients}
+        self._name_overrides = {k: v for k, v in self._name_overrides.items() if k in surviving_keys}
+
         self.recipients_changed.emit(summary)
 
     def _on_import_clicked(self) -> None:
@@ -124,14 +149,60 @@ class RecipientWidget(QWidget):
             ),
         )
 
+    def _on_import_csv_clicked(self) -> None:
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, tr("recipient_widget.import_dialog_title"), "", tr("recipient_widget.import_csv_file_filter")
+        )
+        if not file_path:
+            return
+        try:
+            result = import_recipients_from_csv(Path(file_path))
+        except CsvImportError as exc:
+            QMessageBox.warning(
+                self, tr("recipient_widget.import_dialog_title"), tr("recipient_widget.import_read_failed", error=exc)
+            )
+            return
+
+        existing_text = self._text_edit.toPlainText()
+        new_lines = "\n".join(p.raw.strip() for p in result.parsed)
+        combined = f"{existing_text}\n{new_lines}" if existing_text.strip() else new_lines
+        self._text_edit.setPlainText(combined)
+        self._name_overrides.update(result.names)
+        self.flush()
+
+        QMessageBox.information(
+            self,
+            tr("recipient_widget.import_dialog_title"),
+            tr(
+                "recipient_widget.import_result",
+                total=result.total_rows,
+                duplicates=result.duplicates_removed,
+                invalid=result.invalid_count,
+                valid=len(result.valid_recipients),
+            ),
+        )
+
+    def _on_review_invalid_clicked(self) -> None:
+        rows = [(p.raw.strip() or p.raw, p.error or "") for p in self._last_summary.parsed if not p.is_valid]
+        show_invalid_rows(self, tr("recipient_widget.review_invalid_title"), rows)
+
     def _on_clear_clicked(self) -> None:
         self._text_edit.clear()
+        self._name_overrides = {}
 
     def get_summary(self) -> ParseSummary:
         return self._last_summary
 
     def valid_recipients(self) -> List[ParsedRecipient]:
         return self._last_summary.valid_recipients
+
+    def name_overrides(self) -> Dict[str, str]:
+        """normalized_key -> display name, sourced from CSV import (see
+        app.recipients.csv_importer) -- consumed by
+        app.ui.main_window._start_campaign to override the {name}
+        placeholder for a specific recipient over whatever Telegram
+        itself reports as that user's first name."""
+        return dict(self._name_overrides)
 
     def get_text(self) -> str:
         return self._text_edit.toPlainText()
@@ -144,5 +215,7 @@ class RecipientWidget(QWidget):
         self._text_edit.setPlaceholderText(tr("recipient_widget.placeholder"))
         self._text_edit.setToolTip(tr("recipient_widget.tooltip"))
         self._import_button.setText(tr("recipient_widget.import_txt_button"))
+        self._import_csv_button.setText(tr("recipient_widget.import_csv_button"))
         self._clear_button.setText(tr("recipient_widget.clear_button"))
+        self._review_invalid_button.setText(tr("recipient_widget.review_invalid_button"))
         self._recompute_summary()

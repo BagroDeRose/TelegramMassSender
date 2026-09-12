@@ -1192,6 +1192,7 @@ class MainWindow(QMainWindow):
         if not recipients:
             show_error(self, tr("main_window.dialogs.campaign_title"), tr("main_window.start_error.no_recipients"))
             return
+        recipient_names = self._recipient_widget.name_overrides()
 
         text, entities = self._message_text, self._message_entities
         attachments = self._attachments_widget.get_attachments()
@@ -1231,11 +1232,13 @@ class MainWindow(QMainWindow):
         # same pattern applied to account switching.
         self._campaign_starting = True
         asyncio.ensure_future(
-            self._start_campaign(account, recipients, text, entities, attachments, rate_limiter, settings.retry_count)
+            self._start_campaign(
+                account, recipients, text, entities, attachments, rate_limiter, settings.retry_count, recipient_names
+            )
         )
 
     async def _start_campaign(
-        self, account, recipients, text, entities, attachments, rate_limiter, retry_count
+        self, account, recipients, text, entities, attachments, rate_limiter, retry_count, recipient_names
     ) -> None:
         account_manager = self._service.account_manager
         assert account_manager is not None
@@ -1258,6 +1261,7 @@ class MainWindow(QMainWindow):
             attachments=attachments,
             rate_limiter=rate_limiter,
             max_retries=retry_count,
+            recipient_names=recipient_names,
             # No Qt parent on purpose: with parent=self, Qt's ownership
             # hierarchy would keep every past campaign alive forever as a
             # child of MainWindow. Plain Python refcounting reclaims it as

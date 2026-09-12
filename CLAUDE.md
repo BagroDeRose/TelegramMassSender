@@ -75,8 +75,14 @@ described below.
     formatting entities through `.to_dict()`/a name→class map (Telethon has
     no built-in `from_dict()`), and re-checks attachment paths against the
     filesystem on load since a saved file may have moved or been deleted.
-- `app/recipients/` — `parser.py` (format detection: username/ID/link/phone),
-  `validator.py`, `importer.py` (TXT import).
+- `app/recipients/` — `parser.py` (format detection: username/ID/link/phone;
+  also owns `dedupe_recipients`, shared by every import path), `validator.py`,
+  `importer.py` (TXT import), `csv_importer.py` (CSV import with
+  content-based column detection — no header parsing or manual column
+  mapping: the first cell in a row that parses as a recipient identifier
+  via `parser.parse_recipient_line` is that row's identifier, and the
+  first remaining non-identifier cell becomes a per-recipient `{name}`
+  override, consumed by `CampaignManager(recipient_names=...)`).
 - `app/security/` — `dpapi.py` (Windows `CryptProtectData`/`CryptUnprotectData`
   wrapper), `secure_storage.py` (API ID/Hash at-rest encryption).
 - `app/config/` — `settings.py` (defaults/bounds for all user settings),
@@ -94,7 +100,7 @@ described below.
   `MainWindow.retranslate_ui()` the same way theme switching already
   dispatches `apply_theme()`. Deliberately not gettext or Qt Linguist
   (.ts/.qm + lupdate/lrelease) — this app has no other use for either.
-- `tests/` — pytest + pytest-asyncio (`asyncio_mode = auto`), 456 tests,
+- `tests/` — pytest + pytest-asyncio (`asyncio_mode = auto`), 473 tests,
   using `tests/mocks/mock_telegram_client.py` and
   `tests/mocks/fake_client_manager.py` instead of a real Telegram
   connection. CI runs this suite on `windows-latest` with
@@ -120,7 +126,7 @@ reproduced with a failing test first, then fixed.
 
 **Tests.** After any code change, run the targeted test file, then the
 full suite (`pytest tests/ -v`). Don't delete or weaken existing tests just
-to make the suite pass. The current baseline is 456 passed, 0 failures —
+to make the suite pass. The current baseline is 473 passed, 0 failures —
 if that number changes, know exactly why before saying the change is done.
 
 **GUI.** Never block the Qt event loop or the asyncio event loop.

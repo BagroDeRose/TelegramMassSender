@@ -18,7 +18,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from datetime import datetime
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from PySide6.QtCore import QObject, Signal
 from telethon import TelegramClient
@@ -103,6 +103,7 @@ class CampaignManager(QObject):
         attachments: List[Attachment],
         rate_limiter: RateLimiter,
         max_retries: int,
+        recipient_names: Optional[Dict[str, str]] = None,
         parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)
@@ -113,6 +114,12 @@ class CampaignManager(QObject):
         self._attachments = attachments
         self._rate_limiter = rate_limiter
         self._max_retries = max_retries
+        # normalized_key -> display name, from CSV import
+        # (app.recipients.csv_importer) -- takes priority over whatever
+        # Telegram itself reports as the resolved user's first_name, since
+        # it's the sender's own, deliberately supplied data for that
+        # specific recipient. See _attempt_send.
+        self._recipient_names = recipient_names or {}
         self._resolver = RecipientResolver(client)
 
         self._state = CampaignStateMachine()
@@ -300,7 +307,8 @@ class CampaignManager(QObject):
 
         item.resolved_id = getattr(resolved.entity, "id", None)
         item.resolved_username = getattr(resolved.entity, "username", None)
-        first_name = getattr(resolved.entity, "first_name", None)
+        override_name = self._recipient_names.get(item.recipient.normalized_key)
+        first_name = override_name or getattr(resolved.entity, "first_name", None)
         send_text, send_entities = expand_name_placeholder(self._text, self._entities, first_name)
 
         attempt = 0

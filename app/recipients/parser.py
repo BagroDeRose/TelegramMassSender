@@ -11,7 +11,9 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Iterable, List, Optional
+from typing import Iterable, List, Optional, Tuple
+
+from app.i18n import tr
 
 _USERNAME_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_]{3,31}$")
 _TME_URL_RE = re.compile(r"^(?:https?://)?t\.me/([a-zA-Z0-9_]{4,32})/?$", re.IGNORECASE)
@@ -60,7 +62,7 @@ class ParsedRecipient:
 def parse_recipient_line(raw_line: str) -> ParsedRecipient:
     text = raw_line.strip()
     if not text:
-        return ParsedRecipient(raw=raw_line, kind=None, value=None, is_valid=False, error="Пустая строка")
+        return ParsedRecipient(raw=raw_line, kind=None, value=None, is_valid=False, error=tr("recipients.parser.error.empty_line"))
 
     if text.startswith("+"):
         if _PHONE_RE.match(text):
@@ -70,7 +72,7 @@ def parse_recipient_line(raw_line: str) -> ParsedRecipient:
             kind=None,
             value=None,
             is_valid=False,
-            error="Некорректный номер телефона. Используйте международный формат, например +4917612345678",
+            error=tr("recipients.parser.error.invalid_phone"),
         )
 
     if text.isdigit():
@@ -82,7 +84,7 @@ def parse_recipient_line(raw_line: str) -> ParsedRecipient:
         if _USERNAME_RE.match(username):
             return ParsedRecipient(raw=raw_line, kind=RecipientKind.USERNAME, value=username, is_valid=True)
         return ParsedRecipient(
-            raw=raw_line, kind=None, value=None, is_valid=False, error="Некорректная ссылка t.me"
+            raw=raw_line, kind=None, value=None, is_valid=False, error=tr("recipients.parser.error.invalid_tme_link")
         )
 
     if text.startswith("@"):
@@ -90,11 +92,11 @@ def parse_recipient_line(raw_line: str) -> ParsedRecipient:
         if _USERNAME_RE.match(candidate):
             return ParsedRecipient(raw=raw_line, kind=RecipientKind.USERNAME, value=candidate, is_valid=True)
         return ParsedRecipient(
-            raw=raw_line, kind=None, value=None, is_valid=False, error="Некорректный username"
+            raw=raw_line, kind=None, value=None, is_valid=False, error=tr("recipients.parser.error.invalid_username")
         )
 
     return ParsedRecipient(
-        raw=raw_line, kind=None, value=None, is_valid=False, error="Неизвестный формат получателя"
+        raw=raw_line, kind=None, value=None, is_valid=False, error=tr("recipients.parser.error.unknown_format")
     )
 
 
@@ -114,6 +116,27 @@ class ParseSummary:
         return len(self.parsed)
 
 
+def dedupe_recipients(parsed: List[ParsedRecipient]) -> Tuple[List[ParsedRecipient], int]:
+    """Drop recipients that duplicate an earlier *valid* entry's
+    normalized_key, keeping the first occurrence and every invalid entry
+    unchanged (an invalid entry has no normalized_key, so it can never be
+    a duplicate of anything). Shared by parse_recipient_lines below and
+    app.recipients.csv_importer, so there is exactly one definition of
+    "duplicate" for both import paths."""
+    seen_keys: set[str] = set()
+    deduped: List[ParsedRecipient] = []
+    duplicates_removed = 0
+    for item in parsed:
+        if item.is_valid:
+            key = item.normalized_key
+            if key in seen_keys:
+                duplicates_removed += 1
+                continue
+            seen_keys.add(key)
+        deduped.append(item)
+    return deduped, duplicates_removed
+
+
 def parse_recipient_lines(lines: Iterable[str]) -> ParseSummary:
     """Parse an iterable of raw lines (e.g. an open file, or text.splitlines()).
 
@@ -121,9 +144,7 @@ def parse_recipient_lines(lines: Iterable[str]) -> ParseSummary:
     Whitespace around each line is stripped. Duplicates (by normalized
     identity) are dropped, keeping the first occurrence.
     """
-    seen_keys: set[str] = set()
     parsed: List[ParsedRecipient] = []
-    duplicates_removed = 0
     invalid_count = 0
     total_lines = 0
 
@@ -135,17 +156,11 @@ def parse_recipient_lines(lines: Iterable[str]) -> ParseSummary:
         result = parse_recipient_line(raw_line)
         if not result.is_valid:
             invalid_count += 1
-            parsed.append(result)
-            continue
-        key = result.normalized_key
-        if key in seen_keys:
-            duplicates_removed += 1
-            continue
-        seen_keys.add(key)
         parsed.append(result)
 
+    deduped, duplicates_removed = dedupe_recipients(parsed)
     return ParseSummary(
-        parsed=parsed,
+        parsed=deduped,
         total_lines=total_lines,
         duplicates_removed=duplicates_removed,
         invalid_count=invalid_count,

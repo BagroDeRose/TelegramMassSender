@@ -169,3 +169,41 @@ async def test_campaign_expands_name_per_recipient(qapp):
     sent_texts = {entity.username: text for (_, entity, text, _) in client.sent_messages}
     assert sent_texts["alice"] == "Привет, Alice!"
     assert sent_texts["bobby"] == "Привет, Bob!"
+
+
+async def test_csv_supplied_name_overrides_telegrams_own_first_name(qapp):
+    # Smart Recipient Import (v1.6): a name mapped from a CSV column is
+    # the sender's own, deliberately supplied data for that recipient --
+    # it must win over whatever Telegram itself reports as the resolved
+    # user's first_name, not just be a fallback for when Telegram has none.
+    from app.campaign.campaign_manager import CampaignManager
+    from app.recipients.parser import parse_recipient_line
+
+    class FakeRateLimiter:
+        def next_delay(self) -> float:
+            return 0.01
+
+    from tests.mocks.mock_telegram_client import MockTelegramClient
+
+    client = MockTelegramClient(first_name_behavior={"alice": "TelegramAlice"})
+    recipients = [parse_recipient_line("@alice")]
+    manager = CampaignManager(
+        client=client,
+        recipients=recipients,
+        message_text="Привет, {name}!",
+        message_entities=[],
+        attachments=[],
+        rate_limiter=FakeRateLimiter(),
+        max_retries=1,
+        recipient_names={"username:alice": "CsvAlice"},
+    )
+
+    import asyncio
+
+    fut = asyncio.get_event_loop().create_future()
+    manager.finished.connect(lambda status: fut.done() or fut.set_result(status))
+    manager.start()
+    await asyncio.wait_for(fut, timeout=10)
+
+    sent_text = client.sent_messages[0][2]
+    assert sent_text == "Привет, CsvAlice!"

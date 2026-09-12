@@ -6,7 +6,9 @@ there is no persistent widget to retranslate.
 """
 from __future__ import annotations
 
-from PySide6.QtWidgets import QMessageBox, QWidget
+from typing import List, Tuple
+
+from PySide6.QtWidgets import QDialog, QMessageBox, QPlainTextEdit, QPushButton, QVBoxLayout, QWidget
 
 from app.i18n import tr, trn
 
@@ -75,6 +77,26 @@ def confirm_reset_settings(parent: QWidget) -> bool:
     box.setDefaultButton(yes_button)
     box.exec()
     return box.clickedButton() is yes_button
+
+
+def show_invalid_rows(parent: QWidget, title: str, rows: List[Tuple[str, str]]) -> None:
+    """Read-only review of recipient rows that failed to parse (ROADMAP:
+    "Allow user to review problematic rows") -- one "<raw> -- <reason>"
+    line per row. A QDialog with a plain-text view rather than another
+    QMessageBox: the row list can be long, and a message box is not
+    scrollable/selectable the way this needs to be."""
+    dialog = QDialog(parent)
+    dialog.setWindowTitle(title)
+    dialog.resize(520, 360)
+    layout = QVBoxLayout(dialog)
+    text_view = QPlainTextEdit(dialog)
+    text_view.setReadOnly(True)
+    text_view.setPlainText("\n".join(f"{raw}  —  {reason}" for raw, reason in rows))
+    layout.addWidget(text_view)
+    close_button = QPushButton(tr("dialogs.close"), dialog)
+    close_button.clicked.connect(dialog.accept)
+    layout.addWidget(close_button)
+    dialog.exec()
 
 
 def confirm_delete_preset(parent: QWidget, name: str) -> bool:

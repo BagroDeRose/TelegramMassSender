@@ -375,15 +375,19 @@ STRINGS: Dict[str, Dict[str, str]] = {
         ),
     },
     "recipient_widget.import_txt_button": {"ru": "Импорт TXT", "en": "Import TXT"},
+    "recipient_widget.import_csv_button": {"ru": "Импорт CSV", "en": "Import CSV"},
     "recipient_widget.clear_button": {"ru": "Очистить", "en": "Clear"},
     "recipient_widget.empty_summary": {
-        "ru": "Нет получателей — вставьте @username, ID, ссылки t.me/... или номера телефонов, либо импортируйте TXT-файл",
-        "en": "No recipients — paste @usernames, IDs, t.me/... links, or phone numbers, or import a TXT file",
+        "ru": "Нет получателей — вставьте @username, ID, ссылки t.me/... или номера телефонов, либо импортируйте TXT- или CSV-файл",
+        "en": "No recipients — paste @usernames, IDs, t.me/... links, or phone numbers, or import a TXT or CSV file",
     },
     "recipient_widget.summary_invalid_count": {"ru": "ошибок формата: {count}", "en": "format errors: {count}"},
     "recipient_widget.summary_duplicates_removed": {"ru": "дубликатов удалено: {count}", "en": "duplicates removed: {count}"},
+    "recipient_widget.review_invalid_button": {"ru": "Показать ошибки", "en": "Show errors"},
+    "recipient_widget.review_invalid_title": {"ru": "Некорректные строки", "en": "Invalid rows"},
     "recipient_widget.import_dialog_title": {"ru": "Импорт получателей", "en": "Import recipients"},
     "recipient_widget.import_file_filter": {"ru": "Текстовые файлы (*.txt)", "en": "Text files (*.txt)"},
+    "recipient_widget.import_csv_file_filter": {"ru": "CSV-файлы (*.csv)", "en": "CSV files (*.csv)"},
     "recipient_widget.import_read_failed": {"ru": "Не удалось прочитать файл: {error}", "en": "Couldn't read the file: {error}"},
     "recipient_widget.import_result": {
         "ru": (
@@ -394,6 +398,22 @@ STRINGS: Dict[str, Dict[str, str]] = {
             "Imported: {total}\nDuplicates removed: {duplicates}\n"
             "Invalid lines: {invalid}\nTotal recipients: {valid}"
         ),
+    },
+
+    # ---- app/recipients/parser.py -------------------------------------------
+    "recipients.parser.error.empty_line": {"ru": "Пустая строка", "en": "Empty line"},
+    "recipients.parser.error.invalid_phone": {
+        "ru": "Некорректный номер телефона. Используйте международный формат, например +4917612345678",
+        "en": "Invalid phone number. Use international format, e.g. +4917612345678",
+    },
+    "recipients.parser.error.invalid_tme_link": {"ru": "Некорректная ссылка t.me", "en": "Invalid t.me link"},
+    "recipients.parser.error.invalid_username": {"ru": "Некорректный username", "en": "Invalid username"},
+    "recipients.parser.error.unknown_format": {"ru": "Неизвестный формат получателя", "en": "Unrecognized recipient format"},
+
+    # ---- app/recipients/csv_importer.py -------------------------------------
+    "csv_importer.error.no_identifier_in_row": {
+        "ru": "В строке не найден @username, ID или номер телефона",
+        "en": "No @username, ID, or phone number found in this row",
     },
 
     # ---- attachments_widget -----------------------------------------------
@@ -514,6 +534,7 @@ STRINGS: Dict[str, Dict[str, str]] = {
     "dialogs.exit_during_campaign.title": {"ru": "Рассылка ещё выполняется", "en": "A campaign is still running"},
     "dialogs.exit_during_campaign.message": {"ru": "Вы действительно хотите выйти?", "en": "Are you sure you want to quit?"},
     "dialogs.cancel": {"ru": "Отмена", "en": "Cancel"},
+    "dialogs.close": {"ru": "Закрыть", "en": "Close"},
     "dialogs.exit": {"ru": "Выйти", "en": "Quit"},
     "dialogs.start_campaign.title": {"ru": "Начать рассылку?", "en": "Start the campaign?"},
     "dialogs.start_campaign.start": {"ru": "Начать", "en": "Start"},

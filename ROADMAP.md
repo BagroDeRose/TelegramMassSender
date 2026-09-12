@@ -300,16 +300,50 @@ Still deferred.
 
 ## Smart Recipient Import
 
-- [ ] Improve TXT import
-- [ ] Add CSV import
-- [ ] Automatically detect CSV columns
-- [ ] Map username/ID/phone columns
-- [ ] Map name column to `{name}`
-- [ ] Normalize recipient identifiers
-- [ ] Remove duplicates
-- [ ] Show import statistics
-- [ ] Show invalid recipients before campaign start
-- [ ] Allow user to review problematic rows
+- [x] Improve TXT import — now shares the same "review problematic rows"
+      dialog CSV import gets (see below); its own row-by-row parsing was
+      already correct and is unchanged
+- [x] Add CSV import — new `app/recipients/csv_importer.py`, an "Импорт
+      CSV" button next to the existing "Импорт TXT" on the Campaign page's
+      Recipients card
+- [x] Automatically detect CSV columns — content-based, not header-based:
+      for each row, every cell is tried against the existing
+      `parse_recipient_line` (the exact same recognizer the paste box and
+      TXT import already use), and the first cell that parses as a valid
+      username/ID/phone becomes that row's identifier. This works
+      regardless of column order or header names/language, without a
+      manual column-mapping UI
+- [x] Map username/ID/phone columns — see above; a t.me link is also
+      recognized as an identifier if present in a cell
+- [x] Map name column to `{name}` — any other non-empty cell in the row
+      that does *not* itself parse as a recipient identifier becomes that
+      row's display name, stored as a normalized_key -> name override
+      (`RecipientWidget.name_overrides()`) and passed into
+      `CampaignManager(recipient_names=...)`; a CSV-supplied name takes
+      priority over whatever Telegram itself reports as the resolved
+      user's first_name for that recipient, since it's the sender's own,
+      deliberately supplied data
+- [x] Normalize recipient identifiers — reuses `ParsedRecipient.normalized_key`
+      (unchanged) for both de-duplication and the name-override lookup key
+- [x] Remove duplicates — `app.recipients.parser.dedupe_recipients`, a
+      single shared implementation now used by both `parse_recipient_lines`
+      (paste box / TXT import) and the new CSV importer
+- [x] Show import statistics — the existing total/duplicates/invalid/valid
+      summary dialog, now shown for CSV import too
+- [x] Show invalid recipients before campaign start — a "Показать ошибки"
+      button appears next to the Recipients summary line whenever the
+      current list has invalid entries (from typing, pasting, TXT import,
+      or CSV import alike), available at any time before Start, not just
+      right after an import
+- [x] Allow user to review problematic rows — that button opens
+      `app.ui.dialogs.show_invalid_rows`, listing each invalid row's raw
+      text and its specific reason. This is also what surfaced a
+      pre-existing gap: `app.recipients.parser`'s per-row error messages
+      were hardcoded Russian literals never routed through the app's
+      localization system (`tr()`) added in the Localization stage --
+      invisible before because nothing displayed `.error` in the UI.
+      Fixed as part of this stage (now real i18n keys) since this feature
+      is what makes those messages user-visible for the first time
 
 ## Recipient Groups
 
