@@ -345,6 +345,9 @@ class AttachmentsWidget(QWidget):
             self._remove_item(item)
 
     def _on_clear_clicked(self) -> None:
+        self.clear()
+
+    def clear(self) -> None:
         self._list.clear()
         self._paths.clear()
         self._tiles.clear()

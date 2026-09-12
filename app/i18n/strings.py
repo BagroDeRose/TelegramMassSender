@@ -63,6 +63,21 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "en": "{{name}} — the recipient's Telegram name, filled in when sending",
     },
     "main_window.campaign_page.message_card": {"ru": "Сообщение", "en": "Message"},
+    "main_window.presets.placeholder": {"ru": "Выберите шаблон…", "en": "Choose a preset…"},
+    "main_window.presets.load_button": {"ru": "Загрузить", "en": "Load"},
+    "main_window.presets.save_button": {"ru": "Сохранить как…", "en": "Save as…"},
+    "main_window.presets.delete_button": {"ru": "Удалить", "en": "Delete"},
+    "main_window.dialogs.save_preset_title": {"ru": "Сохранить шаблон", "en": "Save preset"},
+    "main_window.dialogs.preset_name_label": {"ru": "Название шаблона:", "en": "Preset name:"},
+    "main_window.dialogs.preset_saved_message": {"ru": "Шаблон «{name}» сохранён.", "en": "Preset “{name}” saved."},
+    "main_window.dialogs.no_preset_selected": {"ru": "Сначала выберите шаблон в списке.", "en": "First select a preset from the list."},
+    "main_window.dialogs.delete_preset_title": {"ru": "Удалить шаблон?", "en": "Delete preset?"},
+    "main_window.dialogs.delete_preset_message": {"ru": "Шаблон «{name}» будет удалён без возможности восстановления. Продолжить?", "en": "The preset “{name}” will be permanently deleted. Continue?"},
+    "main_window.dialogs.preset_missing_attachments_title": {"ru": "Вложения не найдены", "en": "Attachments not found"},
+    "main_window.dialogs.preset_missing_attachments_message": {
+        "ru": "Следующие файлы из шаблона больше не найдены и не были добавлены: {names}",
+        "en": "The following files from the preset could no longer be found and were not added: {names}",
+    },
     "main_window.campaign_page.preview_name_label": {"ru": "Пример имени для {{name}}:", "en": "Example name for {{name}}:"},
     "main_window.campaign_page.preview_name_default": {"ru": "Александр", "en": "Alex"},
     "main_window.campaign_page.preview_name_tooltip": {
@@ -497,6 +512,10 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "ru": "Количество повторов должно быть от {min} до {max}.",
         "en": "The retry count must be between {min} and {max}.",
     },
+
+    # ---- app/campaign/presets.py -------------------------------------------
+    "presets.untitled_name": {"ru": "Без названия", "en": "Untitled"},
+    "presets.error.corrupted": {"ru": "Не удалось прочитать сохранённый шаблон (повреждённые данные)", "en": "Couldn't read the saved preset (corrupted data)"},
 
     # ---- app/campaign/report_library.py: errors shown via show_error --------
     "report_library.error.file_not_found": {"ru": "Файл отчёта не найден: {path}", "en": "Report file not found: {path}"},

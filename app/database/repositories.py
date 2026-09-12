@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import List, Optional
 
 from app.database.database import Database
-from app.database.models import Account, SavedReport
+from app.database.models import Account, Preset, SavedReport
 
 
 class AccountRepository:
@@ -244,4 +244,68 @@ class SavedReportRepository:
             skipped=row["skipped"],
             file_path=row["file_path"],
             is_favorite=bool(row["is_favorite"]),
+        )
+
+
+class PresetRepository:
+    """Pure DB access for named message presets -- JSON encode/decode of
+    entities/attachment paths and missing-file handling is business logic
+    that lives in app.campaign.presets, not here (same split as
+    SavedReportRepository above vs. app.campaign.report_library)."""
+
+    def __init__(self, database: Database) -> None:
+        self._db = database
+
+    def create(
+        self,
+        name: str,
+        message_text: str,
+        message_entities_json: str,
+        attachment_paths_json: str,
+        min_delay_seconds: Optional[int],
+        max_delay_seconds: Optional[int],
+    ) -> Preset:
+        with self._db.cursor() as cur:
+            cur.execute(
+                """INSERT INTO presets
+                   (name, message_text, message_entities, attachment_paths, min_delay_seconds, max_delay_seconds)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (name, message_text, message_entities_json, attachment_paths_json, min_delay_seconds, max_delay_seconds),
+            )
+            preset_id = cur.lastrowid
+        preset = self.get_by_id(preset_id)
+        assert preset is not None
+        return preset
+
+    def get_by_id(self, preset_id: int) -> Optional[Preset]:
+        with self._db.cursor() as cur:
+            cur.execute("SELECT * FROM presets WHERE id = ?", (preset_id,))
+            row = cur.fetchone()
+        return self._row_to_preset(row) if row else None
+
+    def list_all(self) -> List[Preset]:
+        with self._db.cursor() as cur:
+            cur.execute("SELECT * FROM presets ORDER BY created_at DESC")
+            rows = cur.fetchall()
+        return [self._row_to_preset(row) for row in rows]
+
+    def rename(self, preset_id: int, new_name: str) -> None:
+        with self._db.cursor() as cur:
+            cur.execute("UPDATE presets SET name = ? WHERE id = ?", (new_name, preset_id))
+
+    def delete(self, preset_id: int) -> None:
+        with self._db.cursor() as cur:
+            cur.execute("DELETE FROM presets WHERE id = ?", (preset_id,))
+
+    @staticmethod
+    def _row_to_preset(row) -> Preset:
+        return Preset(
+            id=row["id"],
+            name=row["name"],
+            created_at=row["created_at"],
+            message_text=row["message_text"],
+            message_entities=row["message_entities"],
+            attachment_paths=row["attachment_paths"],
+            min_delay_seconds=row["min_delay_seconds"],
+            max_delay_seconds=row["max_delay_seconds"],
         )

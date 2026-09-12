@@ -156,6 +156,134 @@ async def test_preview_name_survives_language_retranslation(qapp, tmp_path):
         set_language(LANGUAGE_RU)
 
 
+async def test_save_preset_writes_and_refreshes_combo(qapp, tmp_path):
+    window = _make_window(tmp_path)
+    window._message_text = "Hello {name}"
+    window._message_entities = []
+    photo = tmp_path / "photo.jpg"
+    photo.write_bytes(b"x")
+    window._attachments_widget.add_file(photo)
+
+    with patch("app.ui.main_window.QInputDialog") as mock_dialog, patch("app.ui.main_window.show_info"):
+        mock_dialog.getText.return_value = ("My preset", True)
+        window._on_save_preset_clicked()
+
+    from app.campaign import presets
+
+    saved = presets.list_presets(window._preset_repo)
+    assert len(saved) == 1
+    assert saved[0].name == "My preset"
+    assert window._presets_combo.findText("My preset") != -1
+
+
+async def test_save_preset_cancelled_does_not_create_a_row(qapp, tmp_path):
+    window = _make_window(tmp_path)
+    window._message_text = "Hello"
+    window._message_entities = []
+
+    with patch("app.ui.main_window.QInputDialog") as mock_dialog:
+        mock_dialog.getText.return_value = ("", False)  # user hit Cancel
+        window._on_save_preset_clicked()
+
+    from app.campaign import presets
+
+    assert presets.list_presets(window._preset_repo) == []
+
+
+async def test_load_preset_restores_message_and_attachments(qapp, tmp_path):
+    from app.campaign import presets
+
+    window = _make_window(tmp_path)
+    photo = tmp_path / "photo.jpg"
+    photo.write_bytes(b"x")
+    saved = presets.save_preset(window._preset_repo, "Greeting", "Hi {name}", [], [photo])
+    window._refresh_presets_combo()
+    index = window._presets_combo.findData(saved.id)
+    window._presets_combo.setCurrentIndex(index)
+
+    window._on_load_preset_clicked()
+
+    assert window._message_text == "Hi {name}"
+    assert [a.path for a in window._attachments_widget.get_attachments()] == [photo]
+
+
+async def test_load_preset_warns_about_missing_attachments_but_still_loads(qapp, tmp_path):
+    from app.campaign import presets
+
+    window = _make_window(tmp_path)
+    present = tmp_path / "present.jpg"
+    present.write_bytes(b"x")
+    gone = tmp_path / "gone.jpg"
+    gone.write_bytes(b"x")
+    saved = presets.save_preset(window._preset_repo, "Mixed", "text", [], [present, gone])
+    gone.unlink()
+    window._refresh_presets_combo()
+    window._presets_combo.setCurrentIndex(window._presets_combo.findData(saved.id))
+
+    with patch("app.ui.main_window.show_error") as mock_show_error:
+        window._on_load_preset_clicked()
+
+    assert [a.path for a in window._attachments_widget.get_attachments()] == [present]
+    assert mock_show_error.call_count == 1
+    assert "gone.jpg" in mock_show_error.call_args[0][2]
+
+
+async def test_load_preset_with_no_selection_shows_an_error(qapp, tmp_path):
+    window = _make_window(tmp_path)
+
+    with patch("app.ui.main_window.show_error") as mock_show_error:
+        window._on_load_preset_clicked()
+
+    mock_show_error.assert_called_once()
+
+
+async def test_load_preset_restores_the_saved_interval(qapp, tmp_path):
+    from app.campaign import presets
+
+    window = _make_window(tmp_path)
+    saved = presets.save_preset(
+        window._preset_repo, "Timed", "text", [], [], min_delay_seconds=45, max_delay_seconds=90
+    )
+    window._refresh_presets_combo()
+    window._presets_combo.setCurrentIndex(window._presets_combo.findData(saved.id))
+
+    window._on_load_preset_clicked()
+
+    reloaded = window._service.settings_repository.load_app_settings()
+    assert reloaded.min_delay_seconds == 45
+    assert reloaded.max_delay_seconds == 90
+    assert "45" in window._campaign_controls._interval_summary_label.text()
+
+
+async def test_delete_preset_removes_it(qapp, tmp_path):
+    from app.campaign import presets
+
+    window = _make_window(tmp_path)
+    saved = presets.save_preset(window._preset_repo, "Doomed", "text", [], [])
+    window._refresh_presets_combo()
+    window._presets_combo.setCurrentIndex(window._presets_combo.findData(saved.id))
+
+    with patch("app.ui.main_window.confirm_delete_preset", return_value=True):
+        window._on_delete_preset_clicked()
+
+    assert presets.list_presets(window._preset_repo) == []
+    assert window._presets_combo.findData(saved.id) == -1
+
+
+async def test_delete_preset_declined_keeps_it(qapp, tmp_path):
+    from app.campaign import presets
+
+    window = _make_window(tmp_path)
+    saved = presets.save_preset(window._preset_repo, "Kept", "text", [], [])
+    window._refresh_presets_combo()
+    window._presets_combo.setCurrentIndex(window._presets_combo.findData(saved.id))
+
+    with patch("app.ui.main_window.confirm_delete_preset", return_value=False):
+        window._on_delete_preset_clicked()
+
+    assert len(presets.list_presets(window._preset_repo)) == 1
+
+
 async def test_start_button_disabled_while_campaign_running(qapp, tmp_path):
     # Test Send was removed (redundant with adding a test recipient and
     # starting a real campaign, per the second UX pass) -- this replaces

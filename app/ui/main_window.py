@@ -41,6 +41,8 @@ from app.campaign.campaign_state import CampaignStatus
 from app.campaign.rate_limiter import RateLimiter
 from app.campaign.report import suggest_report_filename, write_csv_report
 from app.campaign.report_library import ReportFileMissingError
+from app.campaign import presets
+from app.campaign.presets import PresetError
 from app.campaign import report_library
 from app.config.paths import get_reports_dir
 from app.config.settings import (
@@ -50,8 +52,8 @@ from app.config.settings import (
     SettingsValidationError,
 )
 from app.database.database import Database
-from app.database.models import SavedReport
-from app.database.repositories import SavedReportRepository
+from app.database.models import Preset, SavedReport
+from app.database.repositories import PresetRepository, SavedReportRepository
 from app.i18n import LANGUAGE_LABELS, VALID_LANGUAGES, get_language, set_language, tr
 from app.logging.logger import get_logger
 from app.telegram.account_manager import Account
@@ -64,6 +66,7 @@ from app.ui.attachments_widget import AttachmentsWidget
 from app.ui.campaign_controls import CampaignControlsWidget
 from app.ui.dialogs import (
     confirm_delete_account,
+    confirm_delete_preset,
     confirm_exit_during_campaign,
     confirm_reset_settings,
     confirm_start_campaign,
@@ -185,6 +188,7 @@ class MainWindow(QMainWindow):
         self._database = database if database is not None else Database()
         self._service = TelegramService(self._database)
         self._saved_report_repo = SavedReportRepository(self._database)
+        self._preset_repo = PresetRepository(self._database)
 
         # Source of truth for the message: the inline preview is read-only,
         # actual editing happens in MessageEditorDialog.
@@ -228,6 +232,7 @@ class MainWindow(QMainWindow):
         self._update_message_preview()
         self._update_results_page()
         self._refresh_saved_reports()
+        self._refresh_presets_combo()
         self.statusBar().showMessage(tr("main_window.status.ready"))
 
         asyncio.ensure_future(self._refresh_accounts())
@@ -303,6 +308,10 @@ class MainWindow(QMainWindow):
         # it may already be user-edited, and a language switch resetting
         # it back to the new language's default would silently discard
         # that. Only the label/tooltip text is retranslated.
+        self._load_preset_button.setText(tr("main_window.presets.load_button"))
+        self._save_preset_button.setText(tr("main_window.presets.save_button"))
+        self._delete_preset_button.setText(tr("main_window.presets.delete_button"))
+        self._refresh_presets_combo()  # re-set the placeholder item's text
         _retranslate_card_title(self._message_card, tr("main_window.campaign_page.message_card"))
         _retranslate_card_title(self._attachments_card, tr("main_window.campaign_page.attachments_card"))
         _retranslate_card_title(self._campaign_card, tr("main_window.campaign_page.campaign_card"))
@@ -480,6 +489,23 @@ class MainWindow(QMainWindow):
         preview_name_row.addWidget(self._preview_name_edit)
         preview_name_row.addStretch(1)
         message_layout.addLayout(preview_name_row)
+
+        presets_row = QHBoxLayout()
+        self._presets_combo = QComboBox(message_section)
+        self._presets_combo.setMinimumWidth(180)
+        self._load_preset_button = QPushButton(tr("main_window.presets.load_button"), message_section)
+        self._load_preset_button.clicked.connect(self._on_load_preset_clicked)
+        self._save_preset_button = QPushButton(tr("main_window.presets.save_button"), message_section)
+        self._save_preset_button.setObjectName("ghostButton")
+        self._save_preset_button.clicked.connect(self._on_save_preset_clicked)
+        self._delete_preset_button = QPushButton(tr("main_window.presets.delete_button"), message_section)
+        self._delete_preset_button.setObjectName("ghostButton")
+        self._delete_preset_button.clicked.connect(self._on_delete_preset_clicked)
+        presets_row.addWidget(self._presets_combo, 1)
+        presets_row.addWidget(self._load_preset_button)
+        presets_row.addWidget(self._save_preset_button)
+        presets_row.addWidget(self._delete_preset_button)
+        message_layout.addLayout(presets_row)
 
         self._message_card = _card(tr("main_window.campaign_page.message_card"), message_section)
         layout.addWidget(self._message_card)
@@ -859,6 +885,93 @@ class MainWindow(QMainWindow):
         )
         self._message_preview.update_preview(preview_text, preview_entities, attachment_names)
         self._on_form_state_changed()
+
+    # ---- message presets --------------------------------------------------
+
+    def _refresh_presets_combo(self) -> None:
+        current_id = self._presets_combo.currentData()
+        self._presets_combo.blockSignals(True)
+        self._presets_combo.clear()
+        self._presets_combo.addItem(tr("main_window.presets.placeholder"), None)
+        for preset in presets.list_presets(self._preset_repo):
+            self._presets_combo.addItem(preset.name, preset.id)
+        if current_id is not None:
+            index = self._presets_combo.findData(current_id)
+            if index >= 0:
+                self._presets_combo.setCurrentIndex(index)
+        self._presets_combo.blockSignals(False)
+
+    def _selected_preset(self) -> Optional[Preset]:
+        preset_id = self._presets_combo.currentData()
+        if preset_id is None:
+            return None
+        return self._preset_repo.get_by_id(preset_id)
+
+    def _on_save_preset_clicked(self) -> None:
+        name, ok = QInputDialog.getText(self, tr("main_window.dialogs.save_preset_title"), tr("main_window.dialogs.preset_name_label"))
+        if not ok or not name.strip():
+            return
+        settings = self._service.settings_repository.load_app_settings()
+        saved = presets.save_preset(
+            self._preset_repo,
+            name,
+            self._message_text,
+            self._message_entities,
+            [a.path for a in self._attachments_widget.get_attachments()],
+            settings.min_delay_seconds,
+            settings.max_delay_seconds,
+        )
+        self._refresh_presets_combo()
+        index = self._presets_combo.findData(saved.id)
+        if index >= 0:
+            self._presets_combo.setCurrentIndex(index)
+        show_info(self, tr("main_window.dialogs.save_preset_title"), tr("main_window.dialogs.preset_saved_message", name=saved.name))
+
+    def _on_load_preset_clicked(self) -> None:
+        preset = self._selected_preset()
+        if preset is None:
+            show_error(self, tr("main_window.dialogs.save_preset_title"), tr("main_window.dialogs.no_preset_selected"))
+            return
+        try:
+            loaded = presets.load_preset(preset)
+        except PresetError as exc:
+            show_error(self, tr("main_window.dialogs.save_preset_title"), str(exc))
+            return
+
+        self._message_text = loaded.message_text
+        self._message_entities = loaded.message_entities
+        self._attachments_widget.clear()
+        for path in loaded.attachment_paths:
+            self._attachments_widget.add_file(path)
+        if loaded.min_delay_seconds is not None and loaded.max_delay_seconds is not None:
+            settings = self._service.settings_repository.load_app_settings()
+            settings.min_delay_seconds = loaded.min_delay_seconds
+            settings.max_delay_seconds = loaded.max_delay_seconds
+            try:
+                self._service.settings_repository.save_app_settings(settings)
+            except SettingsValidationError:
+                pass  # a stale/out-of-range saved interval must not block loading the rest of the preset
+            else:
+                self._load_settings_into_page(settings)
+                self._campaign_controls.set_interval_summary(settings.min_delay_seconds, settings.max_delay_seconds)
+        self._update_message_preview()
+
+        if loaded.missing_attachment_names:
+            show_error(
+                self,
+                tr("main_window.dialogs.preset_missing_attachments_title"),
+                tr("main_window.dialogs.preset_missing_attachments_message", names=", ".join(loaded.missing_attachment_names)),
+            )
+
+    def _on_delete_preset_clicked(self) -> None:
+        preset = self._selected_preset()
+        if preset is None:
+            show_error(self, tr("main_window.dialogs.save_preset_title"), tr("main_window.dialogs.no_preset_selected"))
+            return
+        if not confirm_delete_preset(self, preset.name):
+            return
+        presets.delete_preset(self._preset_repo, preset.id)
+        self._refresh_presets_combo()
 
     def _on_recipients_changed(self, summary) -> None:
         self._recipient_count_label.setText(str(len(summary.valid_recipients)))

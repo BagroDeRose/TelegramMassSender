@@ -48,6 +48,22 @@ CREATE TABLE IF NOT EXISTS saved_reports (
     file_path TEXT NOT NULL,
     is_favorite INTEGER NOT NULL DEFAULT 0
 );
+
+-- Named message presets (see app.campaign.presets) -- explicit, named
+-- save/load of a message + its formatting + attachments, never automatic
+-- history. message_entities/attachment_paths are JSON arrays (TEXT);
+-- min_delay_seconds/max_delay_seconds are nullable since saving the
+-- campaign interval alongside a preset is optional.
+CREATE TABLE IF NOT EXISTS presets (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    message_text TEXT NOT NULL DEFAULT '',
+    message_entities TEXT NOT NULL DEFAULT '[]',
+    attachment_paths TEXT NOT NULL DEFAULT '[]',
+    min_delay_seconds INTEGER,
+    max_delay_seconds INTEGER
+);
 """
 
 

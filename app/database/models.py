@@ -28,3 +28,20 @@ class SavedReport:
     skipped: int
     file_path: str
     is_favorite: bool
+
+
+@dataclass
+class Preset:
+    """DB row shape only -- message_entities/attachment_paths are the raw
+    JSON strings as stored; app.campaign.presets is where those get
+    serialized/deserialized into real TypeMessageEntity/Path objects, same
+    split as SavedReport (this module) vs. app.campaign.report_library."""
+
+    id: Optional[int]
+    name: str
+    created_at: str
+    message_text: str
+    message_entities: str
+    attachment_paths: str
+    min_delay_seconds: Optional[int]
+    max_delay_seconds: Optional[int]

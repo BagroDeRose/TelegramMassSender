@@ -59,6 +59,13 @@ described below.
   - `rate_limiter.py` — randomized interval between sends.
   - `report.py`, `report_library.py` — CSV report generation (with
     formula-injection sanitization) and the saved-reports library.
+  - `presets.py` — named message presets (text, formatting, attachments,
+    optionally the campaign interval), explicitly saved/loaded by name via
+    the Campaign page's Presets row in `app/ui/main_window.py` — never an
+    automatic history of everything typed. Round-trips Telethon TL
+    formatting entities through `.to_dict()`/a name→class map (Telethon has
+    no built-in `from_dict()`), and re-checks attachment paths against the
+    filesystem on load since a saved file may have moved or been deleted.
 - `app/recipients/` — `parser.py` (format detection: username/ID/link/phone),
   `validator.py`, `importer.py` (TXT import).
 - `app/security/` — `dpapi.py` (Windows `CryptProtectData`/`CryptUnprotectData`
@@ -66,7 +73,7 @@ described below.
 - `app/config/` — `settings.py` (defaults/bounds for all user settings),
   `paths.py` (`%APPDATA%` layout).
 - `app/database/` — SQLite via `database.py`; `models.py`/`repositories.py`
-  for accounts, settings, and saved-report metadata.
+  for accounts, settings, saved-report metadata, and named presets.
 - `app/logging/` — rotating file logging with secret scrubbing.
 - `app/i18n/` — Russian/English translation catalog and lookup:
   `translator.py` (`tr()`/`trn()`, active-language state following the
@@ -78,7 +85,7 @@ described below.
   `MainWindow.retranslate_ui()` the same way theme switching already
   dispatches `apply_theme()`. Deliberately not gettext or Qt Linguist
   (.ts/.qm + lupdate/lrelease) — this app has no other use for either.
-- `tests/` — pytest + pytest-asyncio (`asyncio_mode = auto`), 409 tests,
+- `tests/` — pytest + pytest-asyncio (`asyncio_mode = auto`), 442 tests,
   using `tests/mocks/mock_telegram_client.py` and
   `tests/mocks/fake_client_manager.py` instead of a real Telegram
   connection. CI runs this suite on `windows-latest` with
@@ -104,7 +111,7 @@ reproduced with a failing test first, then fixed.
 
 **Tests.** After any code change, run the targeted test file, then the
 full suite (`pytest tests/ -v`). Don't delete or weaken existing tests just
-to make the suite pass. The current baseline is 409 passed, 0 failures —
+to make the suite pass. The current baseline is 442 passed, 0 failures —
 if that number changes, know exactly why before saying the change is done.
 
 **GUI.** Never block the Qt event loop or the asyncio event loop.

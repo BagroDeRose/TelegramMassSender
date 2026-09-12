@@ -223,14 +223,40 @@ Still deferred.
 
 ## Drafts / Presets
 
-- [ ] Add message drafts
-- [ ] Add named message presets
-- [ ] Save message text
-- [ ] Save formatting
-- [ ] Save attachments
-- [ ] Optionally save campaign interval/settings
-- [ ] Load/edit/delete presets
-- [ ] Do not turn presets into message history
+- [x] Add message drafts — interpreted as the named-preset feature below
+      ("drafts" and "presets" are the same saved-template concept in this
+      roadmap section; there is no separate unnamed-autosave mechanism,
+      since campaign state already survives app restart via the existing
+      recipient/message/attachment fields on the Campaign page)
+- [x] Add named message presets — new `presets` SQLite table
+      (`app/database/database.py`), `Preset` model
+      (`app/database/models.py`), `PresetRepository`
+      (`app/database/repositories.py`), and `app/campaign/presets.py`
+      (`save_preset`/`list_presets`/`rename_preset`/`delete_preset`/
+      `load_preset`); UI wired into the Campaign page as a
+      combo box + Load/Save as.../Delete buttons
+      (`app/ui/main_window.py`)
+- [x] Save message text
+- [x] Save formatting — rich-text entities round-tripped through
+      Telethon's `.to_dict()`/reconstructed via a name→class map in
+      `app/campaign/presets.py`, since Telethon has no built-in
+      `from_dict()`
+- [x] Save attachments — attachment file paths only (not file contents);
+      `load_preset` reports which saved paths still exist vs. are missing
+      so a preset survives files moving/being deleted, per the same
+      philosophy as the existing missing-file detection on the Campaign
+      page
+- [x] Optionally save campaign interval/settings — min/max delay seconds
+      saved with the preset and restored on load if present
+- [x] Load/edit/delete presets — rename is implemented at the repository/
+      business-logic layer (`PresetRepository.rename`,
+      `presets.rename_preset`) but has no UI entry point yet, since the
+      spec's UI mockup only called for Load/Save as.../Delete; load
+      warns (via `show_error`) about any attachments that no longer exist
+      on disk but still restores everything else
+- [x] Do not turn presets into message history — presets are only ever
+      created by an explicit "Save as..." action, never auto-saved after
+      a send, so the list can't grow into an implicit sent-message log
 
 ## Campaign Wizard
 
