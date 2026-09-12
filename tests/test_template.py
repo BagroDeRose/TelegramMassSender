@@ -51,6 +51,28 @@ def test_unicode_first_name():
     assert result_text == "Привет, Алекс!"
 
 
+def test_long_message_with_unicode_and_trailing_entity_expands_correctly():
+    # Reliability Tests: "Long message" -- a message well past Telegram's
+    # 4096-char text limit (app.telegram.media_sender.TEXT_MESSAGE_MAX_LENGTH)
+    # must still expand correctly and keep an entity after the placeholder
+    # aligned; the app doesn't truncate/split messages itself (Telegram's
+    # own API is the one authority on that limit), so this is purely a
+    # correctness check that placeholder expansion doesn't break down at
+    # length, not a test of any splitting behavior.
+    filler = "Тестовое сообщение с эмодзи 🎉 и текстом. " * 120  # >4096 chars
+    text = filler + "Здравствуйте, {name}! Конец"
+    entities = [MessageEntityBold(offset=0, length=10)]
+
+    result_text, result_entities = expand_name_placeholder(text, entities, "Алекс")
+
+    assert len(text) > 4096
+    assert result_text == filler + "Здравствуйте, Алекс! Конец"
+    assert result_text.endswith("Конец")
+    # The leading entity (well before the placeholder) must be untouched.
+    assert result_entities[0].offset == 0
+    assert result_entities[0].length == 10
+
+
 def test_emoji_adjacent_to_placeholder_preserves_offsets():
     # 🎉 is an astral-plane character (UTF-16 surrogate pair, i.e. 2 UTF-16
     # code units) -- an entity positioned after both the emoji and the

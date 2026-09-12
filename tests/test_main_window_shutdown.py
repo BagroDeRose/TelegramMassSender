@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 
 from pathlib import Path
+from unittest.mock import patch
 
 from PySide6.QtWidgets import QApplication
 
@@ -67,6 +68,61 @@ async def test_shutdown_without_close_event_does_not_crash(qapp, tmp_path):
     window._current_campaign = None
     await window._perform_shutdown()
     window._database.close()
+
+
+async def test_close_declined_during_active_campaign_keeps_window_open(qapp, tmp_path):
+    # Reliability Tests: "Application close during campaign" -- closing
+    # while a campaign is active must ask for confirmation, and declining
+    # must leave the window open with no shutdown started.
+    from unittest.mock import MagicMock
+
+    from PySide6.QtGui import QCloseEvent
+
+    window = _isolated_window(tmp_path)
+    active_campaign = MagicMock()
+    active_campaign.is_active = True
+    window._current_campaign = active_campaign
+
+    try:
+        with patch("app.ui.main_window.confirm_exit_during_campaign", return_value=False) as mock_confirm:
+            event = QCloseEvent()
+            event.ignore = MagicMock()
+            window.closeEvent(event)
+
+        mock_confirm.assert_called_once()
+        event.ignore.assert_called_once()
+        assert window._shutdown_in_progress is False
+    finally:
+        window._current_campaign = None
+        window._database.close()
+
+
+async def test_close_confirmed_during_active_campaign_stops_it_and_shuts_down(qapp, tmp_path):
+    from unittest.mock import AsyncMock, MagicMock
+
+    from PySide6.QtGui import QCloseEvent
+
+    close_event = asyncio.Event()
+    window = _isolated_window(tmp_path, close_event=close_event)
+    active_campaign = MagicMock()
+    active_campaign.is_active = True
+    active_campaign.stop = AsyncMock()
+    window._current_campaign = active_campaign
+
+    real_quit = QApplication.instance().quit
+    QApplication.instance().quit = lambda: None
+    try:
+        with patch("app.ui.main_window.confirm_exit_during_campaign", return_value=True):
+            event = QCloseEvent()
+            event.ignore = MagicMock()
+            window.closeEvent(event)
+            await asyncio.wait_for(close_event.wait(), timeout=5)
+
+        active_campaign.stop.assert_awaited_once()
+        assert window._shutdown_in_progress is True
+    finally:
+        QApplication.instance().quit = real_quit
+        window._database.close()
 
 
 async def test_close_event_is_always_ignored_by_qt(qapp, tmp_path):

@@ -563,6 +563,43 @@ async def test_start_blocked_by_an_unreadable_attachment(qapp, tmp_path):
     assert "locked.pdf" in mock_show_error.call_args[0][2]
 
 
+async def test_start_blocked_by_an_attachment_deleted_after_being_added(qapp, tmp_path):
+    # Reliability Tests: "Attachment deleted during campaign preparation"
+    # -- a file added while it existed, then removed from disk before
+    # Start is clicked, must block with a clear error naming it, exactly
+    # like the unreadable-file case above (distinct failure mode, same
+    # guard shape, checked first in _on_start_requested).
+    window = _make_window(tmp_path)
+    fake_account_manager = MagicMock()
+    fake_account = Account(
+        id=1, phone="+70001112233", telegram_user_id=1, username="u", display_name="U",
+        session_name="s", created_at="now", last_used_at=None,
+    )
+    fake_account_manager.active_account_id = 1
+    window._service.account_manager = fake_account_manager
+    window._service.account_repository.get_by_id = MagicMock(return_value=fake_account)
+
+    window._recipient_widget._text_edit.setPlainText("@testuser")
+    window._recipient_widget.flush()
+    window._message_text = "hello"
+
+    doomed_file = tmp_path / "doomed.pdf"
+    doomed_file.write_bytes(b"x")
+    window._attachments_widget.add_file(doomed_file)
+    window._on_form_state_changed()
+    window._update_message_preview()
+    assert window._campaign_controls._start_button.isEnabled() is True
+
+    doomed_file.unlink()  # deleted from disk during "preparation," before Start
+
+    with patch("app.ui.main_window.show_error") as mock_show_error:
+        window._on_start_requested()
+
+    assert window._campaign_starting is False  # never got past the validation guard
+    assert mock_show_error.call_count == 1
+    assert "doomed.pdf" in mock_show_error.call_args[0][2]
+
+
 async def test_account_add_delete_disabled_during_campaign(qapp, tmp_path):
     from app.telegram.account_manager import AccountStatus
 

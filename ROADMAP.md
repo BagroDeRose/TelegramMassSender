@@ -590,21 +590,78 @@ Still deferred.
 
 ## Reliability Tests
 
-- [ ] Network disconnect
-- [ ] Reconnect
-- [ ] FloodWait
-- [ ] Partial media send
-- [ ] Failure after first media group
-- [ ] Application close during campaign
-- [ ] Attachment deleted during campaign preparation
-- [ ] Unreadable attachment
-- [ ] Corrupted file
-- [ ] Very large file
-- [ ] Long message
-- [ ] Unicode / emoji
-- [ ] Mixed attachments
-- [ ] Concurrent user actions
-- [ ] Duplicate campaign start protection
+This section is an audit against the existing test suite, not a new
+feature -- for each item below, existing coverage was checked first, and
+new tests were written only where a genuine gap existed (`app/telegram/client_manager.py`
+had *no* dedicated test file before this pass, despite being a real,
+previously-untested module).
+
+- [x] Network disconnect — `tests/test_client_manager.py` (new): a
+      client whose `is_connected()` flips to `False`, simulating a real
+      drop; a transient `ConnectionError`/`OSError`/timeout mid-send is
+      already covered by `tests/test_campaign_manager.py`'s existing
+      retry-with-backoff tests
+- [x] Reconnect — `tests/test_client_manager.py::test_reconnect_after_a_simulated_network_drop`:
+      the next `connect()` call after a simulated drop must actually
+      reconnect, not silently no-op because a client object already
+      exists
+- [x] FloodWait — already extensively covered before this stage
+      (`tests/test_campaign_manager.py`, `tests/test_recipient_resolver.py`,
+      `tests/test_campaign_controls.py`); unchanged
+- [x] Partial media send — already covered before this stage
+      (`test_transient_error_after_first_of_two_steps_does_not_resend_first_step`,
+      `test_send_media_plan_resumes_from_start_step`); unchanged
+- [x] Failure after first media group — already covered before this
+      stage (`test_floodwait_after_first_of_two_steps_does_not_resend_first_step`);
+      unchanged
+- [x] Application close during campaign — new
+      `tests/test_main_window_shutdown.py` tests: declining the
+      confirmation keeps the window open with no shutdown started;
+      confirming stops the active campaign before completing shutdown
+- [x] Attachment deleted during campaign preparation — new
+      `tests/test_main_window_ux.py::test_start_blocked_by_an_attachment_deleted_after_being_added`
+      (a file added while it existed, removed before Start is clicked)
+- [x] Unreadable attachment — already covered before this stage (v1.4
+      Stage 4a: `tests/test_media_sender.py`,
+      `tests/test_main_window_ux.py::test_start_blocked_by_an_unreadable_attachment`);
+      unchanged
+- [x] Corrupted file — already covered before this stage
+      (`tests/test_thumbnails.py::test_make_thumbnail_returns_none_for_corrupted_image`,
+      `tests/test_presets.py`'s corrupted-JSON tests); unchanged
+- [x] Very large file — new `tests/test_thumbnails.py` tests:
+      `format_file_size` at GB scale, and proof that `make_thumbnail`
+      requests a small scaled decode target regardless of how large the
+      source image reports itself (never a full-resolution decode)
+- [x] Long message — new `tests/test_template.py` test: a message well
+      past `TEXT_MESSAGE_MAX_LENGTH` (4096 chars) with Unicode/emoji
+      still expands `{name}` correctly and keeps a trailing entity
+      aligned. This app does not truncate/split long messages itself
+      (Telegram's own API is the one authority on that limit) -- adding
+      auto-splitting would be a new feature, not a reliability fix, and
+      was not implemented
+- [x] Unicode / emoji — already extensively covered before this stage
+      across `tests/test_template.py`, `tests/test_media_formatting.py`,
+      `tests/test_message_editor.py`, `tests/test_message_preview.py`;
+      unchanged
+- [x] Mixed attachments — already covered before this stage
+      (`test_photo_plus_video_uses_album_path`,
+      `test_photo_plus_document_does_not_album_but_keeps_caption` in
+      `tests/test_media_formatting.py` -- different attachment kinds
+      mixed in one send, both the album-eligible and non-album cases);
+      unchanged
+- [x] Concurrent user actions — already covered before this stage,
+      spread across the specific actions that can race: double-clicking
+      Start (`test_double_click_start_does_not_launch_two_campaigns`),
+      double-clicking account switch
+      (`test_duplicate_switch_clicks_are_ignored_while_in_flight`), and
+      retrying while a campaign is already active
+      (`test_retry_blocked_while_a_campaign_is_already_running`, v1.6);
+      `CampaignStateMachine` also structurally rejects invalid
+      concurrent state transitions regardless of UI click timing
+      (`test_state_machine_rejects_invalid_transition`)
+- [x] Duplicate campaign start protection — already covered before this
+      stage (`test_double_click_start_does_not_launch_two_campaigns`,
+      the TOCTOU race fix documented in `CLAUDE.md`); unchanged
 
 ---
 
