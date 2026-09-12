@@ -24,6 +24,8 @@ from PySide6.QtWidgets import (
     QInputDialog,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMainWindow,
     QMenu,
     QPushButton,
@@ -41,6 +43,7 @@ from app.campaign.campaign_state import CampaignStatus
 from app.campaign.rate_limiter import RateLimiter
 from app.campaign.report import suggest_report_filename, write_csv_report
 from app.campaign.report_library import ReportFileMissingError
+from app.campaign.send_queue import SendItemStatus
 from app.campaign import presets
 from app.campaign.presets import PresetError
 from app.recipients import groups
@@ -180,6 +183,11 @@ class MainWindow(QMainWindow):
         # this is what lets the CSV report/Results page stay populated
         # after the campaign completes/stops, per app.campaign.report.
         self._report_source: Optional[CampaignManager] = None
+        # (account, text, entities, attachments, recipient_names) from the
+        # most recently started campaign -- what Retry relaunches against
+        # a smaller recipient list. Also not cleared on finish, same
+        # reasoning as _report_source.
+        self._last_campaign_context: Optional[tuple] = None
         # Guards against a second "Использовать" click starting a new
         # switch while one is still in flight -- see _switch_account.
         self._account_switch_in_progress = False
@@ -345,6 +353,10 @@ class MainWindow(QMainWindow):
         self._stat_skipped.set_label(tr("main_window.results_page.stat_skipped"))
         self._results_export_button.setText(tr("main_window.results_page.export_csv_button"))
         self._save_report_button.setText(tr("main_window.results_page.save_report_button"))
+        self._failed_section_title.setText(tr("main_window.results_page.failed_section").upper())
+        self._retry_selected_button.setText(tr("main_window.results_page.retry_selected_button"))
+        self._retry_all_button.setText(tr("main_window.results_page.retry_all_button"))
+        self._refresh_failed_items()  # row text is baked in per-item, like saved-report cards
         self._saved_reports_section_title.setText(tr("main_window.results_page.saved_reports_section").upper())
         retranslate_empty_state(
             self._saved_reports_empty_label,
@@ -617,6 +629,31 @@ class MainWindow(QMainWindow):
         export_row.addWidget(self._save_report_button)
         export_row.addStretch(1)
         layout.addLayout(export_row)
+
+        self._failed_section_title = _section_title(tr("main_window.results_page.failed_section"))
+        self._failed_section_title.setVisible(False)
+        layout.addWidget(self._failed_section_title)
+
+        self._failed_items_list = QListWidget(page)
+        self._failed_items_list.setMaximumHeight(180)
+        self._failed_items_list.setVisible(False)
+        self._failed_items_list.itemChanged.connect(self._on_failed_item_check_changed)
+        layout.addWidget(self._failed_items_list)
+
+        retry_row = QHBoxLayout()
+        self._retry_selected_button = QPushButton(tr("main_window.results_page.retry_selected_button"), page)
+        self._retry_selected_button.setEnabled(False)
+        self._retry_selected_button.clicked.connect(self._on_retry_selected_clicked)
+        self._retry_all_button = QPushButton(tr("main_window.results_page.retry_all_button"), page)
+        self._retry_all_button.setObjectName("ghostButton")
+        self._retry_all_button.clicked.connect(self._on_retry_all_failures_clicked)
+        retry_row.addWidget(self._retry_selected_button)
+        retry_row.addWidget(self._retry_all_button)
+        retry_row.addStretch(1)
+        self._retry_row_widget = QWidget(page)
+        self._retry_row_widget.setLayout(retry_row)
+        self._retry_row_widget.setVisible(False)
+        layout.addWidget(self._retry_row_widget)
 
         self._saved_reports_section_title = _section_title(tr("main_window.results_page.saved_reports_section"))
         layout.addWidget(self._saved_reports_section_title)
@@ -1361,6 +1398,12 @@ class MainWindow(QMainWindow):
         self._current_campaign = campaign
         self._campaign_starting = False
         self._report_source = campaign
+        # What Retry (below) needs to relaunch this exact message/
+        # attachments/account against a different (smaller) recipient
+        # list -- deliberately not the rate limiter/retry count, which
+        # are re-read fresh from current settings at retry time instead,
+        # same as a normal Start.
+        self._last_campaign_context = (account, text, entities, attachments, recipient_names)
         self._campaign_controls.set_report_available(True)
         self._results_export_button.setEnabled(True)
         self._save_report_button.setEnabled(True)
@@ -1428,6 +1471,7 @@ class MainWindow(QMainWindow):
             )
         self._current_campaign = None
         self._on_form_state_changed()
+        self._refresh_failed_items()
 
         settings = self._service.settings_repository.load_app_settings()
         if settings.auto_save_reports and self._report_source is not None and self._report_source.items:
@@ -1474,6 +1518,7 @@ class MainWindow(QMainWindow):
         self._results_stats_widget.setVisible(has_data)
         if self._report_source is not None:
             self._update_results_stats(self._report_source.snapshot())
+        self._refresh_failed_items()
 
     def _update_results_stats(self, snapshot: ProgressSnapshot) -> None:
         self._results_empty_label.setVisible(False)
@@ -1482,6 +1527,83 @@ class MainWindow(QMainWindow):
         self._stat_success.set_value(snapshot.sent)
         self._stat_failed.set_value(snapshot.failed)
         self._stat_skipped.set_value(snapshot.skipped)
+
+    # ---- retry --------------------------------------------------------------
+
+    def _refresh_failed_items(self) -> None:
+        self._failed_items_list.blockSignals(True)
+        self._failed_items_list.clear()
+        failed_items = (
+            [item for item in self._report_source.items if item.status == SendItemStatus.FAILED]
+            if self._report_source is not None
+            else []
+        )
+        for item in failed_items:
+            list_item = QListWidgetItem(f"{item.recipient.display_label}  —  {item.error or ''}")
+            list_item.setFlags(list_item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
+            list_item.setCheckState(Qt.CheckState.Unchecked)
+            list_item.setData(Qt.ItemDataRole.UserRole, item)
+            self._failed_items_list.addItem(list_item)
+        self._failed_items_list.blockSignals(False)
+
+        has_failed = bool(failed_items)
+        self._failed_section_title.setVisible(has_failed)
+        self._failed_items_list.setVisible(has_failed)
+        self._retry_row_widget.setVisible(has_failed)
+        self._retry_all_button.setEnabled(has_failed)
+        self._update_retry_selected_enabled()
+
+    def _on_failed_item_check_changed(self, _item: QListWidgetItem) -> None:
+        self._update_retry_selected_enabled()
+
+    def _update_retry_selected_enabled(self) -> None:
+        any_checked = any(
+            self._failed_items_list.item(i).checkState() == Qt.CheckState.Checked
+            for i in range(self._failed_items_list.count())
+        )
+        self._retry_selected_button.setEnabled(any_checked)
+
+    def _on_retry_selected_clicked(self) -> None:
+        recipients = [
+            self._failed_items_list.item(i).data(Qt.ItemDataRole.UserRole).recipient
+            for i in range(self._failed_items_list.count())
+            if self._failed_items_list.item(i).checkState() == Qt.CheckState.Checked
+        ]
+        self._retry_recipients(recipients)
+
+    def _on_retry_all_failures_clicked(self) -> None:
+        recipients = [
+            self._failed_items_list.item(i).data(Qt.ItemDataRole.UserRole).recipient
+            for i in range(self._failed_items_list.count())
+        ]
+        self._retry_recipients(recipients)
+
+    def _retry_recipients(self, recipients) -> None:
+        # Reuses _start_campaign exactly like the fast workflow and the
+        # Campaign Wizard both do -- one validation/start implementation,
+        # never a second retry-specific code path. Only the recipient
+        # list shrinks to the ones actually retried; message/attachments/
+        # account are exactly what was sent the first time
+        # (_last_campaign_context), never whatever is currently sitting
+        # in the Campaign page's boxes.
+        if not recipients or self._last_campaign_context is None or self._campaign_starting:
+            return
+        if self._current_campaign is not None and self._current_campaign.is_active:
+            show_error(self, tr("main_window.dialogs.campaign_title"), tr("main_window.start_error.already_running"))
+            return
+        account, text, entities, attachments, recipient_names = self._last_campaign_context
+        settings = self._service.settings_repository.load_app_settings()
+        try:
+            rate_limiter = RateLimiter(settings.min_delay_seconds, settings.max_delay_seconds)
+        except SettingsValidationError as exc:
+            show_error(self, tr("main_window.dialogs.interval_title"), str(exc))
+            return
+        self._campaign_starting = True
+        asyncio.ensure_future(
+            self._start_campaign(
+                account, recipients, text, entities, attachments, rate_limiter, settings.retry_count, recipient_names
+            )
+        )
 
     def _on_save_report_clicked(self) -> None:
         if self._report_source is None or not self._report_source.items:

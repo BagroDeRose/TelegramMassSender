@@ -169,6 +169,9 @@ STRINGS: Dict[str, Dict[str, str]] = {
     "main_window.results_page.stat_skipped": {"ru": "Пропущено", "en": "Skipped"},
     "main_window.results_page.export_csv_button": {"ru": "Экспорт CSV-отчёта", "en": "Export CSV report"},
     "main_window.results_page.save_report_button": {"ru": "Сохранить отчёт", "en": "Save report"},
+    "main_window.results_page.failed_section": {"ru": "Неудачные получатели", "en": "Failed recipients"},
+    "main_window.results_page.retry_selected_button": {"ru": "Повторить выбранные", "en": "Retry selected"},
+    "main_window.results_page.retry_all_button": {"ru": "Повторить все ошибки", "en": "Retry all failures"},
     "main_window.results_page.saved_reports_section": {"ru": "Сохранённые отчёты", "en": "Saved reports"},
     "main_window.results_page.saved_reports_empty_title": {"ru": "Нет сохранённых отчётов", "en": "No saved reports"},
     "main_window.results_page.saved_reports_empty_body": {

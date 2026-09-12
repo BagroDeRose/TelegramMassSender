@@ -821,3 +821,118 @@ async def test_save_report_writes_to_library_and_refreshes_list(qapp, tmp_path):
     assert len(reports) == 1
     assert reports[0].name == "My saved report"
     assert len(window._saved_report_cards) == 1
+
+
+def _fake_report_source_with_two_failures():
+    from app.campaign.send_queue import SendItem, SendItemStatus
+    from app.recipients.parser import parse_recipient_line as parse
+
+    fake_campaign = MagicMock()
+    fake_campaign.items = [
+        SendItem(recipient=parse("@alice_test"), status=SendItemStatus.SENT),
+        SendItem(recipient=parse("@bob_test"), status=SendItemStatus.FAILED, error="Пользователь не найден"),
+        SendItem(recipient=parse("@carol_test"), status=SendItemStatus.FAILED, error="Заблокирован"),
+    ]
+    return fake_campaign
+
+
+async def test_refresh_failed_items_lists_only_failed_recipients(qapp, tmp_path):
+    window = _make_window(tmp_path)
+    window._report_source = _fake_report_source_with_two_failures()
+
+    window._refresh_failed_items()
+
+    assert window._failed_items_list.count() == 2
+    assert window._failed_items_list.isHidden() is False
+    assert window._retry_all_button.isEnabled() is True
+    texts = [window._failed_items_list.item(i).text() for i in range(2)]
+    assert any("bob_test" in t and "Пользователь не найден" in t for t in texts)
+    assert any("carol_test" in t for t in texts)
+
+
+async def test_refresh_failed_items_hides_section_with_no_failures(qapp, tmp_path):
+    window = _make_window(tmp_path)
+    window._refresh_failed_items()
+    assert window._failed_items_list.isHidden() is True
+    assert window._retry_row_widget.isHidden() is True
+    assert window._retry_all_button.isEnabled() is False
+
+
+async def test_retry_selected_enables_only_once_a_row_is_checked(qapp, tmp_path):
+    from PySide6.QtCore import Qt
+
+    window = _make_window(tmp_path)
+    window._report_source = _fake_report_source_with_two_failures()
+    window._refresh_failed_items()
+    assert window._retry_selected_button.isEnabled() is False
+
+    window._failed_items_list.item(0).setCheckState(Qt.CheckState.Checked)
+    assert window._retry_selected_button.isEnabled() is True
+
+    window._failed_items_list.item(0).setCheckState(Qt.CheckState.Unchecked)
+    assert window._retry_selected_button.isEnabled() is False
+
+
+async def test_retry_selected_only_relaunches_checked_recipients(qapp, tmp_path):
+    from PySide6.QtCore import Qt
+
+    window = _make_window(tmp_path)
+    window._report_source = _fake_report_source_with_two_failures()
+    window._refresh_failed_items()
+    window._last_campaign_context = (MagicMock(), "hello", [], [], {})
+    window._failed_items_list.item(1).setCheckState(Qt.CheckState.Checked)  # carol_test only
+
+    with patch.object(window, "_start_campaign", new=AsyncMock()) as mock_start:
+        window._on_retry_selected_clicked()
+        await asyncio.sleep(0)
+
+    mock_start.assert_called_once()
+    recipients_arg = mock_start.call_args[0][1]
+    assert [r.value for r in recipients_arg] == ["carol_test"]
+
+
+async def test_retry_all_failures_relaunches_every_failed_recipient(qapp, tmp_path):
+    window = _make_window(tmp_path)
+    window._report_source = _fake_report_source_with_two_failures()
+    window._refresh_failed_items()
+    window._last_campaign_context = (MagicMock(), "hello", [], [], {})
+
+    with patch.object(window, "_start_campaign", new=AsyncMock()) as mock_start:
+        window._on_retry_all_failures_clicked()
+        await asyncio.sleep(0)
+
+    mock_start.assert_called_once()
+    recipients_arg = mock_start.call_args[0][1]
+    assert sorted(r.value for r in recipients_arg) == ["bob_test", "carol_test"]
+
+
+async def test_retry_is_a_noop_without_a_previous_campaign_context(qapp, tmp_path):
+    window = _make_window(tmp_path)
+    window._report_source = _fake_report_source_with_two_failures()
+    window._refresh_failed_items()
+    assert window._last_campaign_context is None
+
+    with patch.object(window, "_start_campaign", new=AsyncMock()) as mock_start:
+        window._on_retry_all_failures_clicked()
+        await asyncio.sleep(0)
+
+    mock_start.assert_not_called()
+
+
+async def test_retry_blocked_while_a_campaign_is_already_running(qapp, tmp_path):
+    window = _make_window(tmp_path)
+    window._report_source = _fake_report_source_with_two_failures()
+    window._refresh_failed_items()
+    window._last_campaign_context = (MagicMock(), "hello", [], [], {})
+    running_campaign = MagicMock()
+    running_campaign.is_active = True
+    window._current_campaign = running_campaign
+
+    with patch.object(window, "_start_campaign", new=AsyncMock()) as mock_start, patch(
+        "app.ui.main_window.show_error"
+    ) as mock_show_error:
+        window._on_retry_all_failures_clicked()
+        await asyncio.sleep(0)
+
+    mock_start.assert_not_called()
+    mock_show_error.assert_called_once()

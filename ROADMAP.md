@@ -413,12 +413,35 @@ Still deferred.
 
 ## Retry
 
-- [ ] Retry failed recipients
-- [ ] Allow retry of selected failures
-- [ ] Allow retry of all failures
-- [ ] Never knowingly resend already-successful campaign steps
-- [ ] Preserve existing FloodWait safety behavior
-- [ ] Test retry behavior extensively
+- [x] Retry failed recipients — a new "Неудачные получатели" (Failed
+      recipients) section on the Results page, populated once a campaign
+      finishes: one checkable row per FAILED `SendItem` (raw identifier +
+      its specific error), with "Повторить выбранные"/"Повторить все
+      ошибки" buttons. Retrying relaunches through the exact same
+      `_start_campaign` the fast workflow, the Campaign Wizard, and Start
+      all already share -- one validation/start implementation, not a
+      fourth. The message text/formatting/attachments/account reused are
+      exactly what was actually sent the first time
+      (`MainWindow._last_campaign_context`, captured when that campaign
+      started), never whatever currently happens to be sitting in the
+      Campaign page's boxes; the sending interval and retry-count are
+      re-read fresh from current settings, same as a normal Start
+- [x] Allow retry of selected failures — checkboxes per row, "Повторить
+      выбранные" enabled only once at least one is checked
+- [x] Allow retry of all failures — "Повторить все ошибки", enabled
+      whenever there is at least one failed recipient
+- [x] Never knowingly resend already-successful campaign steps — only
+      `SendItemStatus.FAILED` items are ever offered for retry; SENT/
+      SKIPPED items never appear in the list or get included
+- [x] Preserve existing FloodWait safety behavior — a retry is a brand
+      new `CampaignManager` over a smaller recipient list, going through
+      the exact same resolve/send/FloodWait code path as any other
+      campaign; nothing here bypasses or shortcuts it
+- [x] Test retry behavior extensively — 7 new tests: list population
+      (only failed items, correct text/visibility), selected-only vs.
+      all-failures relaunch (asserting the exact recipient set passed to
+      `_start_campaign`), no-op with no prior campaign context, and
+      blocked while another campaign is already active
 
 ---
 
