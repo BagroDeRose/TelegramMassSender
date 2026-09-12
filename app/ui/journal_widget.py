@@ -12,6 +12,7 @@ from typing import Optional
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QToolButton, QVBoxLayout, QWidget
 
+from app.i18n import tr
 from app.ui import icons, theme
 
 _MAX_VISIBLE_LINES = 300
@@ -44,13 +45,13 @@ class JournalWidget(QFrame):
         layout.setSpacing(8)
 
         header = QHBoxLayout()
-        title = QLabel("Журнал", self)
-        title.setObjectName("journalTitle")
-        header.addWidget(title)
+        self._title = QLabel(tr("journal_widget.title"), self)
+        self._title.setObjectName("journalTitle")
+        header.addWidget(self._title)
         header.addStretch(1)
         self._collapse_button = QToolButton(self)
         self._collapse_button.setObjectName("journalToggleButton")
-        self._collapse_button.setToolTip("Скрыть журнал")
+        self._collapse_button.setToolTip(tr("journal_widget.hide_tooltip"))
         self._collapse_button.clicked.connect(self.toggle_requested.emit)
         header.addWidget(self._collapse_button)
         layout.addLayout(header)
@@ -76,6 +77,10 @@ class JournalWidget(QFrame):
 
     def clear(self) -> None:
         self._list.clear()
+
+    def retranslate_ui(self) -> None:
+        self._title.setText(tr("journal_widget.title"))
+        self._collapse_button.setToolTip(tr("journal_widget.hide_tooltip"))
 
     def _sync_collapse_icon(self) -> None:
         self._collapse_button.setIcon(icons.icon("close", theme.current_tokens().text_muted, 12))

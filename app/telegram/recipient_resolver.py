@@ -24,6 +24,7 @@ from telethon.errors import (
 from telethon.tl.functions.contacts import ResolvePhoneRequest
 from telethon.tl.types import User
 
+from app.i18n import tr
 from app.logging.logger import get_logger
 from app.recipients.parser import ParsedRecipient, RecipientKind
 
@@ -39,18 +40,36 @@ class ResolveStatus:
     UNAVAILABLE = "unavailable"
     PHONE_NOT_FOUND = "phone_not_found"
 
-STATUS_LABELS: Dict[str, str] = {
-    ResolveStatus.READY: "Готов",
-    ResolveStatus.INVALID_FORMAT: "Некорректный формат",
-    ResolveStatus.NOT_FOUND: "Пользователь не найден",
-    ResolveStatus.INVALID_ID: "Некорректный Telegram ID",
-    ResolveStatus.NOT_A_USER: "Нельзя отправить сообщение",
-    ResolveStatus.UNAVAILABLE: "Нельзя отправить сообщение",
-    ResolveStatus.PHONE_NOT_FOUND: (
-        "Telegram не смог разрешить этот номер телефона. Пользователь может быть "
-        "недоступен по номеру из-за настроек приватности Telegram."
-    ),
+
+_STATUS_LABEL_KEYS: Dict[str, str] = {
+    ResolveStatus.READY: "recipient_resolver.status.ready",
+    ResolveStatus.INVALID_FORMAT: "recipient_resolver.status.invalid_format",
+    ResolveStatus.NOT_FOUND: "recipient_resolver.status.user_not_found",
+    ResolveStatus.INVALID_ID: "recipient_resolver.status.invalid_id",
+    ResolveStatus.NOT_A_USER: "recipient_resolver.status.cannot_message",
+    ResolveStatus.UNAVAILABLE: "recipient_resolver.status.cannot_message",
+    ResolveStatus.PHONE_NOT_FOUND: "recipient_resolver.status.phone_not_found",
 }
+
+
+def status_label(status: str) -> str:
+    """Looked up fresh on every call (not a module-level dict of already-
+    resolved strings) so a language switch is reflected immediately,
+    rather than freezing every label in whatever language was active the
+    moment this module was first imported."""
+    return tr(_STATUS_LABEL_KEYS[status])
+
+
+class _StatusLabels:
+    """Preserves the STATUS_LABELS[status] subscript call sites below
+    without a module-level dict that would bake in the import-time
+    language permanently."""
+
+    def __getitem__(self, status: str) -> str:
+        return status_label(status)
+
+
+STATUS_LABELS = _StatusLabels()
 
 
 @dataclass
@@ -118,7 +137,7 @@ class RecipientResolver:
                 result = ResolvedRecipient(
                     parsed=parsed,
                     status=ResolveStatus.NOT_A_USER,
-                    error="Получатель должен быть пользователем, а не группой/каналом",
+                    error=tr("recipient_resolver.error.not_a_user"),
                 )
 
         self._cache[cache_key] = result
@@ -154,7 +173,7 @@ class RecipientResolver:
             return ResolvedRecipient(
                 parsed=parsed,
                 status=ResolveStatus.NOT_A_USER,
-                error="Получатель должен быть пользователем, а не группой/каналом",
+                error=tr("recipient_resolver.error.not_a_user"),
             )
         return ResolvedRecipient(parsed=parsed, status=ResolveStatus.READY, entity=entity)
 

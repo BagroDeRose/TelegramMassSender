@@ -29,9 +29,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.i18n import tr
 from app.telegram.media_sender import Attachment, AttachmentKind, kind_for_path
 from app.ui import icons, theme
-from app.ui.empty_state import build_empty_state
+from app.ui.empty_state import build_empty_state, retranslate_empty_state
 from app.ui.theme import SPACE_SM, SPACE_XS
 from app.ui.thumbnails import format_file_size, is_image, make_thumbnail
 
@@ -287,7 +288,7 @@ class AttachmentsWidget(QWidget):
         layout.setSpacing(SPACE_SM)
 
         self._empty_label = build_empty_state(
-            "Нет вложений", "Перетащите файлы сюда или нажмите «Добавить файл»", self
+            tr("attachments_widget.empty_title"), tr("attachments_widget.empty_body"), self
         )
         layout.addWidget(self._empty_label)
 
@@ -317,16 +318,16 @@ class AttachmentsWidget(QWidget):
         layout.addWidget(self._list)
 
         buttons = QHBoxLayout()
-        self._add_button = QPushButton("Добавить файл", self)
+        self._add_button = QPushButton(tr("attachments_widget.add_button"), self)
         self._add_button.clicked.connect(self._on_add_clicked)
-        remove_button = QPushButton("Удалить выбранное", self)
-        remove_button.clicked.connect(self._on_remove_clicked)
-        clear_button = QPushButton("Очистить", self)
-        clear_button.setObjectName("ghostButton")
-        clear_button.clicked.connect(self._on_clear_clicked)
+        self._remove_selected_button = QPushButton(tr("attachments_widget.remove_selected_button"), self)
+        self._remove_selected_button.clicked.connect(self._on_remove_clicked)
+        self._clear_button = QPushButton(tr("attachments_widget.clear_button"), self)
+        self._clear_button.setObjectName("ghostButton")
+        self._clear_button.clicked.connect(self._on_clear_clicked)
         buttons.addWidget(self._add_button)
-        buttons.addWidget(remove_button)
-        buttons.addWidget(clear_button)
+        buttons.addWidget(self._remove_selected_button)
+        buttons.addWidget(self._clear_button)
         buttons.addStretch(1)
         layout.addLayout(buttons)
 
@@ -335,7 +336,7 @@ class AttachmentsWidget(QWidget):
     # ---- adding / removing ---------------------------------------------------
 
     def _on_add_clicked(self) -> None:
-        files, _ = QFileDialog.getOpenFileNames(self, "Выбрать файлы")
+        files, _ = QFileDialog.getOpenFileNames(self, tr("attachments_widget.add_dialog_title"))
         for file_path in files:
             self.add_file(Path(file_path))
 
@@ -483,9 +484,9 @@ class AttachmentsWidget(QWidget):
         remove_button = QToolButton(tile)
         remove_button.setObjectName("chipRemoveButton")
         remove_button.setIcon(icons.icon("close", tokens.text_muted, _REMOVE_ICON_SIZE))
-        remove_button.setText(" Удалить")
+        remove_button.setText(tr("attachments_widget.remove_tile_button"))
         remove_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        remove_button.setToolTip("Удалить вложение")
+        remove_button.setToolTip(tr("attachments_widget.remove_tile_tooltip"))
         remove_button.clicked.connect(lambda: self._remove_item(item))
         remove_row = QHBoxLayout()
         remove_row.setContentsMargins(0, 0, 0, 0)
@@ -531,6 +532,21 @@ class AttachmentsWidget(QWidget):
             if not tile.is_image:
                 tile.image_label.setPixmap(icons.icon(tile.icon_name, color, _FILE_ICON_SIZE).pixmap(_FILE_ICON_SIZE, _FILE_ICON_SIZE))
             tile.remove_button.setIcon(icons.icon("close", color, _REMOVE_ICON_SIZE))
+
+    def retranslate_ui(self) -> None:
+        retranslate_empty_state(
+            self._empty_label, tr("attachments_widget.empty_title"), tr("attachments_widget.empty_body")
+        )
+        self._add_button.setText(tr("attachments_widget.add_button"))
+        self._remove_selected_button.setText(tr("attachments_widget.remove_selected_button"))
+        self._clear_button.setText(tr("attachments_widget.clear_button"))
+        # Rebuilds every tile from self._paths (preserving selection) --
+        # the same mechanism a reorder already uses -- rather than looping
+        # each tile's remove-button text/tooltip and the size/type meta
+        # line separately, since a full rebuild already guarantees every
+        # tile matches the current language with no second code path.
+        selected_paths = {self._paths[self._list.row(i)] for i in self._list.selectedItems()}
+        self._rebuild_tiles(selected_paths=selected_paths)
 
     # ---- public API used by app.ui.main_window --------------------------------
 

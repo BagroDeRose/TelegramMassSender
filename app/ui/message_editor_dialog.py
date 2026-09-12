@@ -18,6 +18,7 @@ from PySide6.QtGui import QCloseEvent, QGuiApplication
 from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QMessageBox, QPushButton, QVBoxLayout, QWidget
 from telethon.tl.types import TypeMessageEntity
 
+from app.i18n import tr
 from app.ui.message_editor import MessageEditorWidget
 
 _DEFAULT_SIZE = (760, 560)
@@ -49,7 +50,7 @@ class MessageEditorDialog(QDialog):
         parent: Optional[QWidget] = None,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Редактор сообщения")
+        self.setWindowTitle(tr("message_editor_dialog.title"))
         self.setSizeGripEnabled(True)
         self.setModal(True)
 
@@ -68,9 +69,9 @@ class MessageEditorDialog(QDialog):
         self._char_count_label.setObjectName("charCountLabel")
         footer.addWidget(self._char_count_label)
         footer.addStretch(1)
-        cancel_button = QPushButton("Отмена", self)
+        cancel_button = QPushButton(tr("message_editor_dialog.cancel_button"), self)
         cancel_button.clicked.connect(self.reject)
-        apply_button = QPushButton("Применить", self)
+        apply_button = QPushButton(tr("message_editor_dialog.apply_button"), self)
         apply_button.setObjectName("primaryButton")
         apply_button.setDefault(True)
         apply_button.clicked.connect(self._on_apply)
@@ -85,7 +86,7 @@ class MessageEditorDialog(QDialog):
         self._editor.text_edit.setFocus()
 
     def _update_char_count(self) -> None:
-        self._char_count_label.setText(f"Символов: {self._editor.character_count()}")
+        self._char_count_label.setText(tr("message_editor_dialog.char_count", count=self._editor.character_count()))
 
     def _restore_geometry(self) -> None:
         if _last_geometry is not None and self._is_geometry_on_screen(_last_geometry):
@@ -113,14 +114,24 @@ class MessageEditorDialog(QDialog):
     def _confirm_discard(self) -> bool:
         if not self.has_unsaved_changes():
             return True
-        reply = QMessageBox.question(
-            self,
-            "Несохранённые изменения",
-            "Изменения не были применены. Закрыть без сохранения?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        )
-        return reply == QMessageBox.StandardButton.Yes
+        # Custom Yes/No buttons rather than QMessageBox.StandardButton.Yes/No
+        # -- the stock buttons render in whatever language Qt's own bundled
+        # translations pick (no Qt translator is loaded here), ignoring the
+        # app's selected language entirely; every other confirmation dialog
+        # in the app already uses this same custom-button pattern (see
+        # app.ui.dialogs).
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle(tr("message_editor_dialog.unsaved_title"))
+        box.setText(tr("message_editor_dialog.unsaved_message"))
+        no_button = box.addButton(tr("message_editor_dialog.unsaved_no"), QMessageBox.ButtonRole.NoRole)
+        yes_button = box.addButton(tr("message_editor_dialog.unsaved_yes"), QMessageBox.ButtonRole.YesRole)
+        # "No" (don't discard) stays the default button, matching the
+        # original QMessageBox.question(..., defaultButton=No) behavior --
+        # accidentally hitting Enter must never discard unsaved work.
+        box.setDefaultButton(no_button)
+        box.exec()
+        return box.clickedButton() is yes_button
 
     def _on_apply(self) -> None:
         self._result_text, self._result_entities = self._editor.get_content()

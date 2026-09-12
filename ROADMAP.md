@@ -25,16 +25,52 @@ platform.
 
 ## Localization
 
-- [ ] Add Russian / English UI language switcher
-- [ ] Translate all user-facing UI strings
-- [ ] Translate dialogs and confirmation messages
-- [ ] Translate validation and error messages
-- [ ] Translate Campaign / Accounts / Results / Settings / Journal
-- [ ] Translate empty states
-- [ ] Persist selected language
-- [ ] Decide whether language switching applies immediately or after restart
-- [ ] Add tests for localization and language persistence
-- [ ] Create English portfolio screenshots
+- [x] Add Russian / English UI language switcher — a `QComboBox` next to
+      the existing theme combo on the Settings page
+      (`app/ui/main_window.py::_build_appearance_settings`), backed by a
+      new `app/i18n` package (`translator.py`'s `tr()`/`trn()` catalog
+      lookup + `strings.py`'s ~250-entry Russian/English catalog),
+      following the same active-state pattern `app/ui/theme.py` already
+      uses for the theme combo rather than pulling in gettext or Qt
+      Linguist's .ts/.qm + lupdate/lrelease toolchain
+- [x] Translate all user-facing UI strings — every `app/ui/*.py` file, plus
+      the strings that reach the UI from outside it: `app/config/settings.py`'s
+      validation errors, `app/campaign/report_library.py`'s errors,
+      `app/telegram/account_manager.py`'s `AccountSwitchBlockedError`,
+      `app/telegram/recipient_resolver.py`'s per-recipient status labels,
+      and `app/campaign/campaign_manager.py`'s Journal messages/permanent-
+      error labels. Deliberately NOT translated: the product name
+      ("Telegram Mass Sender" / "Mass Sender") and the generated CSV
+      report's own content (a file artifact for the user's records, not a
+      UI surface — translating it was never requested and would silently
+      expand scope)
+- [x] Translate dialogs and confirmation messages — `app/ui/dialogs.py`,
+      `login_dialog.py`, and `message_editor_dialog.py`'s unsaved-changes
+      prompt, which previously used Qt's stock (untranslated)
+      `QMessageBox.StandardButton.Yes/No` -- now converted to the same
+      custom-button pattern every other dialog in the app already used, so
+      it no longer silently stays in whatever language Qt's own bundled
+      translations pick
+- [x] Translate validation and error messages
+- [x] Translate Campaign / Accounts / Results / Settings / Journal
+- [x] Translate empty states
+- [x] Persist selected language — reuses the existing (previously dead)
+      `AppSettings.language` / `SETTINGS_KEY_LANGUAGE` field, already
+      round-tripped by `SettingsRepository`
+- [x] Decide whether language switching applies immediately or after
+      restart — **immediate**, matching the existing theme switch: every
+      persistent widget/page gets a `retranslate_ui()` method, dispatched
+      from `MainWindow.retranslate_ui()` the same way `_on_theme_combo_changed`
+      already dispatches `apply_theme()`; transient dialogs need no such
+      wiring since they read `tr()` fresh each time they're constructed
+- [x] Add tests for localization and language persistence — `tests/test_i18n.py`
+      (lookup, fallback, Russian 3-way + English 2-way pluralization,
+      catalog-completeness checks that every registered key has both
+      languages) plus `tests/test_main_window_ux.py` (live language switch
+      actually changes already-built widget text, persists across reload,
+      and reset-settings doesn't silently flip it)
+- [ ] Create English portfolio screenshots — separate README/portfolio
+      task, not yet done
 
 ## Universal Attachments
 

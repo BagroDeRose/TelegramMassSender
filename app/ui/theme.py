@@ -18,16 +18,30 @@ from PySide6.QtWidgets import QApplication
 
 from app.config.paths import get_theme_assets_dir
 from app.config.settings import DEFAULT_THEME
+from app.i18n import tr
 from app.ui import icons
 
 THEME_LIGHT = "light"
 THEME_DARK = "dark"
 VALID_THEMES = (THEME_DARK, THEME_LIGHT)
 
-THEME_LABELS: Dict[str, str] = {
-    THEME_DARK: "Тёмная",
-    THEME_LIGHT: "Светлая",
+_THEME_LABEL_KEYS: Dict[str, str] = {
+    THEME_DARK: "theme.label.dark",
+    THEME_LIGHT: "theme.label.light",
 }
+
+
+class _ThemeLabels:
+    """Looked up fresh on every subscript access rather than a plain
+    module-level dict, so the Settings page's theme combo picks up a
+    language switch instead of freezing every label in whatever language
+    was active when this module was first imported."""
+
+    def __getitem__(self, theme_name: str) -> str:
+        return tr(_THEME_LABEL_KEYS[theme_name])
+
+
+THEME_LABELS = _ThemeLabels()
 
 # ---- shared scale (identical in both themes) -------------------------------
 

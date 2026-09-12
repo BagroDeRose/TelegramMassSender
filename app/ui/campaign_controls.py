@@ -17,6 +17,7 @@ from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QProgressBar, QPushButton, QVBoxLayout, QWidget
 
 from app.campaign.campaign_manager import ProgressSnapshot
+from app.i18n import tr
 from app.ui.theme import SPACE_LG, SPACE_SM, SPACE_XS
 
 
@@ -33,6 +34,9 @@ class CampaignControlsWidget(QWidget):
         self._running = False
         self._is_paused = False
         self._start_ready = False
+        self._interval_min: Optional[int] = None
+        self._interval_max: Optional[int] = None
+        self._last_snapshot: Optional[ProgressSnapshot] = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -43,22 +47,22 @@ class CampaignControlsWidget(QWidget):
         self._interval_summary_label = QLabel("", self)
         self._interval_summary_label.setObjectName("helperText")
         interval_row.addWidget(self._interval_summary_label)
-        change_interval_button = QPushButton("Изменить в настройках", self)
-        change_interval_button.setObjectName("toolbarButton")
-        change_interval_button.clicked.connect(self.open_settings_requested.emit)
-        interval_row.addWidget(change_interval_button)
+        self._change_interval_button = QPushButton(tr("campaign_controls.edit_in_settings_button"), self)
+        self._change_interval_button.setObjectName("toolbarButton")
+        self._change_interval_button.clicked.connect(self.open_settings_requested.emit)
+        interval_row.addWidget(self._change_interval_button)
         interval_row.addStretch(1)
         layout.addLayout(interval_row)
 
         action_row = QHBoxLayout()
         action_row.setSpacing(SPACE_SM)
-        self._start_button = QPushButton("▶  Начать рассылку", self)
+        self._start_button = QPushButton(tr("campaign_controls.start_button"), self)
         self._start_button.setObjectName("primaryButton")
-        self._start_button.setToolTip("Нужны: подключённый аккаунт, хотя бы один получатель и текст или вложение")
+        self._start_button.setToolTip(tr("campaign_controls.start_tooltip"))
         self._start_button.clicked.connect(self.start_requested.emit)
-        self._pause_button = QPushButton("⏸  Пауза", self)
+        self._pause_button = QPushButton(tr("campaign_controls.pause_button"), self)
         self._pause_button.clicked.connect(self._on_pause_clicked)
-        self._stop_button = QPushButton("■  Остановить", self)
+        self._stop_button = QPushButton(tr("campaign_controls.stop_button"), self)
         self._stop_button.setObjectName("dangerButton")
         self._stop_button.clicked.connect(self.stop_requested.emit)
         action_row.addWidget(self._start_button, 1)
@@ -71,7 +75,9 @@ class CampaignControlsWidget(QWidget):
         self._progress_bar = QProgressBar(self)
         self._progress_bar.setRange(0, 100)
         stats_section.addWidget(self._progress_bar)
-        self._stats_label = QLabel("Всего: 0    Отправлено: 0    Ошибок: 0    Осталось: 0", self)
+        self._stats_label = QLabel(
+            tr("campaign_controls.stats_line", total=0, sent=0, failed=0, skipped=0, pending=0), self
+        )
         self._stats_label.setWordWrap(True)
         self._stats_label.setObjectName("summaryLabel")
         stats_section.addWidget(self._stats_label)
@@ -81,10 +87,8 @@ class CampaignControlsWidget(QWidget):
         stats_section.addWidget(self._status_label)
 
         report_row = QHBoxLayout()
-        self._export_report_button = QPushButton("Экспорт отчёта", self)
-        self._export_report_button.setToolTip(
-            "Сохранить результаты текущей рассылки в CSV-файл (открывается в Excel)"
-        )
+        self._export_report_button = QPushButton(tr("campaign_controls.export_report_button"), self)
+        self._export_report_button.setToolTip(tr("campaign_controls.export_report_tooltip"))
         self._export_report_button.setEnabled(False)
         self._export_report_button.clicked.connect(self.export_report_requested.emit)
         report_row.addWidget(self._export_report_button)
@@ -103,7 +107,9 @@ class CampaignControlsWidget(QWidget):
             self.pause_requested.emit()
 
     def set_interval_summary(self, min_seconds: int, max_seconds: int) -> None:
-        self._interval_summary_label.setText(f"Интервал отправки: {min_seconds}–{max_seconds} сек")
+        self._interval_min = min_seconds
+        self._interval_max = max_seconds
+        self._interval_summary_label.setText(tr("campaign_controls.interval_summary", min=min_seconds, max=max_seconds))
 
     def set_start_ready(self, ready: bool) -> None:
         """Proactively enable/disable Start based on whether an account,
@@ -120,14 +126,20 @@ class CampaignControlsWidget(QWidget):
         self._is_paused = paused
         self._update_start_enabled()
         self._pause_button.setEnabled(running)
-        self._pause_button.setText("▶  Продолжить" if paused else "⏸  Пауза")
+        self._pause_button.setText(tr("campaign_controls.resume_button") if paused else tr("campaign_controls.pause_button"))
         self._stop_button.setEnabled(running)
 
     def update_progress(self, snapshot: ProgressSnapshot) -> None:
+        self._last_snapshot = snapshot
         self._stats_label.setText(
-            f"Всего: {snapshot.total}    Отправлено: {snapshot.sent}    "
-            f"Ошибок: {snapshot.failed}    Пропущено: {snapshot.skipped}    "
-            f"Осталось: {snapshot.pending}"
+            tr(
+                "campaign_controls.stats_line",
+                total=snapshot.total,
+                sent=snapshot.sent,
+                failed=snapshot.failed,
+                skipped=snapshot.skipped,
+                pending=snapshot.pending,
+            )
         )
         done = snapshot.sent + snapshot.failed + snapshot.skipped
         percent = int(done / snapshot.total * 100) if snapshot.total else 0
@@ -138,3 +150,20 @@ class CampaignControlsWidget(QWidget):
 
     def set_report_available(self, available: bool) -> None:
         self._export_report_button.setEnabled(available)
+
+    def retranslate_ui(self) -> None:
+        self._change_interval_button.setText(tr("campaign_controls.edit_in_settings_button"))
+        self._start_button.setText(tr("campaign_controls.start_button"))
+        self._start_button.setToolTip(tr("campaign_controls.start_tooltip"))
+        self._pause_button.setText(tr("campaign_controls.resume_button") if self._is_paused else tr("campaign_controls.pause_button"))
+        self._stop_button.setText(tr("campaign_controls.stop_button"))
+        if self._last_snapshot is not None:
+            self.update_progress(self._last_snapshot)
+        else:
+            self._stats_label.setText(tr("campaign_controls.stats_line", total=0, sent=0, failed=0, skipped=0, pending=0))
+        self._export_report_button.setText(tr("campaign_controls.export_report_button"))
+        self._export_report_button.setToolTip(tr("campaign_controls.export_report_tooltip"))
+        if self._interval_min is not None and self._interval_max is not None:
+            self._interval_summary_label.setText(
+                tr("campaign_controls.interval_summary", min=self._interval_min, max=self._interval_max)
+            )

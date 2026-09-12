@@ -32,35 +32,70 @@ def test_apply_returns_edited_content(qapp):
 
 def test_cancel_without_changes_skips_prompt(qapp):
     dialog = MessageEditorDialog("same text", [])
-    with patch("app.ui.message_editor_dialog.QMessageBox.question") as mock_q:
+    with patch.object(QMessageBox, "exec") as mock_exec:
         dialog.reject()
-    mock_q.assert_not_called()
+    mock_exec.assert_not_called()
     assert dialog.result() == QDialog.DialogCode.Rejected
 
 
 def test_cancel_with_changes_no_keeps_dialog_open(qapp):
+    # _confirm_discard now builds its own custom-button QMessageBox
+    # (matching every other confirmation dialog in the app -- see
+    # app.ui.dialogs) rather than calling QMessageBox.question(), so the
+    # actual unit under test here is reject()'s behavior given the
+    # confirm/decline result, not the exact QMessageBox mechanics.
     dialog = MessageEditorDialog("original", [])
     dialog._editor.text_edit.setPlainText("changed!")
-    with patch.object(dialog, "_save_geometry") as mock_save, patch(
-        "app.ui.message_editor_dialog.QMessageBox.question",
-        return_value=QMessageBox.StandardButton.No,
-    ) as mock_q:
+    with patch.object(dialog, "_save_geometry") as mock_save, patch.object(
+        dialog, "_confirm_discard", return_value=False
+    ) as mock_confirm:
         dialog.reject()
-    mock_q.assert_called_once()
+    mock_confirm.assert_called_once()
     mock_save.assert_not_called()  # reject() must return early, not close
+    assert dialog.result() == QDialog.DialogCode.Rejected  # not yet actually rejected via super().reject()
 
 
 def test_cancel_with_changes_yes_discards(qapp):
     dialog = MessageEditorDialog("original", [])
     dialog._editor.text_edit.setPlainText("changed!")
-    with patch.object(dialog, "_save_geometry") as mock_save, patch(
-        "app.ui.message_editor_dialog.QMessageBox.question",
-        return_value=QMessageBox.StandardButton.Yes,
-    ) as mock_q:
+    with patch.object(dialog, "_save_geometry") as mock_save, patch.object(
+        dialog, "_confirm_discard", return_value=True
+    ) as mock_confirm:
         dialog.reject()
-    mock_q.assert_called_once()
+    mock_confirm.assert_called_once()
     mock_save.assert_called_once()
     assert dialog.result() == QDialog.DialogCode.Rejected
+
+
+def test_confirm_discard_no_button_keeps_the_dialog_open(qapp):
+    # A real, non-mocked exercise of _confirm_discard's own button-role
+    # wiring: simulate the user clicking "No" by driving the actual
+    # QMessageBox it constructs, rather than mocking around it.
+    dialog = MessageEditorDialog("original", [])
+    dialog._editor.text_edit.setPlainText("changed!")
+
+    def click_no(self):
+        no_button = next(b for b in self.buttons() if self.buttonRole(b) == QMessageBox.ButtonRole.NoRole)
+        self.setResult(0)
+        no_button.click()
+        return 0
+
+    with patch.object(QMessageBox, "exec", click_no):
+        assert dialog._confirm_discard() is False
+
+
+def test_confirm_discard_yes_button_allows_discard(qapp):
+    dialog = MessageEditorDialog("original", [])
+    dialog._editor.text_edit.setPlainText("changed!")
+
+    def click_yes(self):
+        yes_button = next(b for b in self.buttons() if self.buttonRole(b) == QMessageBox.ButtonRole.YesRole)
+        self.setResult(0)
+        yes_button.click()
+        return 0
+
+    with patch.object(QMessageBox, "exec", click_yes):
+        assert dialog._confirm_discard() is True
 
 
 def test_geometry_persists_within_session(qapp):

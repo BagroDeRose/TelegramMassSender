@@ -44,6 +44,7 @@ from telethon.tl.types import (
     TypeMessageEntity,
 )
 
+from app.i18n import tr
 from app.ui import theme
 
 PROP_SPOILER = QTextFormat.Property.UserProperty + 1
@@ -234,22 +235,24 @@ class MessageEditorWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
 
         toolbar = QHBoxLayout()
-        toolbar.addWidget(self._make_toggle_button("bold", "B", "Жирный (Ctrl+B)", self._toggle_bold))
-        toolbar.addWidget(self._make_toggle_button("italic", "I", "Курсив (Ctrl+I)", self._toggle_italic))
+        toolbar.addWidget(self._make_toggle_button("bold", "B", "message_editor.bold_tooltip", self._toggle_bold))
+        toolbar.addWidget(self._make_toggle_button("italic", "I", "message_editor.italic_tooltip", self._toggle_italic))
         toolbar.addWidget(
-            self._make_toggle_button("underline", "U", "Подчёркнутый (Ctrl+U)", self._toggle_underline)
+            self._make_toggle_button("underline", "U", "message_editor.underline_tooltip", self._toggle_underline)
         )
-        toolbar.addWidget(self._make_toggle_button("strike", "S", "Зачёркнутый", self._toggle_strike))
-        toolbar.addWidget(self._make_toggle_button("spoiler", "🙈", "Спойлер", self._toggle_spoiler))
-        toolbar.addWidget(self._make_toggle_button("code", "<>", "Код", self._toggle_code))
-        toolbar.addWidget(self._make_toggle_button("pre", "{ }", "Блок кода", self._toggle_pre))
-        toolbar.addWidget(self._make_button("🔗", "Добавить ссылку к выделенному тексту", self._insert_link))
-        toolbar.addWidget(self._make_emoji_button())
+        toolbar.addWidget(self._make_toggle_button("strike", "S", "message_editor.strike_tooltip", self._toggle_strike))
+        toolbar.addWidget(self._make_toggle_button("spoiler", "🙈", "message_editor.spoiler_tooltip", self._toggle_spoiler))
+        toolbar.addWidget(self._make_toggle_button("code", "<>", "message_editor.code_tooltip", self._toggle_code))
+        toolbar.addWidget(self._make_toggle_button("pre", "{ }", "message_editor.pre_tooltip", self._toggle_pre))
+        self._link_button = self._make_button("🔗", "message_editor.link_tooltip", self._insert_link)
+        toolbar.addWidget(self._link_button)
+        self._emoji_button = self._make_emoji_button()
+        toolbar.addWidget(self._emoji_button)
         toolbar.addStretch(1)
         layout.addLayout(toolbar)
 
         self._text_edit = QTextEdit(self)
-        self._text_edit.setPlaceholderText("Текст сообщения...")
+        self._text_edit.setPlaceholderText(tr("message_editor.placeholder"))
         self._text_edit.setAcceptRichText(False)
         if compact:
             self._text_edit.setFixedHeight(90)
@@ -262,19 +265,21 @@ class MessageEditorWidget(QWidget):
         QShortcut(QKeySequence("Ctrl+I"), self._text_edit, activated=self._toggle_italic)
         QShortcut(QKeySequence("Ctrl+U"), self._text_edit, activated=self._toggle_underline)
 
-    def _make_button(self, label: str, tooltip: str, handler) -> QToolButton:
+    def _make_button(self, label: str, tooltip_key: str, handler) -> QToolButton:
         button = QToolButton(self)
         button.setObjectName("toolbarButton")
         button.setText(label)
-        button.setToolTip(tooltip)
+        button.setToolTip(tr(tooltip_key))
+        button.setProperty("tooltipKey", tooltip_key)
         button.clicked.connect(handler)
         return button
 
-    def _make_toggle_button(self, kind: str, label: str, tooltip: str, handler) -> QToolButton:
+    def _make_toggle_button(self, kind: str, label: str, tooltip_key: str, handler) -> QToolButton:
         button = QToolButton(self)
         button.setObjectName("toolbarButton")
         button.setText(label)
-        button.setToolTip(tooltip)
+        button.setToolTip(tr(tooltip_key))
+        button.setProperty("tooltipKey", tooltip_key)
         button.setCheckable(True)
         button.clicked.connect(handler)
         self._toggle_buttons[kind] = button
@@ -284,7 +289,7 @@ class MessageEditorWidget(QWidget):
         button = QToolButton(self)
         button.setObjectName("toolbarButton")
         button.setText("🙂")
-        button.setToolTip("Вставить emoji")
+        button.setToolTip(tr("message_editor.emoji_tooltip"))
         button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         menu = QMenu(button)
         for emoji in _EMOJI_LIST:
@@ -292,6 +297,14 @@ class MessageEditorWidget(QWidget):
             action.triggered.connect(lambda checked=False, e=emoji: self._insert_emoji(e))
         button.setMenu(menu)
         return button
+
+    def retranslate_ui(self) -> None:
+        self._text_edit.setPlaceholderText(tr("message_editor.placeholder"))
+        for button in list(self._toggle_buttons.values()) + [self._link_button]:
+            tooltip_key = button.property("tooltipKey")
+            if tooltip_key:
+                button.setToolTip(tr(tooltip_key))
+        self._emoji_button.setToolTip(tr("message_editor.emoji_tooltip"))
 
     def _current_format(self) -> QTextCharFormat:
         return self._text_edit.textCursor().charFormat()
@@ -358,10 +371,10 @@ class MessageEditorWidget(QWidget):
         cursor = self._text_edit.textCursor()
         if not cursor.hasSelection():
             QMessageBox.information(
-                self, "Ссылка", "Сначала выделите текст, к которому нужно добавить ссылку."
+                self, tr("message_editor.link_dialog_title"), tr("message_editor.link_no_selection")
             )
             return
-        url, ok = QInputDialog.getText(self, "Добавить ссылку", "URL:")
+        url, ok = QInputDialog.getText(self, tr("message_editor.add_link_dialog_title"), tr("message_editor.url_label"))
         url = url.strip()
         if not ok or not url:
             return

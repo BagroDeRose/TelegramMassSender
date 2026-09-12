@@ -20,23 +20,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.i18n import tr, trn
 from app.recipients.importer import import_recipients_from_txt
 from app.recipients.parser import ParsedRecipient, ParseSummary, parse_recipient_lines
 
 _DEBOUNCE_MS = 300
-
-
-def _recipient_word(count: int) -> str:
-    """Correct Russian plural form of "получатель" for `count`."""
-    remainder_100 = count % 100
-    remainder_10 = count % 10
-    if 11 <= remainder_100 <= 14:
-        return "получателей"
-    if remainder_10 == 1:
-        return "получатель"
-    if 2 <= remainder_10 <= 4:
-        return "получателя"
-    return "получателей"
 
 
 class RecipientWidget(QWidget):
@@ -48,24 +36,19 @@ class RecipientWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
 
         self._text_edit = QPlainTextEdit(self)
-        self._text_edit.setPlaceholderText(
-            "@username1\n123456789\n+4917612345678\nhttps://t.me/username3"
-        )
-        self._text_edit.setToolTip(
-            "По одному получателю на строку: @username, Telegram ID, ссылка t.me/...\n"
-            "или номер телефона в международном формате (например +4917612345678)"
-        )
+        self._text_edit.setPlaceholderText(tr("recipient_widget.placeholder"))
+        self._text_edit.setToolTip(tr("recipient_widget.tooltip"))
         self._text_edit.textChanged.connect(self._on_text_changed)
         layout.addWidget(self._text_edit)
 
         buttons = QHBoxLayout()
-        import_button = QPushButton("Импорт TXT", self)
-        import_button.clicked.connect(self._on_import_clicked)
-        clear_button = QPushButton("Очистить", self)
-        clear_button.setObjectName("ghostButton")
-        clear_button.clicked.connect(self._on_clear_clicked)
-        buttons.addWidget(import_button)
-        buttons.addWidget(clear_button)
+        self._import_button = QPushButton(tr("recipient_widget.import_txt_button"), self)
+        self._import_button.clicked.connect(self._on_import_clicked)
+        self._clear_button = QPushButton(tr("recipient_widget.clear_button"), self)
+        self._clear_button.setObjectName("ghostButton")
+        self._clear_button.clicked.connect(self._on_clear_clicked)
+        buttons.addWidget(self._import_button)
+        buttons.addWidget(self._clear_button)
         buttons.addStretch(1)
         layout.addLayout(buttons)
 
@@ -97,29 +80,30 @@ class RecipientWidget(QWidget):
         summary = parse_recipient_lines(lines)
         self._last_summary = summary
         if summary.total_recipients == 0:
-            self._summary_label.setText(
-                "Нет получателей — вставьте @username, ID, ссылки t.me/... "
-                "или номера телефонов, либо импортируйте TXT-файл"
-            )
+            self._summary_label.setText(tr("recipient_widget.empty_summary"))
         else:
             valid_count = len(summary.valid_recipients)
             details = []
             if summary.invalid_count:
-                details.append(f"ошибок формата: {summary.invalid_count}")
+                details.append(tr("recipient_widget.summary_invalid_count", count=summary.invalid_count))
             if summary.duplicates_removed:
-                details.append(f"дубликатов удалено: {summary.duplicates_removed}")
+                details.append(tr("recipient_widget.summary_duplicates_removed", count=summary.duplicates_removed))
             suffix = f"  ({', '.join(details)})" if details else ""
-            self._summary_label.setText(f"{valid_count} {_recipient_word(valid_count)}{suffix}")
+            self._summary_label.setText(f"{trn('recipient_widget.recipient_count', valid_count)}{suffix}")
         self.recipients_changed.emit(summary)
 
     def _on_import_clicked(self) -> None:
-        file_path, _ = QFileDialog.getOpenFileName(self, "Импорт получателей", "", "Текстовые файлы (*.txt)")
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, tr("recipient_widget.import_dialog_title"), "", tr("recipient_widget.import_file_filter")
+        )
         if not file_path:
             return
         try:
             summary = import_recipients_from_txt(Path(file_path))
         except OSError as exc:
-            QMessageBox.warning(self, "Импорт получателей", f"Не удалось прочитать файл: {exc}")
+            QMessageBox.warning(
+                self, tr("recipient_widget.import_dialog_title"), tr("recipient_widget.import_read_failed", error=exc)
+            )
             return
 
         existing_text = self._text_edit.toPlainText()
@@ -130,11 +114,14 @@ class RecipientWidget(QWidget):
 
         QMessageBox.information(
             self,
-            "Импорт получателей",
-            f"Импортировано: {summary.total_recipients}\n"
-            f"Дубликатов удалено: {summary.duplicates_removed}\n"
-            f"Некорректных строк: {summary.invalid_count}\n"
-            f"Итого получателей: {len(summary.valid_recipients)}",
+            tr("recipient_widget.import_dialog_title"),
+            tr(
+                "recipient_widget.import_result",
+                total=summary.total_recipients,
+                duplicates=summary.duplicates_removed,
+                invalid=summary.invalid_count,
+                valid=len(summary.valid_recipients),
+            ),
         )
 
     def _on_clear_clicked(self) -> None:
@@ -145,3 +132,10 @@ class RecipientWidget(QWidget):
 
     def valid_recipients(self) -> List[ParsedRecipient]:
         return self._last_summary.valid_recipients
+
+    def retranslate_ui(self) -> None:
+        self._text_edit.setPlaceholderText(tr("recipient_widget.placeholder"))
+        self._text_edit.setToolTip(tr("recipient_widget.tooltip"))
+        self._import_button.setText(tr("recipient_widget.import_txt_button"))
+        self._clear_button.setText(tr("recipient_widget.clear_button"))
+        self._recompute_summary()

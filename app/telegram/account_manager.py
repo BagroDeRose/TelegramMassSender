@@ -12,6 +12,7 @@ from typing import Callable, List, Optional
 from app.config.paths import get_session_path
 from app.database.models import Account
 from app.database.repositories import AccountRepository
+from app.i18n import tr
 from app.logging.logger import get_logger
 from app.telegram.client_manager import ClientManager
 from app.telegram.exceptions import AccountSwitchBlockedError
@@ -113,9 +114,7 @@ class AccountManager:
 
     def switch_active_account(self, account_id: int) -> None:
         if self._switch_guard is not None and not self._switch_guard():
-            raise AccountSwitchBlockedError(
-                "Переключение аккаунта недоступно во время рассылки."
-            )
+            raise AccountSwitchBlockedError(tr("account_manager.error.switch_blocked"))
         self._active_account_id = account_id
         logger.info("Активный аккаунт переключён: %s", account_id)
 

@@ -19,11 +19,10 @@ from app.campaign.report import write_csv_report
 from app.campaign.send_queue import SendItem
 from app.database.models import SavedReport
 from app.database.repositories import SavedReportRepository
+from app.i18n import tr
 from app.logging.logger import get_logger
 
 logger = get_logger()
-
-_UNTITLED_NAME = "Без названия"
 
 
 class ReportFileMissingError(Exception):
@@ -55,7 +54,7 @@ def save_report(
     file_path = directory / f"report_{uuid.uuid4().hex[:12]}.csv"
     write_csv_report(items, file_path)
 
-    display_name = name.strip() or _UNTITLED_NAME
+    display_name = name.strip() or tr("report_library.untitled_name")
     return repo.create(display_name, total, successful, failed, skipped, str(file_path))
 
 
@@ -64,7 +63,7 @@ def list_reports(repo: SavedReportRepository) -> List[SavedReport]:
 
 
 def rename_report(repo: SavedReportRepository, report_id: int, new_name: str) -> None:
-    repo.rename(report_id, new_name.strip() or _UNTITLED_NAME)
+    repo.rename(report_id, new_name.strip() or tr("report_library.untitled_name"))
 
 
 def set_favorite(repo: SavedReportRepository, report_id: int, is_favorite: bool) -> None:
@@ -86,12 +85,12 @@ def read_report_rows(report: SavedReport) -> List[List[str]]:
     """Read a saved report's CSV content back for the "Open/View" action."""
     path = Path(report.file_path)
     if not path.is_file():
-        raise ReportFileMissingError(f"Файл отчёта не найден: {path}")
+        raise ReportFileMissingError(tr("report_library.error.file_not_found", path=path))
     try:
         with path.open("r", encoding="utf-8-sig", newline="") as f:
             return list(csv.reader(f, delimiter=";"))
     except (OSError, csv.Error) as exc:
-        raise ReportFileMissingError(f"Не удалось прочитать файл отчёта: {exc}") from exc
+        raise ReportFileMissingError(tr("report_library.error.read_failed", error=exc)) from exc
 
 
 def export_report(report: SavedReport, destination: Path) -> None:
@@ -100,5 +99,5 @@ def export_report(report: SavedReport, destination: Path) -> None:
     CSV" button which writes straight from in-memory SendItems."""
     path = Path(report.file_path)
     if not path.is_file():
-        raise ReportFileMissingError(f"Файл отчёта не найден: {path}")
+        raise ReportFileMissingError(tr("report_library.error.file_not_found", path=path))
     shutil.copyfile(path, destination)

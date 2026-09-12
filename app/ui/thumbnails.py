@@ -15,7 +15,10 @@ from typing import Optional
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QImageReader, QPixmap
 
+from app.i18n import tr
 from app.telegram.media_sender import THUMBNAILABLE_KINDS, kind_for_path
+
+_UNIT_KEYS = ("thumbnails.unit.bytes", "thumbnails.unit.kilobytes", "thumbnails.unit.megabytes", "thumbnails.unit.gigabytes")
 
 
 def is_image(path: Path) -> bool:
@@ -50,8 +53,9 @@ def make_thumbnail(path: Path, size: int) -> Optional[QPixmap]:
 
 def format_file_size(size_bytes: int) -> str:
     size = float(size_bytes)
-    for unit in ("Б", "КБ", "МБ", "ГБ"):
-        if size < 1024 or unit == "ГБ":
-            return f"{size:.0f} {unit}" if unit == "Б" else f"{size:.1f} {unit}"
+    for i, unit_key in enumerate(_UNIT_KEYS):
+        unit = tr(unit_key)
+        if size < 1024 or i == len(_UNIT_KEYS) - 1:
+            return f"{size:.0f} {unit}" if i == 0 else f"{size:.1f} {unit}"
         size /= 1024
-    return f"{size:.1f} ГБ"
+    return f"{size:.1f} {tr(_UNIT_KEYS[-1])}"

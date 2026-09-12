@@ -11,16 +11,19 @@ from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QButtonGroup, QFrame, QLabel, QToolButton, QVBoxLayout, QWidget
 
 from app.config.paths import get_resource_path
+from app.i18n import tr
 from app.ui import icons, theme
 from app.ui.theme import SPACE_LG, SPACE_XL, SPACE_XS, SPACE_XXL
 
-# (internal name, icon glyph, display label) -- internal name is only used
-# for lookups in tests/debugging, the label is what's shown.
+# (internal name, icon glyph, translation key) -- internal name is only
+# used for lookups in tests/debugging; the translation key resolves to
+# the display label shown, re-looked-up by retranslate_ui() on a language
+# switch rather than baked in once at import time.
 NAV_ITEMS: Tuple[Tuple[str, str, str], ...] = (
-    ("campaign", "campaign", "Кампания"),
-    ("accounts", "accounts", "Аккаунты"),
-    ("results", "results", "Результаты"),
-    ("settings", "settings", "Настройки"),
+    ("campaign", "campaign", "sidebar.nav.campaign"),
+    ("accounts", "accounts", "sidebar.nav.accounts"),
+    ("results", "results", "sidebar.nav.results"),
+    ("settings", "settings", "sidebar.nav.settings"),
 )
 
 
@@ -49,11 +52,11 @@ class Sidebar(QFrame):
 
         nav = QVBoxLayout()
         nav.setSpacing(SPACE_XS)
-        for index, (_key, icon_name, label) in enumerate(NAV_ITEMS):
+        for index, (_key, icon_name, label_key) in enumerate(NAV_ITEMS):
             button = QToolButton(self)
             button.setObjectName("navButton")
             button.setCheckable(True)
-            button.setText(f"  {label}")
+            button.setText(f"  {tr(label_key)}")
             button.setIconSize(QSize(18, 18))
             button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
             button.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -81,13 +84,13 @@ class Sidebar(QFrame):
             logo_label.setPixmap(pixmap.scaledToHeight(26, Qt.TransformationMode.SmoothTransformation))
         row.addWidget(logo_label)
 
-        title = QLabel("Mass Sender", brand)
+        title = QLabel("Mass Sender", brand)  # product name -- not translated
         title.setObjectName("sidebarBrandTitle")
         row.addWidget(title)
 
-        subtitle = QLabel("для Telegram", brand)
-        subtitle.setObjectName("sidebarBrandSubtitle")
-        row.addWidget(subtitle)
+        self._subtitle = QLabel(tr("sidebar.brand_subtitle"), brand)
+        self._subtitle.setObjectName("sidebarBrandSubtitle")
+        row.addWidget(self._subtitle)
 
         return brand
 
@@ -99,6 +102,11 @@ class Sidebar(QFrame):
         if 0 <= index < len(self._buttons):
             self._buttons[index].setChecked(True)
             self.apply_theme()
+
+    def retranslate_ui(self) -> None:
+        self._subtitle.setText(tr("sidebar.brand_subtitle"))
+        for button, (_key, _icon_name, label_key) in zip(self._buttons, NAV_ITEMS):
+            button.setText(f"  {tr(label_key)}")
 
     def apply_theme(self) -> None:
         """Re-tint every nav icon for the active theme/checked state. Icons

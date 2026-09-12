@@ -23,11 +23,12 @@ from telethon.tl.types import (
     TypeMessageEntity,
 )
 
+from app.i18n import tr
 from app.ui import theme
 
 
 def _placeholder_html() -> str:
-    return f'<span style="color:{theme.placeholder_text_color()};">Текст сообщения появится здесь…</span>'
+    return f'<span style="color:{theme.placeholder_text_color()};">{html_escape(tr("message_preview.placeholder"))}</span>'
 
 
 def _wrap_segment(escaped: str, active_entities: Sequence[TypeMessageEntity]) -> str:

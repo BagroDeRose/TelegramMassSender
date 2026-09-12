@@ -33,6 +33,7 @@ from telethon.errors import (
 )
 
 from app.database.models import Account
+from app.i18n import tr
 from app.logging.logger import get_logger
 from app.telegram.authentication import AuthenticatedUser, AuthenticationFlow
 from app.telegram.service import TelegramService
@@ -51,7 +52,7 @@ class LoginDialog(QDialog):
         self._flow: Optional[AuthenticationFlow] = None
         self._account: Optional[Account] = None
 
-        self.setWindowTitle("Подключение Telegram")
+        self.setWindowTitle(tr("login_dialog.title"))
         self.setMinimumWidth(420)
 
         self._stack = QStackedWidget(self)
@@ -72,33 +73,31 @@ class LoginDialog(QDialog):
         creds = self._service.secure_storage.load_api_credentials()
 
         self._api_id_edit = QLineEdit(page)
-        self._api_id_edit.setPlaceholderText("напр. 12345678")
-        self._api_id_edit.setToolTip("Получается на my.telegram.org/apps (раздел API development tools)")
+        self._api_id_edit.setPlaceholderText(tr("login_dialog.api_id_placeholder"))
+        self._api_id_edit.setToolTip(tr("login_dialog.api_id_tooltip"))
         if creds is not None:
             self._api_id_edit.setText(str(creds.api_id))
 
         self._api_hash_edit = QLineEdit(page)
-        self._api_hash_edit.setPlaceholderText("32-символьный API Hash")
-        self._api_hash_edit.setToolTip(
-            "Секретный ключ приложения Telegram с my.telegram.org — никому не передавайте его"
-        )
+        self._api_hash_edit.setPlaceholderText(tr("login_dialog.api_hash_placeholder"))
+        self._api_hash_edit.setToolTip(tr("login_dialog.api_hash_tooltip"))
         if creds is not None:
             self._api_hash_edit.setText(creds.api_hash)
 
         self._phone_edit = QLineEdit(page)
-        self._phone_edit.setPlaceholderText("+79991234567")
-        self._phone_edit.setToolTip("Номер телефона аккаунта в международном формате, со знаком +")
+        self._phone_edit.setPlaceholderText(tr("login_dialog.phone_placeholder"))
+        self._phone_edit.setToolTip(tr("login_dialog.phone_tooltip"))
 
         self._connect_error = QLabel(page)
         self._connect_error.setObjectName("dialogErrorLabel")
         self._connect_error.setWordWrap(True)
 
-        layout.addRow("API ID:", self._api_id_edit)
-        layout.addRow("API Hash:", self._api_hash_edit)
-        layout.addRow("Телефон:", self._phone_edit)
+        layout.addRow(tr("login_dialog.api_id_label"), self._api_id_edit)
+        layout.addRow(tr("login_dialog.api_hash_label"), self._api_hash_edit)
+        layout.addRow(tr("login_dialog.phone_label"), self._phone_edit)
         layout.addRow(self._connect_error)
 
-        self._connect_button = QPushButton("Подключить", page)
+        self._connect_button = QPushButton(tr("login_dialog.connect_button"), page)
         self._connect_button.clicked.connect(self._on_connect_clicked)
         layout.addRow(self._connect_button)
 
@@ -115,15 +114,13 @@ class LoginDialog(QDialog):
         phone = self._phone_edit.text().strip()
 
         if not api_id_text.isdigit():
-            self._connect_error.setText("API ID должен быть числом.")
+            self._connect_error.setText(tr("login_dialog.error.api_id_not_a_number"))
             return
         if not api_hash or len(api_hash) < 10:
-            self._connect_error.setText("Введите корректный API Hash.")
+            self._connect_error.setText(tr("login_dialog.error.invalid_api_hash"))
             return
         if not _PHONE_RE.match(phone):
-            self._connect_error.setText(
-                "Введите номер телефона в международном формате, напр. +79991234567."
-            )
+            self._connect_error.setText(tr("login_dialog.error.invalid_phone_format"))
             return
 
         self._connect_button.setEnabled(False)
@@ -137,16 +134,14 @@ class LoginDialog(QDialog):
             self._flow = AuthenticationFlow(client, phone)
             await self._flow.request_code()
         except PhoneNumberInvalidError:
-            self._connect_error.setText("Некорректный номер телефона.")
+            self._connect_error.setText(tr("login_dialog.error.invalid_phone"))
             return
         except FloodWaitError as exc:
-            self._connect_error.setText(
-                f"Telegram временно ограничил запросы. Подождите {exc.seconds} сек."
-            )
+            self._connect_error.setText(tr("login_dialog.error.flood_wait", seconds=exc.seconds))
             return
         except Exception as exc:  # noqa: BLE001 - surfaced to the user, not swallowed
             logger.warning("Ошибка подключения аккаунта: %s", exc)
-            self._connect_error.setText(f"Не удалось подключиться: {exc}")
+            self._connect_error.setText(tr("login_dialog.error.connect_failed", error=exc))
             return
         finally:
             self._connect_button.setEnabled(True)
@@ -161,7 +156,7 @@ class LoginDialog(QDialog):
         page = QWidget(self)
         layout = QVBoxLayout(page)
 
-        layout.addWidget(QLabel("Введите код из Telegram:", page))
+        layout.addWidget(QLabel(tr("login_dialog.code_label"), page))
         self._code_edit = QLineEdit(page)
         layout.addWidget(self._code_edit)
 
@@ -170,7 +165,7 @@ class LoginDialog(QDialog):
         self._code_error.setWordWrap(True)
         layout.addWidget(self._code_error)
 
-        self._code_button = QPushButton("Подтвердить", page)
+        self._code_button = QPushButton(tr("login_dialog.confirm_button"), page)
         self._code_button.clicked.connect(self._on_code_clicked)
         layout.addWidget(self._code_button)
 
@@ -183,26 +178,24 @@ class LoginDialog(QDialog):
         assert self._flow is not None
         code = self._code_edit.text().strip()
         if not code:
-            self._code_error.setText("Введите код подтверждения.")
+            self._code_error.setText(tr("login_dialog.error.code_required"))
             return
 
         self._code_button.setEnabled(False)
         try:
             user = await self._flow.submit_code(code)
         except PhoneCodeInvalidError:
-            self._code_error.setText("Неверный код. Попробуйте снова.")
+            self._code_error.setText(tr("login_dialog.error.invalid_code"))
             return
         except PhoneCodeExpiredError:
-            self._code_error.setText("Код истёк. Запросите подключение заново.")
+            self._code_error.setText(tr("login_dialog.error.code_expired"))
             return
         except FloodWaitError as exc:
-            self._code_error.setText(
-                f"Telegram временно ограничил запросы. Подождите {exc.seconds} сек."
-            )
+            self._code_error.setText(tr("login_dialog.error.flood_wait", seconds=exc.seconds))
             return
         except Exception as exc:  # noqa: BLE001
             logger.warning("Ошибка ввода кода: %s", exc)
-            self._code_error.setText(f"Не удалось подтвердить код: {exc}")
+            self._code_error.setText(tr("login_dialog.error.code_confirm_failed", error=exc))
             return
         finally:
             self._code_button.setEnabled(True)
@@ -220,7 +213,7 @@ class LoginDialog(QDialog):
         page = QWidget(self)
         layout = QVBoxLayout(page)
 
-        layout.addWidget(QLabel("Введите пароль двухфакторной аутентификации:", page))
+        layout.addWidget(QLabel(tr("login_dialog.password_label"), page))
         self._password_edit = QLineEdit(page)
         self._password_edit.setEchoMode(QLineEdit.EchoMode.Password)
         layout.addWidget(self._password_edit)
@@ -230,7 +223,7 @@ class LoginDialog(QDialog):
         self._password_error.setWordWrap(True)
         layout.addWidget(self._password_error)
 
-        self._password_button = QPushButton("Подтвердить", page)
+        self._password_button = QPushButton(tr("login_dialog.confirm_button"), page)
         self._password_button.clicked.connect(self._on_password_clicked)
         layout.addWidget(self._password_button)
 
@@ -243,23 +236,21 @@ class LoginDialog(QDialog):
         assert self._flow is not None
         password = self._password_edit.text()
         if not password:
-            self._password_error.setText("Введите пароль.")
+            self._password_error.setText(tr("login_dialog.error.password_required"))
             return
 
         self._password_button.setEnabled(False)
         try:
             user = await self._flow.submit_password(password)
         except PasswordHashInvalidError:
-            self._password_error.setText("Неверный пароль.")
+            self._password_error.setText(tr("login_dialog.error.invalid_password"))
             return
         except FloodWaitError as exc:
-            self._password_error.setText(
-                f"Telegram временно ограничил запросы. Подождите {exc.seconds} сек."
-            )
+            self._password_error.setText(tr("login_dialog.error.flood_wait", seconds=exc.seconds))
             return
         except Exception as exc:  # noqa: BLE001
             logger.warning("Ошибка ввода пароля 2FA: %s", exc)
-            self._password_error.setText(f"Не удалось подтвердить пароль: {exc}")
+            self._password_error.setText(tr("login_dialog.error.password_confirm_failed", error=exc))
             return
         finally:
             self._password_button.setEnabled(True)
@@ -274,7 +265,7 @@ class LoginDialog(QDialog):
         page = QWidget(self)
         layout = QVBoxLayout(page)
 
-        layout.addWidget(QLabel("✓ Telegram аккаунт подключён", page))
+        layout.addWidget(QLabel(tr("login_dialog.success_title"), page))
 
         self._success_phone = QLabel(page)
         self._success_name = QLabel(page)
@@ -283,7 +274,7 @@ class LoginDialog(QDialog):
         layout.addWidget(self._success_name)
         layout.addWidget(self._success_username)
 
-        done_button = QPushButton("Готово", page)
+        done_button = QPushButton(tr("login_dialog.done_button"), page)
         done_button.clicked.connect(self.accept)
         row = QHBoxLayout()
         row.addStretch(1)
@@ -301,10 +292,12 @@ class LoginDialog(QDialog):
         )
         self._account = refreshed
 
-        self._success_phone.setText(f"Аккаунт:\n{refreshed.phone}")
-        self._success_name.setText(f"Имя:\n{refreshed.display_name or '-'}")
+        self._success_phone.setText(tr("login_dialog.summary_account", phone=refreshed.phone))
+        self._success_name.setText(tr("login_dialog.summary_name", name=refreshed.display_name or "-"))
         self._success_username.setText(
-            f"Username:\n@{refreshed.username}" if refreshed.username else "Username:\n-"
+            tr("login_dialog.summary_username", username=refreshed.username)
+            if refreshed.username
+            else tr("login_dialog.summary_username_none")
         )
         self._stack.setCurrentIndex(3)
         self.account_ready.emit(refreshed)

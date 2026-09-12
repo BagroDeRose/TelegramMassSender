@@ -28,15 +28,18 @@ class StatCard(QFrame):
             self._value_label.setProperty("variant", variant)
         layout.addWidget(self._value_label)
 
-        caption = QLabel(label.upper(), self)
-        caption.setObjectName("statLabel")
-        layout.addWidget(caption)
+        self._caption = QLabel(label.upper(), self)
+        self._caption.setObjectName("statLabel")
+        layout.addWidget(self._caption)
 
         layout.addStretch(1)
         self.setMinimumHeight(84)
 
     def set_value(self, value: int) -> None:
         self._value_label.setText(str(value))
+
+    def set_label(self, label: str) -> None:
+        self._caption.setText(label.upper())
 
     def restyle(self) -> None:
         """Force Qt to re-evaluate the [variant=...] property selector after

@@ -220,6 +220,48 @@ async def test_theme_combo_switches_active_theme(qapp, tmp_path):
     theme.set_active_theme(theme.THEME_DARK)  # restore module-global state for other tests
 
 
+async def test_language_combo_switches_active_language_and_retranslates(qapp, tmp_path):
+    from app.i18n import LANGUAGE_EN, LANGUAGE_RU, get_language, set_language
+
+    window = _make_window(tmp_path)
+    try:
+        english_index = window._language_combo.findData(LANGUAGE_EN)
+        window._language_combo.setCurrentIndex(english_index)
+
+        assert get_language() == LANGUAGE_EN
+        reloaded = window._service.settings_repository.load_app_settings()
+        assert reloaded.language == LANGUAGE_EN
+        # Immediate switch, not "restart required" -- an already-built,
+        # persistent widget's text actually changes.
+        assert window._campaign_controls._start_button.text() == "▶  Start campaign"
+        assert window._sidebar._buttons[0].text() == "  Campaign"
+    finally:
+        set_language(LANGUAGE_RU)  # restore module-global state for other tests
+
+
+async def test_reset_settings_does_not_change_the_active_language(qapp, tmp_path):
+    from app.i18n import LANGUAGE_EN, LANGUAGE_RU, get_language, set_language
+
+    window = _make_window(tmp_path)
+    try:
+        english_index = window._language_combo.findData(LANGUAGE_EN)
+        window._language_combo.setCurrentIndex(english_index)
+        assert get_language() == LANGUAGE_EN
+
+        with patch("app.ui.main_window.confirm_reset_settings", return_value=True), patch(
+            "app.ui.main_window.show_info"
+        ):
+            window._on_reset_settings_clicked()
+
+        # Matches the existing theme-reset behavior -- a setting with its
+        # own dedicated control isn't silently flipped by a general reset.
+        assert get_language() == LANGUAGE_EN
+        reloaded = window._service.settings_repository.load_app_settings()
+        assert reloaded.language == LANGUAGE_EN
+    finally:
+        set_language(LANGUAGE_RU)
+
+
 async def test_sidebar_click_switches_stack_page(qapp, tmp_path):
     window = _make_window(tmp_path)
     assert window._stack.currentIndex() == 0

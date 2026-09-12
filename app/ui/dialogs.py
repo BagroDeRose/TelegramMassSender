@@ -1,33 +1,41 @@
-"""Confirmation and result dialogs (spec items 21, 37-38)."""
+"""Confirmation and result dialogs (spec items 21, 37-38).
+
+Every dialog here is built fresh on each call, so reading tr()/trn() at
+call time is all "immediate" language switching needs for this file --
+there is no persistent widget to retranslate.
+"""
 from __future__ import annotations
 
 from PySide6.QtWidgets import QMessageBox, QWidget
 
+from app.i18n import tr, trn
+
 
 def confirm_delete_account(parent: QWidget, phone: str) -> bool:
-    # Custom Russian button labels (spec item 37 mockup: [Да] [Нет]) --
-    # QMessageBox's StandardButton.Yes/No render in English unless a Qt
-    # translator is loaded, which this app does not do.
+    # Custom Russian/English button labels (spec item 37 mockup: [Да] [Нет])
+    # -- QMessageBox's StandardButton.Yes/No render in whatever language
+    # Qt's own bundled translations pick unless a Qt translator is loaded,
+    # which this app does not do.
     box = QMessageBox(parent)
     box.setIcon(QMessageBox.Icon.Question)
-    box.setWindowTitle("Удалить аккаунт?")
-    box.setText(f"Будет удалена локальная Telegram-сессия аккаунта {phone}.\n\nПродолжить?")
-    yes_button = box.addButton("Да", QMessageBox.ButtonRole.YesRole)
-    box.addButton("Нет", QMessageBox.ButtonRole.NoRole)
+    box.setWindowTitle(tr("dialogs.delete_account.title"))
+    box.setText(tr("dialogs.delete_account.message", phone=phone))
+    yes_button = box.addButton(tr("dialogs.yes"), QMessageBox.ButtonRole.YesRole)
+    box.addButton(tr("dialogs.no"), QMessageBox.ButtonRole.NoRole)
     box.setDefaultButton(yes_button)
     box.exec()
     return box.clickedButton() is yes_button
 
 
 def confirm_exit_during_campaign(parent: QWidget) -> bool:
-    # Custom Russian button labels matching spec item 38 mockup exactly:
+    # Custom button labels matching spec item 38 mockup exactly:
     # [ Отмена ]      [ Выйти ]
     box = QMessageBox(parent)
     box.setIcon(QMessageBox.Icon.Warning)
-    box.setWindowTitle("Рассылка ещё выполняется")
-    box.setText("Вы действительно хотите выйти?")
-    box.addButton("Отмена", QMessageBox.ButtonRole.RejectRole)
-    exit_button = box.addButton("Выйти", QMessageBox.ButtonRole.DestructiveRole)
+    box.setWindowTitle(tr("dialogs.exit_during_campaign.title"))
+    box.setText(tr("dialogs.exit_during_campaign.message"))
+    box.addButton(tr("dialogs.cancel"), QMessageBox.ButtonRole.RejectRole)
+    exit_button = box.addButton(tr("dialogs.exit"), QMessageBox.ButtonRole.DestructiveRole)
     box.setDefaultButton(exit_button)
     box.exec()
     return box.clickedButton() is exit_button
@@ -48,10 +56,10 @@ def confirm_start_campaign(parent: QWidget, recipient_count: int) -> bool:
     everyone)."""
     box = QMessageBox(parent)
     box.setIcon(QMessageBox.Icon.Question)
-    box.setWindowTitle("Начать рассылку?")
-    box.setText(f"Сообщение будет отправлено {recipient_count} получателям. Продолжить?")
-    yes_button = box.addButton("Начать", QMessageBox.ButtonRole.YesRole)
-    box.addButton("Отмена", QMessageBox.ButtonRole.RejectRole)
+    box.setWindowTitle(tr("dialogs.start_campaign.title"))
+    box.setText(trn("dialogs.start_campaign.message", recipient_count))
+    yes_button = box.addButton(tr("dialogs.start_campaign.start"), QMessageBox.ButtonRole.YesRole)
+    box.addButton(tr("dialogs.cancel"), QMessageBox.ButtonRole.RejectRole)
     box.setDefaultButton(yes_button)
     box.exec()
     return box.clickedButton() is yes_button
@@ -60,10 +68,10 @@ def confirm_start_campaign(parent: QWidget, recipient_count: int) -> bool:
 def confirm_reset_settings(parent: QWidget) -> bool:
     box = QMessageBox(parent)
     box.setIcon(QMessageBox.Icon.Warning)
-    box.setWindowTitle("Сбросить настройки?")
-    box.setText("Все настройки приложения будут возвращены к значениям по умолчанию. Продолжить?")
-    yes_button = box.addButton("Сбросить", QMessageBox.ButtonRole.YesRole)
-    box.addButton("Отмена", QMessageBox.ButtonRole.RejectRole)
+    box.setWindowTitle(tr("dialogs.reset_settings.title"))
+    box.setText(tr("dialogs.reset_settings.message"))
+    yes_button = box.addButton(tr("dialogs.reset_settings.reset"), QMessageBox.ButtonRole.YesRole)
+    box.addButton(tr("dialogs.cancel"), QMessageBox.ButtonRole.RejectRole)
     box.setDefaultButton(yes_button)
     box.exec()
     return box.clickedButton() is yes_button

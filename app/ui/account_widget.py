@@ -12,9 +12,10 @@ from typing import List, Optional
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QToolButton, QVBoxLayout, QWidget
 
+from app.i18n import tr
 from app.telegram.account_manager import AccountStatus
 from app.ui import icons, theme
-from app.ui.empty_state import build_empty_state
+from app.ui.empty_state import build_empty_state, retranslate_empty_state
 from app.ui.theme import SPACE_MD, SPACE_SM, SPACE_XS
 
 _CARD_MAX_WIDTH = 420
@@ -33,12 +34,12 @@ _VARIANT_TOKEN_FIELD = {
 
 def _status_text_and_variant(status: AccountStatus) -> tuple[str, str]:
     if status.is_authorized:
-        return "Подключён", "success"
+        return tr("account_widget.status.connected"), "success"
     if status.connection_error:
-        return "Проблема с подключением", "warning"
+        return tr("account_widget.status.connection_problem"), "warning"
     if status.needs_reauth:
-        return "Требуется повторная авторизация", "error"
-    return "Не авторизован", "muted"
+        return tr("account_widget.status.reauth_required"), "error"
+    return tr("account_widget.status.not_authorized"), "muted"
 
 
 def _avatar_initial(account) -> str:
@@ -67,7 +68,7 @@ class AccountWidget(QWidget):
         self._layout.setSpacing(SPACE_MD)
 
         top_row = QHBoxLayout()
-        self._add_button = QPushButton("+ Добавить аккаунт", self)
+        self._add_button = QPushButton(tr("account_widget.add_account_button"), self)
         self._add_button.setObjectName("primaryButton")
         self._add_button.clicked.connect(self.add_account_requested.emit)
         top_row.addWidget(self._add_button)
@@ -75,7 +76,7 @@ class AccountWidget(QWidget):
         self._layout.addLayout(top_row)
 
         self._empty_label = build_empty_state(
-            "Нет Telegram-аккаунтов", "Добавьте аккаунт, чтобы начать.", self
+            tr("account_widget.empty_title"), tr("account_widget.empty_body"), self
         )
         self._layout.addWidget(self._empty_label)
 
@@ -152,12 +153,14 @@ class AccountWidget(QWidget):
         actions = QHBoxLayout()
         actions.addStretch(1)
         if status.connection_error:
-            reconnect_button = QPushButton("Переподключить", card)
+            reconnect_button = QPushButton(tr("account_widget.reconnect_button"), card)
             reconnect_button.setProperty("accountId", account.id)
             reconnect_button.clicked.connect(lambda: self.reconnect_requested.emit(account.id))
             actions.addWidget(reconnect_button)
             self._reconnect_buttons.append(reconnect_button)
-        use_button = QPushButton("Активен" if is_active else "Использовать", card)
+        use_button = QPushButton(
+            tr("account_widget.use_button_active") if is_active else tr("account_widget.use_button_inactive"), card
+        )
         use_button.setObjectName("accountUseButton")
         use_button.setProperty("active", "true" if is_active else "false")
         use_button.setProperty("accountId", account.id)
@@ -170,7 +173,7 @@ class AccountWidget(QWidget):
         delete_button.setObjectName("chipRemoveButton")
         delete_button.setProperty("accountId", account.id)
         delete_button.setIcon(icons.icon("close", theme.current_tokens().text_muted, 12))
-        delete_button.setToolTip("Удалить аккаунт")
+        delete_button.setToolTip(tr("account_widget.delete_tooltip"))
         delete_button.clicked.connect(lambda: self.delete_account_requested.emit(account.id))
         actions.addWidget(delete_button)
         self._delete_buttons.append(delete_button)
@@ -186,6 +189,15 @@ class AccountWidget(QWidget):
         the status-dot color are baked in Python at build time (QSS can't
         reach a QPixmap or inline-HTML QLabel content), so unlike most of
         this app's QSS-only widgets, this one needs an explicit refresh."""
+        self.set_accounts(self._statuses, self._active_account_id)
+
+    def retranslate_ui(self) -> None:
+        self._add_button.setText(tr("account_widget.add_account_button"))
+        retranslate_empty_state(self._empty_label, tr("account_widget.empty_title"), tr("account_widget.empty_body"))
+        # Every card's text is fully rebuilt from tr() calls anyway -- same
+        # rebuild apply_theme() already relies on for its own baked-in
+        # (non-QSS) content, so no separate per-widget retranslation path
+        # is needed here.
         self.set_accounts(self._statuses, self._active_account_id)
 
     def refresh_active_state(self, account_id: Optional[int]) -> None:
@@ -207,7 +219,7 @@ class AccountWidget(QWidget):
         self.set_enabled_switching(False)
         for button in self._use_buttons:
             if button.property("accountId") == account_id:
-                button.setText("Переключение…")
+                button.setText(tr("account_widget.switching"))
 
     def set_enabled_switching(self, enabled: bool) -> None:
         self._add_button.setEnabled(enabled)

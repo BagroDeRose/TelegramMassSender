@@ -32,3 +32,15 @@ def build_empty_state(title: str, body: str, parent: Optional[QWidget] = None) -
     layout.addWidget(body_label)
 
     return container
+
+
+def retranslate_empty_state(container: QWidget, title: str, body: str) -> None:
+    """Re-set an already-built build_empty_state() container's text after
+    a language switch -- the title/body QLabels aren't otherwise reachable
+    from outside since build_empty_state() only returns the container."""
+    title_label = container.findChild(QLabel, "emptyStateTitle")
+    if title_label is not None:
+        title_label.setText(title)
+    body_label = container.findChild(QLabel, "emptyStateBody")
+    if body_label is not None:
+        body_label.setText(body)

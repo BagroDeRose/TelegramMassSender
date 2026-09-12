@@ -38,6 +38,7 @@ from telethon.tl.types import TypeMessageEntity
 from app.campaign.campaign_state import CampaignStateMachine, CampaignStatus
 from app.campaign.rate_limiter import RateLimiter
 from app.campaign.send_queue import SendItem, SendItemStatus, SendQueue
+from app.i18n import tr
 from app.logging.logger import get_logger
 from app.recipients.parser import ParsedRecipient
 from app.telegram.media_sender import Attachment, SendProgress
@@ -47,14 +48,22 @@ from app.telegram.template import expand_name_placeholder
 
 logger = get_logger()
 
-_PERMANENT_ERROR_MESSAGES = {
-    UsernameNotOccupiedError: "пользователь не найден",
-    UserIsBlockedError: "пользователь заблокировал аккаунт",
-    PeerIdInvalidError: "некорректный Telegram ID",
-    ChatWriteForbiddenError: "отправка сообщения запрещена",
-    UserPrivacyRestrictedError: "Telegram ограничил возможность отправки",
+_PERMANENT_ERROR_MESSAGE_KEYS = {
+    UsernameNotOccupiedError: "campaign_manager.error.user_not_found",
+    UserIsBlockedError: "campaign_manager.error.user_blocked",
+    PeerIdInvalidError: "campaign_manager.error.invalid_id",
+    ChatWriteForbiddenError: "campaign_manager.error.write_forbidden",
+    UserPrivacyRestrictedError: "campaign_manager.error.privacy_restricted",
 }
-_PERMANENT_ERROR_TYPES = tuple(_PERMANENT_ERROR_MESSAGES.keys())
+_PERMANENT_ERROR_TYPES = tuple(_PERMANENT_ERROR_MESSAGE_KEYS.keys())
+
+
+def _permanent_error_message(exc: Exception) -> str:
+    """Looked up fresh per call, not a module-level dict of already-
+    resolved strings, for the same reason as
+    app.telegram.recipient_resolver.status_label."""
+    key = _PERMANENT_ERROR_MESSAGE_KEYS.get(type(exc))
+    return tr(key) if key is not None else str(exc)
 
 _CRITICAL_ERROR_TYPES = (AuthKeyError, UserDeactivatedError, UserDeactivatedBanError)
 
@@ -150,14 +159,14 @@ class CampaignManager(QObject):
         self._pause_event.clear()
         self._state.transition(CampaignStatus.PAUSED)
         self._emit_state()
-        self._log("⏸ Рассылка поставлена на паузу")
+        self._log(tr("campaign_manager.journal.paused"))
 
     def resume(self) -> None:
         if self._state.status != CampaignStatus.PAUSED:
             return
         self._state.transition(CampaignStatus.RUNNING)
         self._emit_state()
-        self._log("▶ Рассылка возобновлена")
+        self._log(tr("campaign_manager.journal.resumed"))
         self._pause_event.set()
 
     async def stop(self) -> None:
@@ -203,7 +212,7 @@ class CampaignManager(QObject):
     async def _run(self) -> None:
         self._state.transition(CampaignStatus.RUNNING)
         self._emit_state()
-        self._log(f"▶ Рассылка запущена: получателей {len(self._queue)}")
+        self._log(tr("campaign_manager.journal.started", count=len(self._queue)))
 
         try:
             while not self._stop_event.is_set():
@@ -215,7 +224,7 @@ class CampaignManager(QObject):
                 if item is None:
                     self._state.transition(CampaignStatus.COMPLETED)
                     self._emit_state()
-                    self._log("✓ Рассылка завершена")
+                    self._log(tr("campaign_manager.journal.completed"))
                     break
 
                 item.status = SendItemStatus.SENDING
@@ -233,7 +242,7 @@ class CampaignManager(QObject):
                     self._state.transition(CampaignStatus.PAUSED)
                     self._emit_state()
                     self._pause_event.clear()
-                    self._log("Рассылка приостановлена после ограничения Telegram. Нажмите «Продолжить», чтобы продолжить.")
+                    self._log(tr("campaign_manager.journal.paused_after_flood"))
                     self._emit_progress(item)
                     continue
 
@@ -245,7 +254,7 @@ class CampaignManager(QObject):
                     continue
 
                 delay = self._rate_limiter.next_delay()
-                self._log(f"Следующая отправка через {round(delay)} сек.")
+                self._log(tr("campaign_manager.journal.next_send_in", seconds=round(delay)))
                 completed = await self._sleep_interruptible(delay)
                 if not completed:
                     break
@@ -259,7 +268,7 @@ class CampaignManager(QObject):
                 if self._state.can_transition(CampaignStatus.STOPPED):
                     self._state.transition(CampaignStatus.STOPPED)
                 self._emit_state()
-                self._log("■ Рассылка остановлена")
+                self._log(tr("campaign_manager.journal.stopped"))
             self.finished.emit(self._state.status.value)
 
     async def _handle_flood_wait(self, item: SendItem, exc: FloodWaitError) -> str:
@@ -269,7 +278,7 @@ class CampaignManager(QObject):
         shortcut or bypass this wait."""
         item.status = SendItemStatus.PENDING
         wait_seconds = int(exc.seconds)
-        self._log(f"Telegram временно ограничил отправку. Необходимо подождать: {wait_seconds} сек.")
+        self._log(tr("campaign_manager.journal.flood_wait", seconds=wait_seconds))
         self.flood_wait_started.emit(wait_seconds)
         self._state.transition(CampaignStatus.WAITING_FOR_FLOOD)
         self._emit_state()
@@ -284,9 +293,9 @@ class CampaignManager(QObject):
 
         if not resolved.is_ready:
             item.status = SendItemStatus.FAILED
-            item.error = resolved.error or "Получатель недоступен"
+            item.error = resolved.error or tr("campaign_manager.error.recipient_unavailable")
             item.sent_at = _now_iso()
-            self._log(f"✗ {item.recipient.display_label} — {item.error}")
+            self._log(tr("campaign_manager.journal.item_failed", recipient=item.recipient.display_label, error=item.error))
             return "failed"
 
         item.resolved_id = getattr(resolved.entity, "id", None)
@@ -313,28 +322,33 @@ class CampaignManager(QObject):
                 return await self._handle_flood_wait(item, exc)
             except _CRITICAL_ERROR_TYPES as exc:
                 item.status = SendItemStatus.FAILED
-                item.error = "Аккаунт недоступен"
+                item.error = tr("campaign_manager.error.account_unavailable")
                 item.sent_at = _now_iso()
                 logger.error("Критическая ошибка аккаунта: %s", exc)
-                self._log(f"✗ Критическая ошибка аккаунта: {exc}")
+                self._log(tr("campaign_manager.journal.critical_error", error=exc))
                 return "critical"
             except _PERMANENT_ERROR_TYPES as exc:
                 item.status = SendItemStatus.FAILED
-                item.error = _PERMANENT_ERROR_MESSAGES.get(type(exc), str(exc))
+                item.error = _permanent_error_message(exc)
                 item.sent_at = _now_iso()
-                self._log(f"✗ {item.recipient.display_label} — {item.error}")
+                self._log(tr("campaign_manager.journal.item_failed", recipient=item.recipient.display_label, error=item.error))
                 return "failed"
             except _TRANSIENT_ERROR_TYPES:
                 if attempt >= self._max_retries:
                     item.status = SendItemStatus.FAILED
-                    item.error = "Сетевая ошибка"
+                    item.error = tr("campaign_manager.error.network")
                     item.sent_at = _now_iso()
-                    self._log(f"✗ {item.recipient.display_label} — сетевая ошибка")
+                    self._log(tr("campaign_manager.journal.network_error", recipient=item.recipient.display_label))
                     return "failed"
                 backoff = min(2 ** attempt, _MAX_BACKOFF_SECONDS)
                 self._log(
-                    f"… повтор {attempt}/{self._max_retries} для "
-                    f"{item.recipient.display_label} через {backoff} сек."
+                    tr(
+                        "campaign_manager.journal.retrying",
+                        attempt=attempt,
+                        max_attempts=self._max_retries,
+                        recipient=item.recipient.display_label,
+                        backoff=backoff,
+                    )
                 )
                 completed = await self._sleep_interruptible(backoff)
                 if not completed:
@@ -345,14 +359,14 @@ class CampaignManager(QObject):
             except Exception as exc:  # noqa: BLE001 - last-resort, categorized as a normal failure
                 logger.exception("Непредвиденная ошибка при отправке %s", item.recipient.display_label)
                 item.status = SendItemStatus.FAILED
-                item.error = "Непредвиденная ошибка"
+                item.error = tr("campaign_manager.error.unexpected")
                 item.sent_at = _now_iso()
-                self._log(f"✗ {item.recipient.display_label} — непредвиденная ошибка: {exc}")
+                self._log(tr("campaign_manager.journal.unexpected_error", recipient=item.recipient.display_label, error=exc))
                 return "failed"
             else:
                 item.status = SendItemStatus.SENT
                 item.sent_at = _now_iso()
-                self._log(f"✓ {item.recipient.display_label} — отправлено")
+                self._log(tr("campaign_manager.journal.item_sent", recipient=item.recipient.display_label))
                 return "sent"
             finally:
                 # Record how far this attempt actually got *before* any of
