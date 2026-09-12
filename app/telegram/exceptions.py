@@ -37,3 +37,10 @@ class RecipientNotAUserError(TelegramMassSenderError):
 
 class AttachmentNotFoundError(TelegramMassSenderError):
     """Raised when a configured attachment file no longer exists on disk."""
+
+
+class AttachmentUnreadableError(TelegramMassSenderError):
+    """Raised when a configured attachment file exists but can't be opened
+    for reading (e.g. locked by another program, permission denied) --
+    distinct from AttachmentNotFoundError, which means the path itself is
+    gone."""

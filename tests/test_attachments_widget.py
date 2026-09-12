@@ -97,6 +97,43 @@ def test_missing_files_detects_deleted_path(qapp, tmp_path):
     assert widget.missing_files() == [path]
 
 
+def test_unreadable_files_is_empty_for_healthy_attachments(qapp, tmp_path):
+    widget = AttachmentsWidget()
+    path = tmp_path / "doc.pdf"
+    path.write_bytes(b"x")
+    widget.add_file(path)
+
+    assert widget.unreadable_files() == []
+
+
+def test_unreadable_files_detects_a_locked_or_permission_denied_file(qapp, tmp_path):
+    from pathlib import Path
+    from unittest.mock import patch
+
+    widget = AttachmentsWidget()
+    path = tmp_path / "locked.pdf"
+    path.write_bytes(b"x")
+    widget.add_file(path)
+
+    with patch.object(Path, "open", side_effect=PermissionError("Access is denied")):
+        assert widget.unreadable_files() == [path]
+
+
+def test_unreadable_files_does_not_double_report_a_missing_file(qapp, tmp_path):
+    # A missing path is missing_files()'s concern, not unreadable_files()'s
+    # -- is_file() being False must short-circuit before ever attempting
+    # to open() it, so a deleted attachment shows up in exactly one of the
+    # two lists, never both.
+    widget = AttachmentsWidget()
+    path = tmp_path / "gone.pdf"
+    path.write_bytes(b"x")
+    widget.add_file(path)
+    path.unlink()
+
+    assert widget.unreadable_files() == []
+    assert widget.missing_files() == [path]
+
+
 def test_apply_theme_does_not_raise_with_or_without_tiles(qapp, tmp_path):
     widget = AttachmentsWidget()
     widget.apply_theme()
@@ -130,6 +167,37 @@ def test_image_attachment_gets_a_real_thumbnail(qapp, tmp_path):
     tile = widget._tiles[id(item)]
     assert tile.is_image is True
     assert not tile.image_label.pixmap().isNull()
+
+
+def test_image_tile_also_shows_type_and_size_not_just_the_thumbnail(qapp, tmp_path):
+    # Stage 4: previously only non-image (icon-fallback) tiles showed a
+    # size/type line at all -- an image tile showed nothing but the
+    # thumbnail and filename. "Show file type and size" applies to every
+    # attachment, not just the ones without a decoded thumbnail.
+    widget = AttachmentsWidget()
+    path = tmp_path / "photo.png"
+    _write_minimal_png(path)
+
+    widget.add_file(path)
+
+    tile = widget._tiles[id(widget._list.item(0))]
+    meta_label = tile.widget.findChild(QWidget, "thumbnailMeta")
+    assert meta_label is not None
+    assert "PNG" in meta_label.text()
+
+
+def test_non_image_tile_meta_line_shows_size_and_uppercase_extension(qapp, tmp_path):
+    widget = AttachmentsWidget()
+    path = tmp_path / "report.pdf"
+    path.write_bytes(b"x" * 2048)
+
+    widget.add_file(path)
+
+    tile = widget._tiles[id(widget._list.item(0))]
+    meta_label = tile.widget.findChild(QWidget, "thumbnailMeta")
+    assert meta_label is not None
+    assert "PDF" in meta_label.text()
+    assert "КБ" in meta_label.text() or "Б" in meta_label.text()
 
 
 def test_multiple_image_attachments_each_get_their_own_thumbnail(qapp, tmp_path):

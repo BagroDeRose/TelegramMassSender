@@ -29,7 +29,7 @@ from telethon.tl.types import (
 )
 
 from app.logging.logger import get_logger
-from app.telegram.exceptions import AttachmentNotFoundError
+from app.telegram.exceptions import AttachmentNotFoundError, AttachmentUnreadableError
 
 logger = get_logger()
 
@@ -138,6 +138,27 @@ class Attachment:
         if not self.path.is_file():
             raise AttachmentNotFoundError(f"Файл не найден: {self.path.name}")
 
+    def is_readable(self) -> bool:
+        """Lightweight readability probe -- opens the file and reads a
+        single byte rather than the whole thing, just enough to surface a
+        locked/permission-denied file as distinct from a healthy one
+        without the cost of a full read. Callers must check
+        validate_exists()/is_file() first: a missing path is not
+        "unreadable", it's AttachmentNotFoundError's own case."""
+        try:
+            with self.path.open("rb") as f:
+                f.read(1)
+        except OSError:
+            return False
+        return True
+
+    def validate_readable(self) -> None:
+        if not self.is_readable():
+            raise AttachmentUnreadableError(
+                f"Не удалось прочитать файл: {self.path.name} -- возможно, он "
+                "занят другой программой или у вас нет прав на его чтение"
+            )
+
     def size_bytes(self) -> int:
         return self.path.stat().st_size
 
@@ -191,6 +212,7 @@ def build_media_send_plan(
 ) -> MediaSendPlan:
     for attachment in attachments:
         attachment.validate_exists()
+        attachment.validate_readable()
 
     groups = build_send_groups(attachments)
     message_text = message_text or ""

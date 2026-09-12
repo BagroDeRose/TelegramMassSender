@@ -58,6 +58,23 @@ def _icon_name_for(path: Path) -> str:
     return _ICON_NAME_FOR_KIND.get(kind_for_path(path), _DEFAULT_ICON_NAME)
 
 
+def _meta_text(path: Path) -> str:
+    """"<size> · <TYPE>" for a tile's metadata line, e.g. "228 КБ · JPG" --
+    both file size and file type in one compact line rather than two,
+    keeping the tile from getting visually busier. Falls back to just the
+    size (no extension) or just the type (unreadable size) rather than
+    hiding the line entirely, since either half is still useful on its
+    own."""
+    try:
+        size_text = format_file_size(path.stat().st_size)
+    except OSError:
+        size_text = ""
+    ext = path.suffix.lstrip(".").upper()
+    if size_text and ext:
+        return f"{size_text} · {ext}"
+    return size_text or ext
+
+
 @dataclass
 class _Tile:
     widget: QWidget  # the _AttachmentTile itself -- needed to drive its [selected] QSS property
@@ -455,17 +472,13 @@ class AttachmentsWidget(QWidget):
         name_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         column.addWidget(name_label)
 
-        if not image_is_thumbnail:
-            try:
-                size_text = format_file_size(path.stat().st_size)
-            except OSError:
-                size_text = ""
-            if size_text:
-                meta_label = QLabel(size_text, tile)
-                meta_label.setObjectName("thumbnailMeta")
-                meta_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                meta_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-                column.addWidget(meta_label)
+        meta_text = _meta_text(path)
+        if meta_text:
+            meta_label = QLabel(meta_text, tile)
+            meta_label.setObjectName("thumbnailMeta")
+            meta_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            meta_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+            column.addWidget(meta_label)
 
         remove_button = QToolButton(tile)
         remove_button.setObjectName("chipRemoveButton")
@@ -529,6 +542,14 @@ class AttachmentsWidget(QWidget):
 
     def missing_files(self) -> List[Path]:
         return [p for p in self._paths if not p.is_file()]
+
+    def unreadable_files(self) -> List[Path]:
+        """Files that exist but fail the lightweight read probe (locked by
+        another program, permission denied) -- distinct from
+        missing_files(), which is about the path not existing at all. Only
+        checks files that do exist, so this can be called independently of
+        missing_files() without double-reporting a missing path here."""
+        return [p for p in self._paths if p.is_file() and not Attachment(path=p).is_readable()]
 
 
 def _elide(text: str, max_chars: int = 16) -> str:

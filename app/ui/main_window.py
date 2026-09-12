@@ -842,6 +842,17 @@ class MainWindow(QMainWindow):
             names = ", ".join(p.name for p in missing)
             show_error(self, "Рассылка", f"Не найдены прикреплённые файлы: {names}")
             return
+        unreadable = self._attachments_widget.unreadable_files()
+        if unreadable:
+            names = ", ".join(p.name for p in unreadable)
+            show_error(
+                self,
+                "Рассылка",
+                f"Не удалось прочитать файлы: {names}. Файл может быть открыт в "
+                "другой программе или у вас нет прав на его чтение. Закройте "
+                "файл в других программах или выберите другой файл.",
+            )
+            return
         if not text.strip() and not attachments:
             show_error(self, "Рассылка", "Введите текст сообщения или добавьте вложение.")
             return

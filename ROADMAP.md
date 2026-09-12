@@ -69,9 +69,13 @@ platform.
 - [x] Generate thumbnails where applicable
 - [x] Validate files before campaign start
 - [x] Detect missing files
-- [ ] Detect unreadable files — missing-file detection exists
-      (`missing_files()`); a file that exists but can't be read (e.g.
-      permission denied) is not yet distinguished from a healthy one
+- [x] Detect unreadable files — a lightweight readability probe
+      (`Attachment.is_readable()`/`validate_readable()`, opens and reads 1
+      byte rather than the whole file) distinguishes a locked/permission-
+      denied file from both a healthy one and a missing one
+      (`AttachmentUnreadableError`, checked before campaign start
+      alongside the existing missing-file check, and in
+      `build_media_send_plan` itself)
 - [x] Preserve attachment order
 - [x] Support mixed attachment types where Telegram allows it
 - [x] Add comprehensive attachment tests — classification, per-type icon,
@@ -83,7 +87,14 @@ Telegram semantics for GIF-as-animation and audio-as-voice/audio-message.
 Both are more than an extension-table change — they need `media_sender.py`
 to pass Telegram-specific attributes through `send_file`/the album path,
 which is a real enough change to warrant its own design pass rather than
-folding it into the attachment-classification work above.
+folding it into the attachment-classification work above. Re-verified
+during Stage 4: Telethon 1.36's `send_file` does expose the needed
+primitives (`attributes=[DocumentAttributeAnimated()]`, `voice_note=True`),
+so this is technically reachable, but audio-as-voice specifically needs a
+new *opt-in per-file* UI decision before it could ship — defaulting every
+`.mp3` to voice-message semantics (a visually distinct Telegram bubble)
+would be a surprising, unrequested behavior change, not a pure enhancement.
+Still deferred.
 
 ## Attachment UX
 
@@ -95,13 +106,33 @@ folding it into the attachment-classification work above.
       position updates `self._paths` (the single source of truth for send
       order) and rebuilds the tile grid to match; the campaign pipeline
       already consumed `get_attachments()` order with no separate ordering
-      mechanism to keep in sync
-      (`app/ui/attachments_widget.py::_ReorderableListWidget`)
+      mechanism to keep in sync. Each tile (`_AttachmentTile`) detects the
+      gesture itself via `grabMouse()`/explicit event acceptance rather
+      than a viewport-level event filter, verified directly via
+      `QWidget.mouseGrabber()` (Qt's own grab-state introspection) after
+      an event-filter-based first attempt was found, via real hardware
+      testing, to never receive a real mouse move at all. Click/Ctrl-click/
+      Shift-click selection is implemented explicitly against the list's
+      `QItemSelectionModel`, and the native `QListWidget::item:selected`
+      paint is neutralized in favor of a deliberate `[selected]`-driven
+      highlight on the tile itself (`app/ui/attachments_widget.py::_AttachmentTile`,
+      `_ReorderableListWidget`). The reorder gesture's *logic* is
+      exhaustively covered by automated tests and independently verified
+      selection rendering visually in both themes; the physical mouse
+      drag itself could not be exercised by this environment's synthetic
+      input and was confirmed on real hardware by the project owner.
 - [x] Remove attachments individually
 - [x] Clear attachment queue
-- [ ] Improve attachment preview
-- [ ] Show file type and size
-- [ ] Show useful validation errors
+- [x] Improve attachment preview — every tile (including images, which
+      previously showed nothing but the thumbnail) now shows a
+      `<size> · <TYPE>` line (`app/ui/attachments_widget.py::_meta_text`);
+      long filenames already elide with a full-path tooltip; spacing and
+      both themes visually re-verified
+- [x] Show file type and size — see above
+- [x] Show useful validation errors — missing-file and unreadable-file
+      errors each name the affected file(s) and, for an unreadable file,
+      explain the likely cause and what to do
+      (`app/ui/main_window.py::_on_start_requested`)
 
 ---
 

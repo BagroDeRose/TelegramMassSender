@@ -137,6 +137,42 @@ async def test_double_click_start_does_not_launch_two_campaigns(qapp, tmp_path):
         assert mock_campaign_cls.call_count == 1
 
 
+async def test_start_blocked_by_an_unreadable_attachment(qapp, tmp_path):
+    # Stage 4: a file that exists but can't be opened for reading (locked,
+    # permission-denied) must block campaign start with a clear error,
+    # exactly like the existing missing-file check just above it in
+    # _on_start_requested -- distinct failure mode, same guard shape.
+    window = _make_window(tmp_path)
+    fake_account_manager = MagicMock()
+    fake_account = Account(
+        id=1, phone="+70001112233", telegram_user_id=1, username="u", display_name="U",
+        session_name="s", created_at="now", last_used_at=None,
+    )
+    fake_account_manager.active_account_id = 1
+    window._service.account_manager = fake_account_manager
+    window._service.account_repository.get_by_id = MagicMock(return_value=fake_account)
+
+    window._recipient_widget._text_edit.setPlainText("@testuser")
+    window._recipient_widget.flush()
+    window._message_text = "hello"
+
+    locked_file = tmp_path / "locked.pdf"
+    locked_file.write_bytes(b"x")
+    window._attachments_widget.add_file(locked_file)
+    window._on_form_state_changed()
+    window._update_message_preview()
+    assert window._campaign_controls._start_button.isEnabled() is True
+
+    with patch("app.ui.main_window.show_error") as mock_show_error, patch.object(
+        Path, "open", side_effect=PermissionError("Access is denied")
+    ):
+        window._on_start_requested()
+
+    assert window._campaign_starting is False  # never got past the validation guard
+    assert mock_show_error.call_count == 1
+    assert "locked.pdf" in mock_show_error.call_args[0][2]
+
+
 async def test_account_add_delete_disabled_during_campaign(qapp, tmp_path):
     from app.telegram.account_manager import AccountStatus
 
