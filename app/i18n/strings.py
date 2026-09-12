@@ -252,6 +252,10 @@ STRINGS: Dict[str, Dict[str, str]] = {
     "main_window.settings.diagnostics_card": {"ru": "Диагностика", "en": "Diagnostics"},
     "main_window.settings.copy_diagnostics_button": {"ru": "Копировать диагностику", "en": "Copy diagnostics"},
     "main_window.settings.refresh_diagnostics_button": {"ru": "Обновить", "en": "Refresh"},
+    "main_window.settings.export_diagnostic_bundle_button": {
+        "ru": "Экспорт диагностического пакета",
+        "en": "Export diagnostic bundle",
+    },
 
     # ---- main_window: settings dialogs / handlers ----------------------------
     "main_window.dialogs.interval_title": {"ru": "Интервал отправки", "en": "Sending interval"},
@@ -264,6 +268,16 @@ STRINGS: Dict[str, Dict[str, str]] = {
     "main_window.dialogs.diagnostics_copied_message": {
         "ru": "Диагностическая информация скопирована в буфер обмена.",
         "en": "Diagnostic information copied to the clipboard.",
+    },
+    "main_window.dialogs.export_diagnostic_bundle_title": {"ru": "Экспорт диагностического пакета", "en": "Export diagnostic bundle"},
+    "main_window.dialogs.export_diagnostic_bundle_file_filter": {"ru": "ZIP-архивы (*.zip)", "en": "ZIP archives (*.zip)"},
+    "main_window.dialogs.export_diagnostic_bundle_write_failed": {
+        "ru": "Не удалось сохранить диагностический пакет: {error}",
+        "en": "Couldn't save the diagnostic bundle: {error}",
+    },
+    "main_window.dialogs.export_diagnostic_bundle_saved": {
+        "ru": "Диагностический пакет сохранён: {path}",
+        "en": "Diagnostic bundle saved: {path}",
     },
     "main_window.dialogs.unavailable_title": {"ru": "Недоступно", "en": "Unavailable"},
     "main_window.dialogs.add_account_unavailable": {

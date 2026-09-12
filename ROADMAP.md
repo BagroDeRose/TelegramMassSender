@@ -565,13 +565,28 @@ Still deferred.
 
 ## Diagnostic Bundle
 
-- [ ] Export sanitized diagnostic ZIP
-- [ ] Include relevant logs
-- [ ] Include application/version information
-- [ ] Include sanitized configuration
-- [ ] Never include Telegram session files
-- [ ] Never include credentials
-- [ ] Never include message contents
+- [x] Export sanitized diagnostic ZIP — new `app/diagnostic_bundle.py`
+      (`export_diagnostic_bundle`), an "Экспорт диагностического пакета"
+      button next to Copy/Refresh on the Diagnostics card. Built entirely
+      from already-sanitized sources -- nothing new to redact here
+- [x] Include relevant logs — the same rotating log files
+      `app/logging/logger.py` already scrubs of secrets at write time
+      (`application.log` + rotated backups), included as-is
+- [x] Include application/version information — `diagnostics.txt`, the
+      same report the Diagnostics card shows (app/Python/Telethon
+      versions, DB/Telegram/session/network status)
+- [x] Include sanitized configuration — `settings.json`, a plain dump of
+      `AppSettings` (interval, retry count, theme, language, window
+      geometry, reports directory, etc.); nothing to sanitize out since
+      API ID/Hash live in `app.security.secure_storage`, a separate
+      DPAPI-encrypted file, never in `AppSettings`
+- [x] Never include Telegram session files — `app.config.paths.get_sessions_dir()`
+      is never read by this module
+- [x] Never include credentials — API ID/Hash/2FA password are never in
+      any of the three sources this bundle draws from
+- [x] Never include message contents — message text/entities are never
+      persisted in `AppSettings` or the logs to begin with; verified by a
+      dedicated test scanning every file in the exported ZIP
 
 ## Reliability Tests
 

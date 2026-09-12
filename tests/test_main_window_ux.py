@@ -1074,3 +1074,27 @@ async def test_refresh_diagnostics_button_updates_the_text(qapp, tmp_path):
     window._diagnostics_text.setPlainText("stale")
     window._refresh_diagnostics_button.click()
     assert window._diagnostics_text.toPlainText() != "stale"
+
+
+async def test_export_diagnostic_bundle_writes_a_zip_and_shows_confirmation(qapp, tmp_path):
+    import zipfile
+
+    window = _make_window(tmp_path)
+    out_path = tmp_path / "bundle.zip"
+
+    with patch("app.ui.main_window.QFileDialog.getSaveFileName", return_value=(str(out_path), "")), \
+         patch("app.ui.main_window.show_info") as mock_show_info:
+        window._on_export_diagnostic_bundle_clicked()
+
+    mock_show_info.assert_called_once()
+    with zipfile.ZipFile(out_path) as bundle:
+        assert "diagnostics.txt" in bundle.namelist()
+        assert "settings.json" in bundle.namelist()
+
+
+async def test_export_diagnostic_bundle_cancelled_dialog_writes_nothing(qapp, tmp_path):
+    window = _make_window(tmp_path)
+    with patch("app.ui.main_window.QFileDialog.getSaveFileName", return_value=("", "")), \
+         patch("app.ui.main_window.show_info") as mock_show_info:
+        window._on_export_diagnostic_bundle_clicked()
+    mock_show_info.assert_not_called()

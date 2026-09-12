@@ -58,6 +58,7 @@ from app.config.settings import (
     SettingsValidationError,
 )
 from app import diagnostics
+from app.diagnostic_bundle import export_diagnostic_bundle
 from app.database.database import Database
 from app.database.models import Preset, RecipientGroup, SavedReport
 from app.database.repositories import PresetRepository, RecipientGroupRepository, SavedReportRepository
@@ -402,6 +403,7 @@ class MainWindow(QMainWindow):
         _retranslate_card_title(self._advanced_card, tr("main_window.settings.advanced_card"))
         _retranslate_card_title(self._diagnostics_card, tr("main_window.settings.diagnostics_card"))
         self._copy_diagnostics_button.setText(tr("main_window.settings.copy_diagnostics_button"))
+        self._export_diagnostic_bundle_button.setText(tr("main_window.settings.export_diagnostic_bundle_button"))
         self._refresh_diagnostics_button.setText(tr("main_window.settings.refresh_diagnostics_button"))
         self._refresh_diagnostics()
         self._theme_section_label.setText(tr("main_window.settings.theme_label"))
@@ -905,10 +907,15 @@ class MainWindow(QMainWindow):
         diagnostics_row = QHBoxLayout()
         self._copy_diagnostics_button = QPushButton(tr("main_window.settings.copy_diagnostics_button"), widget)
         self._copy_diagnostics_button.clicked.connect(self._on_copy_diagnostics_clicked)
+        self._export_diagnostic_bundle_button = QPushButton(
+            tr("main_window.settings.export_diagnostic_bundle_button"), widget
+        )
+        self._export_diagnostic_bundle_button.clicked.connect(self._on_export_diagnostic_bundle_clicked)
         self._refresh_diagnostics_button = QPushButton(tr("main_window.settings.refresh_diagnostics_button"), widget)
         self._refresh_diagnostics_button.setObjectName("ghostButton")
         self._refresh_diagnostics_button.clicked.connect(self._refresh_diagnostics)
         diagnostics_row.addWidget(self._copy_diagnostics_button)
+        diagnostics_row.addWidget(self._export_diagnostic_bundle_button)
         diagnostics_row.addWidget(self._refresh_diagnostics_button)
         diagnostics_row.addStretch(1)
         layout.addLayout(diagnostics_row)
@@ -942,6 +949,37 @@ class MainWindow(QMainWindow):
         self._refresh_diagnostics()
         QApplication.clipboard().setText(self._last_diagnostics_text)
         show_info(self, tr("main_window.settings.diagnostics_card"), tr("main_window.dialogs.diagnostics_copied_message"))
+
+    def _on_export_diagnostic_bundle_clicked(self) -> None:
+        default_name = f"TelegramMassSender_diagnostics_{datetime.now():%Y-%m-%d_%H-%M}.zip"
+        path_str, _ = QFileDialog.getSaveFileName(
+            self,
+            tr("main_window.dialogs.export_diagnostic_bundle_title"),
+            default_name,
+            tr("main_window.dialogs.export_diagnostic_bundle_file_filter"),
+        )
+        if not path_str:
+            return
+        try:
+            export_diagnostic_bundle(
+                Path(path_str),
+                self._database,
+                self._service.settings_repository.load_app_settings(),
+                self._diagnostics_telegram_status(),
+                self._diagnostics_network_status(),
+            )
+        except OSError as exc:
+            show_error(
+                self,
+                tr("main_window.dialogs.export_diagnostic_bundle_title"),
+                tr("main_window.dialogs.export_diagnostic_bundle_write_failed", error=exc),
+            )
+            return
+        show_info(
+            self,
+            tr("main_window.dialogs.export_diagnostic_bundle_title"),
+            tr("main_window.dialogs.export_diagnostic_bundle_saved", path=path_str),
+        )
 
     def _wire_signals(self) -> None:
         self._sidebar.page_selected.connect(self._on_sidebar_page_selected)

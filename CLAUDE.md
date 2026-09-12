@@ -23,6 +23,12 @@ described below.
   page's Diagnostics card. Every field degrades to an error string rather
   than raising if its underlying check fails; never reads API ID/Hash, a
   password, or session file contents.
+- `app/diagnostic_bundle.py` — v1.7 Diagnostic Bundle:
+  `export_diagnostic_bundle()` zips the Diagnostics report, the rotating
+  log files (already secret-scrubbed at write time), and a plain
+  `AppSettings` dump (API ID/Hash live elsewhere, in
+  `app.security.secure_storage`, so there's nothing to strip out of
+  settings) -- never touches session files.
 - `app/ui/` — PySide6 widgets/dialogs/pages:
   - `main_window.py` — top-level window, orchestrates the service layer and
     all pages; sidebar navigation between Campaign/Accounts/Results/Settings.
@@ -137,7 +143,7 @@ described below.
   `MainWindow.retranslate_ui()` the same way theme switching already
   dispatches `apply_theme()`. Deliberately not gettext or Qt Linguist
   (.ts/.qm + lupdate/lrelease) — this app has no other use for either.
-- `tests/` — pytest + pytest-asyncio (`asyncio_mode = auto`), 539 tests,
+- `tests/` — pytest + pytest-asyncio (`asyncio_mode = auto`), 546 tests,
   using `tests/mocks/mock_telegram_client.py` and
   `tests/mocks/fake_client_manager.py` instead of a real Telegram
   connection. CI runs this suite on `windows-latest` with
@@ -163,7 +169,7 @@ reproduced with a failing test first, then fixed.
 
 **Tests.** After any code change, run the targeted test file, then the
 full suite (`pytest tests/ -v`). Don't delete or weaken existing tests just
-to make the suite pass. The current baseline is 539 passed, 0 failures —
+to make the suite pass. The current baseline is 546 passed, 0 failures —
 if that number changes, know exactly why before saying the change is done.
 
 **GUI.** Never block the Qt event loop or the asyncio event loop.
