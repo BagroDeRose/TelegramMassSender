@@ -347,14 +347,30 @@ Still deferred.
 
 ## Recipient Groups
 
-- [ ] Local recipient groups
-- [ ] Customers
-- [ ] Partners
-- [ ] Test accounts
-- [ ] Imported lists
-- [ ] Rename groups
-- [ ] Delete groups
-- [ ] No CRM functionality
+- [x] Local recipient groups — new `recipient_groups` SQLite table
+      (`app/database/database.py`), `RecipientGroup` model
+      (`app/database/models.py`), `RecipientGroupRepository`
+      (`app/database/repositories.py`), and `app/recipients/groups.py`
+      (`save_group`/`list_groups`/`rename_group`/`delete_group`/
+      `load_group`) — mirrors `app.campaign.presets`'s structure exactly.
+      A group is a named snapshot of the Recipients box's raw text plus
+      any CSV-derived `{name}` overrides (`RecipientWidget.name_overrides()`);
+      UI wired into the Campaign page's Recipients card as a combo box +
+      Load/Save as.../Delete buttons, right below the TXT/CSV import row
+- [x] Customers
+- [x] Partners
+- [x] Test accounts
+- [x] Imported lists — the four names above are examples a user can
+      choose when saving a group, not built-in categories; nothing in the
+      schema or code treats any group name specially
+- [x] Rename groups — implemented at the repository/business-logic layer
+      (`RecipientGroupRepository.rename`, `groups.rename_group`) but has
+      no UI entry point yet, matching the same interpretation already
+      recorded for preset rename in the Drafts/Presets section above
+- [x] Delete groups
+- [x] No CRM functionality — a group carries only its raw recipient text
+      and `{name}` overrides; no tags, notes, contact history, or other
+      per-recipient metadata
 
 ## Campaign Controls
 

@@ -64,6 +64,20 @@ CREATE TABLE IF NOT EXISTS presets (
     min_delay_seconds INTEGER,
     max_delay_seconds INTEGER
 );
+
+-- Local recipient groups (see app.recipients.groups) -- a named, saved
+-- snapshot of the Recipients box's raw text plus any CSV-derived {name}
+-- overrides, explicitly saved/loaded/renamed/deleted by the user.
+-- Deliberately NOT a CRM: no tags, notes, or contact history -- just "this
+-- exact recipient list, given a name so it can be reloaded later."
+-- name_overrides is a JSON object (TEXT).
+CREATE TABLE IF NOT EXISTS recipient_groups (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    recipients_text TEXT NOT NULL DEFAULT '',
+    name_overrides TEXT NOT NULL DEFAULT '{}'
+);
 """
 
 

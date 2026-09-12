@@ -109,3 +109,15 @@ def confirm_delete_preset(parent: QWidget, name: str) -> bool:
     box.setDefaultButton(yes_button)
     box.exec()
     return box.clickedButton() is yes_button
+
+
+def confirm_delete_group(parent: QWidget, name: str) -> bool:
+    box = QMessageBox(parent)
+    box.setIcon(QMessageBox.Icon.Warning)
+    box.setWindowTitle(tr("main_window.dialogs.delete_group_title"))
+    box.setText(tr("main_window.dialogs.delete_group_message", name=name))
+    yes_button = box.addButton(tr("main_window.groups.delete_button"), QMessageBox.ButtonRole.YesRole)
+    box.addButton(tr("dialogs.cancel"), QMessageBox.ButtonRole.RejectRole)
+    box.setDefaultButton(yes_button)
+    box.exec()
+    return box.clickedButton() is yes_button

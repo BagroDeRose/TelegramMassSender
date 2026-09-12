@@ -45,3 +45,16 @@ class Preset:
     attachment_paths: str
     min_delay_seconds: Optional[int]
     max_delay_seconds: Optional[int]
+
+
+@dataclass
+class RecipientGroup:
+    """DB row shape only -- name_overrides is the raw JSON string as
+    stored; app.recipients.groups is where that gets decoded into a real
+    dict, same split as Preset (above) vs. app.campaign.presets."""
+
+    id: Optional[int]
+    name: str
+    created_at: str
+    recipients_text: str
+    name_overrides: str

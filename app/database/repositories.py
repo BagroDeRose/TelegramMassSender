@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import List, Optional
 
 from app.database.database import Database
-from app.database.models import Account, Preset, SavedReport
+from app.database.models import Account, Preset, RecipientGroup, SavedReport
 
 
 class AccountRepository:
@@ -308,4 +308,55 @@ class PresetRepository:
             attachment_paths=row["attachment_paths"],
             min_delay_seconds=row["min_delay_seconds"],
             max_delay_seconds=row["max_delay_seconds"],
+        )
+
+
+class RecipientGroupRepository:
+    """Pure DB access for local recipient groups -- JSON encode/decode of
+    name_overrides is business logic that lives in app.recipients.groups,
+    not here (same split as PresetRepository above vs.
+    app.campaign.presets)."""
+
+    def __init__(self, database: Database) -> None:
+        self._db = database
+
+    def create(self, name: str, recipients_text: str, name_overrides_json: str) -> RecipientGroup:
+        with self._db.cursor() as cur:
+            cur.execute(
+                "INSERT INTO recipient_groups (name, recipients_text, name_overrides) VALUES (?, ?, ?)",
+                (name, recipients_text, name_overrides_json),
+            )
+            group_id = cur.lastrowid
+        group = self.get_by_id(group_id)
+        assert group is not None
+        return group
+
+    def get_by_id(self, group_id: int) -> Optional[RecipientGroup]:
+        with self._db.cursor() as cur:
+            cur.execute("SELECT * FROM recipient_groups WHERE id = ?", (group_id,))
+            row = cur.fetchone()
+        return self._row_to_group(row) if row else None
+
+    def list_all(self) -> List[RecipientGroup]:
+        with self._db.cursor() as cur:
+            cur.execute("SELECT * FROM recipient_groups ORDER BY created_at DESC")
+            rows = cur.fetchall()
+        return [self._row_to_group(row) for row in rows]
+
+    def rename(self, group_id: int, new_name: str) -> None:
+        with self._db.cursor() as cur:
+            cur.execute("UPDATE recipient_groups SET name = ? WHERE id = ?", (new_name, group_id))
+
+    def delete(self, group_id: int) -> None:
+        with self._db.cursor() as cur:
+            cur.execute("DELETE FROM recipient_groups WHERE id = ?", (group_id,))
+
+    @staticmethod
+    def _row_to_group(row) -> RecipientGroup:
+        return RecipientGroup(
+            id=row["id"],
+            name=row["name"],
+            created_at=row["created_at"],
+            recipients_text=row["recipients_text"],
+            name_overrides=row["name_overrides"],
         )

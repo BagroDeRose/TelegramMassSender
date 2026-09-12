@@ -211,6 +211,15 @@ class RecipientWidget(QWidget):
         self._text_edit.setPlainText(text)
         self.flush()
 
+    def set_text_with_names(self, text: str, name_overrides: Dict[str, str]) -> None:
+        """Like set_text(), but also restores name overrides for the new
+        list (e.g. loading a saved recipient group whose text came from a
+        CSV import) -- overrides are set before flush() so pruning keeps
+        exactly the ones that still match a currently-valid recipient."""
+        self._text_edit.setPlainText(text)
+        self._name_overrides = dict(name_overrides)
+        self.flush()
+
     def retranslate_ui(self) -> None:
         self._text_edit.setPlaceholderText(tr("recipient_widget.placeholder"))
         self._text_edit.setToolTip(tr("recipient_widget.tooltip"))

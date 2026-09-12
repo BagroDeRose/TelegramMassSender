@@ -43,6 +43,8 @@ from app.campaign.report import suggest_report_filename, write_csv_report
 from app.campaign.report_library import ReportFileMissingError
 from app.campaign import presets
 from app.campaign.presets import PresetError
+from app.recipients import groups
+from app.recipients.groups import RecipientGroupError
 from app.campaign import report_library
 from app.config.paths import get_reports_dir
 from app.config.settings import (
@@ -52,8 +54,8 @@ from app.config.settings import (
     SettingsValidationError,
 )
 from app.database.database import Database
-from app.database.models import Preset, SavedReport
-from app.database.repositories import PresetRepository, SavedReportRepository
+from app.database.models import Preset, RecipientGroup, SavedReport
+from app.database.repositories import PresetRepository, RecipientGroupRepository, SavedReportRepository
 from app.i18n import LANGUAGE_LABELS, VALID_LANGUAGES, get_language, set_language, tr
 from app.logging.logger import get_logger
 from app.telegram.account_manager import Account
@@ -67,6 +69,7 @@ from app.ui.campaign_controls import CampaignControlsWidget
 from app.ui.campaign_wizard import CampaignWizardDialog
 from app.ui.dialogs import (
     confirm_delete_account,
+    confirm_delete_group,
     confirm_delete_preset,
     confirm_exit_during_campaign,
     confirm_reset_settings,
@@ -190,6 +193,7 @@ class MainWindow(QMainWindow):
         self._service = TelegramService(self._database)
         self._saved_report_repo = SavedReportRepository(self._database)
         self._preset_repo = PresetRepository(self._database)
+        self._group_repo = RecipientGroupRepository(self._database)
 
         # Source of truth for the message: the inline preview is read-only,
         # actual editing happens in MessageEditorDialog.
@@ -234,6 +238,7 @@ class MainWindow(QMainWindow):
         self._update_results_page()
         self._refresh_saved_reports()
         self._refresh_presets_combo()
+        self._refresh_groups_combo()
         self.statusBar().showMessage(tr("main_window.status.ready"))
 
         asyncio.ensure_future(self._refresh_accounts())
@@ -301,6 +306,10 @@ class MainWindow(QMainWindow):
         )
         self._open_wizard_button.setText(tr("main_window.campaign_page.open_wizard_button"))
         _retranslate_card_title(self._recipients_card, tr("main_window.campaign_page.recipients_card"))
+        self._load_group_button.setText(tr("main_window.groups.load_button"))
+        self._save_group_button.setText(tr("main_window.groups.save_button"))
+        self._delete_group_button.setText(tr("main_window.groups.delete_button"))
+        self._refresh_groups_combo()  # re-set the placeholder item's text
         self._open_editor_button.setText(tr("main_window.campaign_page.open_editor_button"))
         self._open_editor_button.setToolTip(tr("main_window.campaign_page.open_editor_tooltip"))
         self._name_hint_label.setText(tr("main_window.campaign_page.name_placeholder_hint"))
@@ -463,10 +472,33 @@ class MainWindow(QMainWindow):
         header_row.addWidget(self._open_wizard_button, 0, Qt.AlignmentFlag.AlignTop)
         layout.addLayout(header_row)
 
+        recipients_section = QWidget()
+        recipients_layout = QVBoxLayout(recipients_section)
+        recipients_layout.setContentsMargins(0, 0, 0, 0)
+        recipients_layout.setSpacing(SPACE_SM)
+        recipients_layout.addWidget(self._recipient_widget)
+
+        groups_row = QHBoxLayout()
+        self._groups_combo = QComboBox(recipients_section)
+        self._groups_combo.setMinimumWidth(180)
+        self._load_group_button = QPushButton(tr("main_window.groups.load_button"), recipients_section)
+        self._load_group_button.clicked.connect(self._on_load_group_clicked)
+        self._save_group_button = QPushButton(tr("main_window.groups.save_button"), recipients_section)
+        self._save_group_button.setObjectName("ghostButton")
+        self._save_group_button.clicked.connect(self._on_save_group_clicked)
+        self._delete_group_button = QPushButton(tr("main_window.groups.delete_button"), recipients_section)
+        self._delete_group_button.setObjectName("ghostButton")
+        self._delete_group_button.clicked.connect(self._on_delete_group_clicked)
+        groups_row.addWidget(self._groups_combo, 1)
+        groups_row.addWidget(self._load_group_button)
+        groups_row.addWidget(self._save_group_button)
+        groups_row.addWidget(self._delete_group_button)
+        recipients_layout.addLayout(groups_row)
+
         self._recipient_count_label = QLabel("0", page)
         self._recipient_count_label.setObjectName("cardCount")
         self._recipients_card = _card(
-            tr("main_window.campaign_page.recipients_card"), self._recipient_widget, self._recipient_count_label
+            tr("main_window.campaign_page.recipients_card"), recipients_section, self._recipient_count_label
         )
         layout.addWidget(self._recipients_card)
 
@@ -983,6 +1015,63 @@ class MainWindow(QMainWindow):
             return
         presets.delete_preset(self._preset_repo, preset.id)
         self._refresh_presets_combo()
+
+    # ---- recipient groups ---------------------------------------------------
+
+    def _refresh_groups_combo(self) -> None:
+        current_id = self._groups_combo.currentData()
+        self._groups_combo.blockSignals(True)
+        self._groups_combo.clear()
+        self._groups_combo.addItem(tr("main_window.groups.placeholder"), None)
+        for group in groups.list_groups(self._group_repo):
+            self._groups_combo.addItem(group.name, group.id)
+        if current_id is not None:
+            index = self._groups_combo.findData(current_id)
+            if index >= 0:
+                self._groups_combo.setCurrentIndex(index)
+        self._groups_combo.blockSignals(False)
+
+    def _selected_group(self) -> Optional[RecipientGroup]:
+        group_id = self._groups_combo.currentData()
+        if group_id is None:
+            return None
+        return self._group_repo.get_by_id(group_id)
+
+    def _on_save_group_clicked(self) -> None:
+        self._recipient_widget.flush()
+        name, ok = QInputDialog.getText(self, tr("main_window.dialogs.save_group_title"), tr("main_window.dialogs.group_name_label"))
+        if not ok or not name.strip():
+            return
+        saved = groups.save_group(
+            self._group_repo, name, self._recipient_widget.get_text(), self._recipient_widget.name_overrides()
+        )
+        self._refresh_groups_combo()
+        index = self._groups_combo.findData(saved.id)
+        if index >= 0:
+            self._groups_combo.setCurrentIndex(index)
+        show_info(self, tr("main_window.dialogs.save_group_title"), tr("main_window.dialogs.group_saved_message", name=saved.name))
+
+    def _on_load_group_clicked(self) -> None:
+        group = self._selected_group()
+        if group is None:
+            show_error(self, tr("main_window.dialogs.save_group_title"), tr("main_window.dialogs.no_group_selected"))
+            return
+        try:
+            loaded = groups.load_group(group)
+        except RecipientGroupError as exc:
+            show_error(self, tr("main_window.dialogs.save_group_title"), str(exc))
+            return
+        self._recipient_widget.set_text_with_names(loaded.recipients_text, loaded.name_overrides)
+
+    def _on_delete_group_clicked(self) -> None:
+        group = self._selected_group()
+        if group is None:
+            show_error(self, tr("main_window.dialogs.save_group_title"), tr("main_window.dialogs.no_group_selected"))
+            return
+        if not confirm_delete_group(self, group.name):
+            return
+        groups.delete_group(self._group_repo, group.id)
+        self._refresh_groups_combo()
 
     # ---- campaign wizard ---------------------------------------------------
 

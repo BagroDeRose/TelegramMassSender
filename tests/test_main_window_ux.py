@@ -284,6 +284,87 @@ async def test_delete_preset_declined_keeps_it(qapp, tmp_path):
     assert len(presets.list_presets(window._preset_repo)) == 1
 
 
+async def test_save_group_writes_and_refreshes_combo(qapp, tmp_path):
+    window = _make_window(tmp_path)
+    window._recipient_widget.set_text("@ivan_test\n@maria_test")
+
+    with patch("app.ui.main_window.QInputDialog") as mock_dialog, patch("app.ui.main_window.show_info"):
+        mock_dialog.getText.return_value = ("Customers", True)
+        window._on_save_group_clicked()
+
+    from app.recipients import groups
+
+    saved = groups.list_groups(window._group_repo)
+    assert len(saved) == 1
+    assert saved[0].name == "Customers"
+    assert window._groups_combo.findText("Customers") != -1
+
+
+async def test_save_group_cancelled_does_not_create_a_row(qapp, tmp_path):
+    window = _make_window(tmp_path)
+    window._recipient_widget.set_text("@ivan_test")
+
+    with patch("app.ui.main_window.QInputDialog") as mock_dialog:
+        mock_dialog.getText.return_value = ("", False)
+        window._on_save_group_clicked()
+
+    from app.recipients import groups
+
+    assert groups.list_groups(window._group_repo) == []
+
+
+async def test_load_group_restores_text_and_name_overrides(qapp, tmp_path):
+    from app.recipients import groups
+
+    window = _make_window(tmp_path)
+    saved = groups.save_group(window._group_repo, "Customers", "@ivan_test", {"username:ivan_test": "Ivan"})
+    window._refresh_groups_combo()
+    window._groups_combo.setCurrentIndex(window._groups_combo.findData(saved.id))
+
+    window._on_load_group_clicked()
+
+    assert window._recipient_widget.get_text() == "@ivan_test"
+    assert window._recipient_widget.name_overrides() == {"username:ivan_test": "Ivan"}
+
+
+async def test_load_group_with_no_selection_shows_an_error(qapp, tmp_path):
+    window = _make_window(tmp_path)
+
+    with patch("app.ui.main_window.show_error") as mock_show_error:
+        window._on_load_group_clicked()
+
+    mock_show_error.assert_called_once()
+
+
+async def test_delete_group_removes_it(qapp, tmp_path):
+    from app.recipients import groups
+
+    window = _make_window(tmp_path)
+    saved = groups.save_group(window._group_repo, "Doomed", "@a", {})
+    window._refresh_groups_combo()
+    window._groups_combo.setCurrentIndex(window._groups_combo.findData(saved.id))
+
+    with patch("app.ui.main_window.confirm_delete_group", return_value=True):
+        window._on_delete_group_clicked()
+
+    assert groups.list_groups(window._group_repo) == []
+    assert window._groups_combo.findData(saved.id) == -1
+
+
+async def test_delete_group_declined_keeps_it(qapp, tmp_path):
+    from app.recipients import groups
+
+    window = _make_window(tmp_path)
+    saved = groups.save_group(window._group_repo, "Kept", "@a", {})
+    window._refresh_groups_combo()
+    window._groups_combo.setCurrentIndex(window._groups_combo.findData(saved.id))
+
+    with patch("app.ui.main_window.confirm_delete_group", return_value=False):
+        window._on_delete_group_clicked()
+
+    assert len(groups.list_groups(window._group_repo)) == 1
+
+
 async def test_campaign_wizard_accept_writes_state_and_reuses_start_path(qapp, tmp_path):
     # The wizard must never start a campaign itself -- it hands its
     # collected state to the exact same _on_start_requested the fast

@@ -53,6 +53,19 @@ STRINGS: Dict[str, Dict[str, str]] = {
     "main_window.campaign_page.title": {"ru": "Кампания", "en": "Campaign"},
     "main_window.campaign_page.subtitle": {"ru": "Создайте и запустите рассылку в Telegram", "en": "Create and launch a Telegram campaign"},
     "main_window.campaign_page.recipients_card": {"ru": "Получатели", "en": "Recipients"},
+    "main_window.groups.placeholder": {"ru": "Выберите группу…", "en": "Choose a group…"},
+    "main_window.groups.load_button": {"ru": "Загрузить", "en": "Load"},
+    "main_window.groups.save_button": {"ru": "Сохранить как…", "en": "Save as…"},
+    "main_window.groups.delete_button": {"ru": "Удалить", "en": "Delete"},
+    "main_window.dialogs.save_group_title": {"ru": "Сохранить группу", "en": "Save group"},
+    "main_window.dialogs.group_name_label": {"ru": "Название группы:", "en": "Group name:"},
+    "main_window.dialogs.group_saved_message": {"ru": "Группа «{name}» сохранена.", "en": "Group “{name}” saved."},
+    "main_window.dialogs.no_group_selected": {"ru": "Сначала выберите группу в списке.", "en": "First select a group from the list."},
+    "main_window.dialogs.delete_group_title": {"ru": "Удалить группу?", "en": "Delete group?"},
+    "main_window.dialogs.delete_group_message": {
+        "ru": "Группа «{name}» будет удалена без возможности восстановления. Продолжить?",
+        "en": "The group “{name}” will be permanently deleted. Continue?",
+    },
     "main_window.campaign_page.open_editor_button": {"ru": "✏  Открыть редактор", "en": "✏  Open editor"},
     "main_window.campaign_page.open_editor_tooltip": {
         "ru": "Полноразмерный редактор для длинных сообщений с форматированием",
@@ -580,6 +593,13 @@ STRINGS: Dict[str, Dict[str, str]] = {
     # ---- app/campaign/presets.py -------------------------------------------
     "presets.untitled_name": {"ru": "Без названия", "en": "Untitled"},
     "presets.error.corrupted": {"ru": "Не удалось прочитать сохранённый шаблон (повреждённые данные)", "en": "Couldn't read the saved preset (corrupted data)"},
+
+    # ---- app/recipients/groups.py -------------------------------------------
+    "recipient_groups.untitled_name": {"ru": "Без названия", "en": "Untitled"},
+    "recipient_groups.error.corrupted": {
+        "ru": "Не удалось прочитать сохранённую группу (повреждённые данные)",
+        "en": "Couldn't read the saved group (corrupted data)",
+    },
 
     # ---- app/campaign/report_library.py: errors shown via show_error --------
     "report_library.error.file_not_found": {"ru": "Файл отчёта не найден: {path}", "en": "Report file not found: {path}"},
