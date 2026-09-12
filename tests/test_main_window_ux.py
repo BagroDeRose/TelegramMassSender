@@ -9,6 +9,7 @@ import asyncio
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from PySide6.QtWidgets import QDialog
 
 from app.campaign.campaign_manager import CampaignManager
@@ -64,6 +65,95 @@ async def test_open_editor_dialog_updates_preview(qapp, tmp_path):
 
     assert window._message_text == "edited message"
     assert "edited message" in window._message_preview._browser.toPlainText()
+
+
+async def test_preview_substitutes_the_example_name_for_the_placeholder(qapp, tmp_path):
+    # Personalization preview (v1.5): the preview must go through the same
+    # expand_name_placeholder() the real send path uses per-recipient, not
+    # a second, preview-only implementation -- so this proves the wiring,
+    # not the substitution logic itself (already exhaustively covered by
+    # tests/test_template.py).
+    window = _make_window(tmp_path)
+    window._message_text = "Hello, {name}!"
+    window._message_entities = []
+    window._preview_name_edit.setText("Alex")
+
+    assert "Hello, Alex!" in window._message_preview._browser.toPlainText()
+    assert "{name}" not in window._message_preview._browser.toPlainText()
+
+
+async def test_preview_updates_live_when_the_example_name_changes(qapp, tmp_path):
+    window = _make_window(tmp_path)
+    window._message_text = "Hi {name}"
+    window._message_entities = []
+    window._update_message_preview()
+
+    window._preview_name_edit.setText("Maria")
+
+    assert "Hi Maria" in window._message_preview._browser.toPlainText()
+
+
+@pytest.mark.parametrize(
+    "example_name,expected_substring",
+    [
+        ("Alex", "Hi Alex"),
+        ("Мария", "Hi Мария"),  # Cyrillic
+        ("José 🎉", "Hi José 🎉"),  # accented + astral-plane emoji
+        ("", "Hi "),  # empty example name -- placeholder resolves to nothing, not a crash
+        ("A" * 80, f"Hi {'A' * 80}"),  # long name
+    ],
+)
+async def test_preview_personalization_handles_varied_names(qapp, tmp_path, example_name, expected_substring):
+    window = _make_window(tmp_path)
+    window._message_text = "Hi {name}"
+    window._message_entities = []
+
+    window._preview_name_edit.setText(example_name)
+
+    assert expected_substring in window._message_preview._browser.toPlainText()
+
+
+async def test_preview_without_a_placeholder_ignores_the_example_name(qapp, tmp_path):
+    window = _make_window(tmp_path)
+    window._message_text = "No placeholder here"
+    window._message_entities = []
+    window._preview_name_edit.setText("Alex")
+
+    assert "No placeholder here" in window._message_preview._browser.toPlainText()
+
+
+async def test_preview_personalization_preserves_bold_entity_offsets(qapp, tmp_path):
+    # Regression guard for the exact bug class expand_name_placeholder
+    # exists to prevent: a naive text substitution would shift/corrupt
+    # entity offsets for anything after the placeholder once the
+    # substituted name's UTF-16 length differs from len("{name}").
+    from telethon.tl.types import MessageEntityBold
+
+    window = _make_window(tmp_path)
+    window._message_text = "Hi {name}, welcome!"
+    # "welcome" starts right after the (much longer) substituted name.
+    bold_start = window._message_text.index("welcome")
+    window._message_entities = [MessageEntityBold(offset=bold_start, length=len("welcome"))]
+    window._preview_name_edit.setText("Alexandra")
+
+    html = window._message_preview._browser.toHtml()
+    assert "<b" in html or "font-weight" in html.lower()
+    assert "welcome" in window._message_preview._browser.toPlainText()
+
+
+async def test_preview_name_survives_language_retranslation(qapp, tmp_path):
+    from app.i18n import LANGUAGE_EN, LANGUAGE_RU, set_language
+
+    window = _make_window(tmp_path)
+    try:
+        window._preview_name_edit.setText("CustomName")
+        english_index = window._language_combo.findData(LANGUAGE_EN)
+        window._language_combo.setCurrentIndex(english_index)
+
+        # Retranslation must not silently discard a user-edited example name.
+        assert window._preview_name_edit.text() == "CustomName"
+    finally:
+        set_language(LANGUAGE_RU)
 
 
 async def test_start_button_disabled_while_campaign_running(qapp, tmp_path):

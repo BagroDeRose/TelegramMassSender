@@ -57,6 +57,7 @@ from app.logging.logger import get_logger
 from app.telegram.account_manager import Account
 from app.telegram.exceptions import AccountSwitchBlockedError
 from app.telegram.service import TelegramService
+from app.telegram.template import expand_name_placeholder
 from app.ui import theme
 from app.ui.account_widget import AccountWidget
 from app.ui.attachments_widget import AttachmentsWidget
@@ -296,6 +297,12 @@ class MainWindow(QMainWindow):
         self._open_editor_button.setText(tr("main_window.campaign_page.open_editor_button"))
         self._open_editor_button.setToolTip(tr("main_window.campaign_page.open_editor_tooltip"))
         self._name_hint_label.setText(tr("main_window.campaign_page.name_placeholder_hint"))
+        self._preview_name_label.setText(tr("main_window.campaign_page.preview_name_label"))
+        self._preview_name_edit.setToolTip(tr("main_window.campaign_page.preview_name_tooltip"))
+        # The example name's current *value* is deliberately left alone --
+        # it may already be user-edited, and a language switch resetting
+        # it back to the new language's default would silently discard
+        # that. Only the label/tooltip text is retranslated.
         _retranslate_card_title(self._message_card, tr("main_window.campaign_page.message_card"))
         _retranslate_card_title(self._attachments_card, tr("main_window.campaign_page.attachments_card"))
         _retranslate_card_title(self._campaign_card, tr("main_window.campaign_page.campaign_card"))
@@ -460,6 +467,19 @@ class MainWindow(QMainWindow):
         self._name_hint_label = QLabel(tr("main_window.campaign_page.name_placeholder_hint"), message_section)
         self._name_hint_label.setObjectName("helperText")
         message_layout.addWidget(self._name_hint_label)
+
+        preview_name_row = QHBoxLayout()
+        self._preview_name_label = QLabel(tr("main_window.campaign_page.preview_name_label"), message_section)
+        self._preview_name_label.setObjectName("helperText")
+        self._preview_name_edit = QLineEdit(message_section)
+        self._preview_name_edit.setText(tr("main_window.campaign_page.preview_name_default"))
+        self._preview_name_edit.setToolTip(tr("main_window.campaign_page.preview_name_tooltip"))
+        self._preview_name_edit.setMaximumWidth(160)
+        self._preview_name_edit.textChanged.connect(self._update_message_preview)
+        preview_name_row.addWidget(self._preview_name_label)
+        preview_name_row.addWidget(self._preview_name_edit)
+        preview_name_row.addStretch(1)
+        message_layout.addLayout(preview_name_row)
 
         self._message_card = _card(tr("main_window.campaign_page.message_card"), message_section)
         layout.addWidget(self._message_card)
@@ -826,7 +846,18 @@ class MainWindow(QMainWindow):
 
     def _update_message_preview(self) -> None:
         attachment_names = [a.file_name for a in self._attachments_widget.get_attachments()]
-        self._message_preview.update_preview(self._message_text, self._message_entities, attachment_names)
+        # Uses the same expand_name_placeholder() the real campaign send
+        # path calls per-recipient (app.campaign.campaign_manager) --
+        # never a second, preview-only formatting/substitution
+        # implementation -- so the preview is honest about what will
+        # actually be sent, UTF-16 entity offsets included. The example
+        # name is illustrative only: a real recipient's name isn't known
+        # until Telegram resolves them at send time, so there is nothing
+        # else correct to preview with.
+        preview_text, preview_entities = expand_name_placeholder(
+            self._message_text, self._message_entities, self._preview_name_edit.text()
+        )
+        self._message_preview.update_preview(preview_text, preview_entities, attachment_names)
         self._on_form_state_changed()
 
     def _on_recipients_changed(self, summary) -> None:

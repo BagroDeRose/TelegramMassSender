@@ -46,6 +46,18 @@ def test_multiline_uses_br():
     assert "<br>" in entities_to_preview_html("line1\nline2", [])
 
 
+def test_emoji_including_astral_plane_renders_as_plain_text():
+    # No special handling needed -- Qt's rich-text renderer displays
+    # Unicode text (including astral-plane emoji, UTF-16 surrogate pairs)
+    # natively; this just confirms the HTML pipeline doesn't mangle it
+    # (e.g. via an accidental UTF-16-vs-codepoint slicing bug like the one
+    # entities_to_preview_html's surrogate-aware cut-point logic exists to
+    # avoid).
+    html = entities_to_preview_html("Hi 👍 there 🎉!", [])
+    assert "👍" in html
+    assert "🎉" in html
+
+
 def test_widget_update_preview(qapp):
     widget = MessagePreviewWidget()
     widget.update_preview("Hello", [MessageEntityBold(offset=0, length=5)], ["photo.jpg", "doc.pdf"])

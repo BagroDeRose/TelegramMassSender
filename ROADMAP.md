@@ -176,20 +176,50 @@ Still deferred.
 
 ## Telegram-like Message Preview
 
-- [ ] Add visual Telegram-style message preview
-- [ ] Render rich text entities correctly
-- [ ] Render links correctly
-- [ ] Render emoji correctly
-- [ ] Render attachments in preview
-- [ ] Preview should use the same formatting model as actual sending
-- [ ] Preview should support personalized messages
+- [x] Add visual Telegram-style message preview — a read-only
+      `QTextBrowser` rendering (`app/ui/message_preview.py`); simplified,
+      not a pixel-perfect Telegram clone by design, but a real rendering
+      of the actual formatting, not a mock
+- [x] Render rich text entities correctly — bold/italic/underline/strike/
+      code/pre/spoiler all render (`entities_to_preview_html`,
+      `tests/test_message_preview.py`)
+- [x] Render links correctly
+- [x] Render emoji correctly — Qt's rich-text renderer displays Unicode
+      (including astral-plane/surrogate-pair emoji) natively; verified the
+      HTML pipeline doesn't mangle it
+- [x] Render attachments in preview — filename list with an icon; not
+      per-type thumbnails (would be a real visual overhaul, not requested,
+      and the tile grid immediately below the preview already shows those)
+- [x] Preview should use the same formatting model as actual sending —
+      `entities_to_preview_html` operates on the exact same
+      `TypeMessageEntity` objects `app.telegram.sender` sends, not a
+      second parallel formatting implementation
+- [x] Preview should support personalized messages — see Personalization
+      Preview below; the same `expand_name_placeholder()` the real
+      per-recipient send path uses now runs before the preview renders
 
 ## Personalization Preview
 
-- [ ] Support `{name}` preview for selected recipient
-- [ ] Allow switching preview recipient
-- [ ] Show example personalized messages
-- [ ] Verify UTF-16 entity offsets remain correct after personalization
+- [x] Support `{name}` preview for selected recipient — implemented as an
+      editable "example name" field next to the message editor
+      (`app/ui/main_window.py`'s `_preview_name_edit`), not a picker over
+      the actual parsed recipient list: `ParsedRecipient` (`app/recipients/parser.py`)
+      deliberately carries no name field, and a real recipient's name is
+      only known once Telegram resolves them during actual sending (see
+      `app.telegram.recipient_resolver`) -- there is no real per-recipient
+      name to select from before that. An example name is the only
+      technically honest thing to preview with pre-send.
+- [x] Allow switching preview recipient — implemented as editing the
+      example name (see above); each edit re-renders the preview live
+- [x] Show example personalized messages
+- [x] Verify UTF-16 entity offsets remain correct after personalization —
+      already guaranteed by `app.telegram.template.expand_name_placeholder`
+      (unchanged, reused as-is, same function the real send path calls);
+      re-verified for the new preview wiring specifically with ASCII/
+      Cyrillic/emoji/empty/long example names and a bold-entity-offset
+      regression test (`tests/test_main_window_ux.py`), plus a real
+      running-app screenshot showing correct bold placement after
+      substitution
 
 ## Drafts / Presets
 

@@ -63,6 +63,20 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "en": "{{name}} — the recipient's Telegram name, filled in when sending",
     },
     "main_window.campaign_page.message_card": {"ru": "Сообщение", "en": "Message"},
+    "main_window.campaign_page.preview_name_label": {"ru": "Пример имени для {{name}}:", "en": "Example name for {{name}}:"},
+    "main_window.campaign_page.preview_name_default": {"ru": "Александр", "en": "Alex"},
+    "main_window.campaign_page.preview_name_tooltip": {
+        "ru": (
+            "Показывает, как сообщение будет выглядеть после подстановки "
+            "{{name}} -- реальное имя получателя недоступно до момента "
+            "отправки, это лишь пример"
+        ),
+        "en": (
+            "Shows how the message will look once {{name}} is filled in -- "
+            "the recipient's real name isn't available before sending, "
+            "this is just an example"
+        ),
+    },
     "main_window.campaign_page.attachments_card": {"ru": "Вложения", "en": "Attachments"},
     "main_window.campaign_page.campaign_card": {"ru": "Рассылка", "en": "Campaign"},
 
