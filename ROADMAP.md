@@ -523,16 +523,45 @@ Still deferred.
 
 ## Diagnostics
 
-- [ ] Add Diagnostics section
-- [ ] Application version
-- [ ] Python version
-- [ ] Telethon version
-- [ ] Database status
-- [ ] Telegram connection status
-- [ ] Session storage status
-- [ ] Network status
-- [ ] Copy diagnostics
-- [ ] Sanitize all diagnostic output
+- [x] Add Diagnostics section — a new "Диагностика" card on the Settings
+      page (after Advanced), a read-only text block plus Copy/Refresh
+      buttons; new `app/diagnostics.py` (`collect_diagnostics`/
+      `format_diagnostics_text`) and `app/version.py` (`APP_VERSION`,
+      the single source of truth for the version shown here). Placed in
+      Settings rather than a new sidebar page -- adding a 5th nav item
+      would have touched page-index bounds checking, persisted
+      `last_page_index`, and sidebar wiring in several places for a
+      read-only status panel that fits the existing card-based Settings
+      layout just as well
+- [x] Application version — `app.version.APP_VERSION`, currently the
+      last actually-tagged release (`1.3.0`); bumped only when a real
+      release is cut, the same way semantic versioning always works
+      between releases (the in-progress v1.4-v1.7 work here is an
+      internal roadmap label, not yet a shipped version)
+- [x] Python version — `platform.python_version()`
+- [x] Telethon version — `telethon.__version__`
+- [x] Database status — a real `SELECT 1` against the live database
+      connection, not just "assume it's fine"; reports the actual error
+      text if it fails, and every other diagnostic field still reports
+      something (rather than the whole report crashing) if the database
+      turns out to be unreachable
+- [x] Telegram connection status — reuses the exact same "is an account
+      currently active" signal already shown in the status bar's
+      connection indicator, so Diagnostics never claims a different
+      notion of "connected" than the rest of the app already shows
+- [x] Session storage status — counts how many accounts have a session
+      *file* present on disk vs. missing (`Path.exists()` only -- file
+      contents are never read)
+- [x] Network status — reads the active Telegram client's own
+      `is_connected()` state (a local, synchronous check Telethon already
+      maintains, not a new network probe/ping mechanism); reports
+      "Unknown" rather than fabricating a check when no client exists
+- [x] Copy diagnostics — "Копировать диагностику" button, writes the
+      same text shown on screen to the system clipboard
+- [x] Sanitize all diagnostic output — no field ever reads API ID/Hash,
+      a password, session file contents, or message text; verified by a
+      dedicated test asserting none of those ever appear in the
+      formatted report
 
 ## Diagnostic Bundle
 

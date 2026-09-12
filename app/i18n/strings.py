@@ -249,6 +249,9 @@ STRINGS: Dict[str, Dict[str, str]] = {
     },
     "main_window.settings.debug_logging_checkbox": {"ru": "Расширенное логирование (для диагностики)", "en": "Verbose logging (for diagnostics)"},
     "main_window.settings.reset_settings_button": {"ru": "Сбросить настройки приложения", "en": "Reset application settings"},
+    "main_window.settings.diagnostics_card": {"ru": "Диагностика", "en": "Diagnostics"},
+    "main_window.settings.copy_diagnostics_button": {"ru": "Копировать диагностику", "en": "Copy diagnostics"},
+    "main_window.settings.refresh_diagnostics_button": {"ru": "Обновить", "en": "Refresh"},
 
     # ---- main_window: settings dialogs / handlers ----------------------------
     "main_window.dialogs.interval_title": {"ru": "Интервал отправки", "en": "Sending interval"},
@@ -257,6 +260,10 @@ STRINGS: Dict[str, Dict[str, str]] = {
     "main_window.dialogs.settings_reset_message": {
         "ru": "Настройки приложения сброшены к значениям по умолчанию.",
         "en": "Application settings have been reset to their defaults.",
+    },
+    "main_window.dialogs.diagnostics_copied_message": {
+        "ru": "Диагностическая информация скопирована в буфер обмена.",
+        "en": "Diagnostic information copied to the clipboard.",
     },
     "main_window.dialogs.unavailable_title": {"ru": "Недоступно", "en": "Unavailable"},
     "main_window.dialogs.add_account_unavailable": {
@@ -625,6 +632,26 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "ru": "Не удалось прочитать сохранённую группу (повреждённые данные)",
         "en": "Couldn't read the saved group (corrupted data)",
     },
+
+    # ---- app/diagnostics.py --------------------------------------------------
+    "diagnostics.field.app_version": {"ru": "Версия приложения", "en": "Application version"},
+    "diagnostics.field.python_version": {"ru": "Версия Python", "en": "Python version"},
+    "diagnostics.field.telethon_version": {"ru": "Версия Telethon", "en": "Telethon version"},
+    "diagnostics.field.database_status": {"ru": "Состояние базы данных", "en": "Database status"},
+    "diagnostics.field.telegram_status": {"ru": "Подключение к Telegram", "en": "Telegram connection"},
+    "diagnostics.field.session_storage": {"ru": "Хранилище сессий", "en": "Session storage"},
+    "diagnostics.field.network_status": {"ru": "Состояние сети", "en": "Network status"},
+    "diagnostics.status.ok": {"ru": "Ок", "en": "OK"},
+    "diagnostics.status.error": {"ru": "Ошибка: {error}", "en": "Error: {error}"},
+    "diagnostics.session_storage.no_accounts": {"ru": "Нет аккаунтов", "en": "No accounts"},
+    "diagnostics.session_storage.summary": {
+        "ru": "Файлы сессий найдены: {present} из {total}",
+        "en": "Session files present: {present} of {total}",
+    },
+    "diagnostics.telegram.no_account": {"ru": "Нет подключённого аккаунта", "en": "No account connected"},
+    "diagnostics.telegram.connected": {"ru": "Подключён: {label}", "en": "Connected: {label}"},
+    "diagnostics.network.connected": {"ru": "Активное соединение", "en": "Active connection"},
+    "diagnostics.network.unknown": {"ru": "Неизвестно", "en": "Unknown"},
 
     # ---- app/campaign/report_library.py: errors shown via show_error --------
     "report_library.error.file_not_found": {"ru": "Файл отчёта не найден: {path}", "en": "Report file not found: {path}"},

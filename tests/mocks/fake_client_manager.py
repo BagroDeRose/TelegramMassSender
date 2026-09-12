@@ -29,3 +29,11 @@ class FakeClientManager:
 
     def remove(self, session_name: str) -> None:
         self.removed.append(session_name)
+
+    def get_active_client(self, session_name: str):
+        # This fake never models real TelegramClient instances (only
+        # authorization booleans), so there is never a "live client" to
+        # return -- None is the honest answer, matching the real
+        # ClientManager.get_active_client's behavior for a session it
+        # hasn't created a client for yet.
+        return None

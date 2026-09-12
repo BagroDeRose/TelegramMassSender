@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMainWindow,
     QMenu,
+    QPlainTextEdit,
     QPushButton,
     QScrollArea,
     QSpinBox,
@@ -56,6 +57,7 @@ from app.config.settings import (
     AppSettings,
     SettingsValidationError,
 )
+from app import diagnostics
 from app.database.database import Database
 from app.database.models import Preset, RecipientGroup, SavedReport
 from app.database.repositories import PresetRepository, RecipientGroupRepository, SavedReportRepository
@@ -265,6 +267,7 @@ class MainWindow(QMainWindow):
         self._refresh_saved_reports()
         self._refresh_presets_combo()
         self._refresh_groups_combo()
+        self._refresh_diagnostics()
         self.statusBar().showMessage(tr("main_window.status.ready"))
 
         asyncio.ensure_future(self._refresh_accounts())
@@ -397,6 +400,10 @@ class MainWindow(QMainWindow):
         _retranslate_card_title(self._application_card, tr("main_window.settings.application_card"))
         _retranslate_card_title(self._reports_card, tr("main_window.settings.reports_card"))
         _retranslate_card_title(self._advanced_card, tr("main_window.settings.advanced_card"))
+        _retranslate_card_title(self._diagnostics_card, tr("main_window.settings.diagnostics_card"))
+        self._copy_diagnostics_button.setText(tr("main_window.settings.copy_diagnostics_button"))
+        self._refresh_diagnostics_button.setText(tr("main_window.settings.refresh_diagnostics_button"))
+        self._refresh_diagnostics()
         self._theme_section_label.setText(tr("main_window.settings.theme_label"))
         self._theme_hint_label.setText(tr("main_window.settings.theme_hint"))
         self._language_section_label.setText(tr("main_window.settings.language_label"))
@@ -746,6 +753,8 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._reports_card)
         self._advanced_card = _card(tr("main_window.settings.advanced_card"), self._build_advanced_settings())
         layout.addWidget(self._advanced_card)
+        self._diagnostics_card = _card(tr("main_window.settings.diagnostics_card"), self._build_diagnostics_settings())
+        layout.addWidget(self._diagnostics_card)
         layout.addStretch(1)
         return page
 
@@ -881,6 +890,58 @@ class MainWindow(QMainWindow):
         reset_row.addStretch(1)
         layout.addLayout(reset_row)
         return widget
+
+    def _build_diagnostics_settings(self) -> QWidget:
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(SPACE_SM)
+
+        self._diagnostics_text = QPlainTextEdit(widget)
+        self._diagnostics_text.setReadOnly(True)
+        self._diagnostics_text.setMaximumHeight(160)
+        layout.addWidget(self._diagnostics_text)
+
+        diagnostics_row = QHBoxLayout()
+        self._copy_diagnostics_button = QPushButton(tr("main_window.settings.copy_diagnostics_button"), widget)
+        self._copy_diagnostics_button.clicked.connect(self._on_copy_diagnostics_clicked)
+        self._refresh_diagnostics_button = QPushButton(tr("main_window.settings.refresh_diagnostics_button"), widget)
+        self._refresh_diagnostics_button.setObjectName("ghostButton")
+        self._refresh_diagnostics_button.clicked.connect(self._refresh_diagnostics)
+        diagnostics_row.addWidget(self._copy_diagnostics_button)
+        diagnostics_row.addWidget(self._refresh_diagnostics_button)
+        diagnostics_row.addStretch(1)
+        layout.addLayout(diagnostics_row)
+        return widget
+
+    def _diagnostics_telegram_status(self) -> str:
+        account = self._active_account()
+        if account is None:
+            return tr("diagnostics.telegram.no_account")
+        label = f"@{account.username}" if account.username else account.phone
+        return tr("diagnostics.telegram.connected", label=label)
+
+    def _diagnostics_network_status(self) -> str:
+        account = self._active_account()
+        account_manager = self._service.account_manager
+        if account is None or account_manager is None:
+            return tr("diagnostics.network.unknown")
+        client = account_manager.get_active_client(account.session_name)
+        if client is not None and client.is_connected():
+            return tr("diagnostics.network.connected")
+        return tr("diagnostics.network.unknown")
+
+    def _refresh_diagnostics(self) -> None:
+        report = diagnostics.collect_diagnostics(
+            self._database, self._diagnostics_telegram_status(), self._diagnostics_network_status()
+        )
+        self._last_diagnostics_text = diagnostics.format_diagnostics_text(report)
+        self._diagnostics_text.setPlainText(self._last_diagnostics_text)
+
+    def _on_copy_diagnostics_clicked(self) -> None:
+        self._refresh_diagnostics()
+        QApplication.clipboard().setText(self._last_diagnostics_text)
+        show_info(self, tr("main_window.settings.diagnostics_card"), tr("main_window.dialogs.diagnostics_copied_message"))
 
     def _wire_signals(self) -> None:
         self._sidebar.page_selected.connect(self._on_sidebar_page_selected)
@@ -1258,6 +1319,7 @@ class MainWindow(QMainWindow):
             label = f"@{account.username}" if account.username else account.phone
             dot_color, text = tokens.success, tr("main_window.status.connected", label=label)
         self._connection_status_label.setText(f'<span style="color:{dot_color};">●</span>&nbsp;&nbsp;{text}')
+        self._refresh_diagnostics()
 
     def _on_add_account_requested(self) -> None:
         if not self._can_switch_accounts():

@@ -1040,3 +1040,37 @@ async def test_export_failures_writes_only_failed_items(qapp, tmp_path):
     assert "bob_test" in content
     assert "carol_test" in content
     assert "alice_test" not in content
+
+
+async def test_diagnostics_populated_on_startup(qapp, tmp_path):
+    from app.version import APP_VERSION
+
+    window = _make_window(tmp_path)
+    text = window._diagnostics_text.toPlainText()
+    assert APP_VERSION in text
+    assert text == window._last_diagnostics_text
+
+
+async def test_diagnostics_reflects_no_account_by_default(qapp, tmp_path):
+    from app.i18n import tr
+
+    window = _make_window(tmp_path)
+    assert tr("diagnostics.telegram.no_account") in window._diagnostics_text.toPlainText()
+
+
+async def test_copy_diagnostics_writes_to_the_clipboard(qapp, tmp_path):
+    from PySide6.QtWidgets import QApplication
+
+    window = _make_window(tmp_path)
+    with patch("app.ui.main_window.show_info"):
+        window._on_copy_diagnostics_clicked()
+
+    assert QApplication.clipboard().text() == window._last_diagnostics_text
+    assert window._last_diagnostics_text  # not empty
+
+
+async def test_refresh_diagnostics_button_updates_the_text(qapp, tmp_path):
+    window = _make_window(tmp_path)
+    window._diagnostics_text.setPlainText("stale")
+    window._refresh_diagnostics_button.click()
+    assert window._diagnostics_text.toPlainText() != "stale"
