@@ -99,6 +99,19 @@ async def test_happy_path_completes(qapp):
     assert len(client.sent_messages) == 3
 
 
+async def test_current_item_changed_fires_once_per_recipient_in_order(qapp):
+    # Campaign Controls (v1.6): "show current recipient" / "show current
+    # campaign step" are driven by this signal -- it must fire exactly
+    # once per queue item, in order, with an accurate 1-based position.
+    manager, client = make_manager(["alice", "bobby", "carol"])
+    seen = []
+    manager.current_item_changed.connect(lambda item, position, total: seen.append((item.recipient.value, position, total)))
+
+    await run_to_finish(manager)
+
+    assert seen == [("alice", 1, 3), ("bobby", 2, 3), ("carol", 3, 3)]
+
+
 async def test_permanent_error_marks_failed_but_continues(qapp):
     client = MockTelegramClient()
     manager, client = make_manager(["alice", "bobby", "carol"], client=client)

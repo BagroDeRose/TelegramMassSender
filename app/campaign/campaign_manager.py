@@ -89,6 +89,7 @@ class CampaignManager(QObject):
     state_changed = Signal(str)
     item_result = Signal(object)  # SendItem
     progress_changed = Signal(object)  # ProgressSnapshot
+    current_item_changed = Signal(object, int, int)  # SendItem, 1-based position, total
     flood_wait_started = Signal(int)  # total seconds
     flood_wait_tick = Signal(int)  # remaining seconds
     log_message = Signal(str)
@@ -235,6 +236,9 @@ class CampaignManager(QObject):
                     break
 
                 item.status = SendItemStatus.SENDING
+                counts = self._queue.counts()
+                position = counts[SendItemStatus.SENT] + counts[SendItemStatus.FAILED] + counts[SendItemStatus.SKIPPED] + 1
+                self.current_item_changed.emit(item, position, len(self._queue))
                 outcome = await self._attempt_send(item)
 
                 if outcome == "critical":

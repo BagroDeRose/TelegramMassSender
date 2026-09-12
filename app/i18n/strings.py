@@ -355,6 +355,19 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "en": "Save the current campaign's results to a CSV file (opens in Excel)",
     },
     "campaign_controls.interval_summary": {"ru": "Интервал отправки: {min}–{max} сек", "en": "Sending interval: {min}–{max} sec"},
+    "campaign_controls.duration_estimate": {
+        "ru": "Приблизительная длительность рассылки: {duration}",
+        "en": "Estimated campaign duration: {duration}",
+    },
+    "campaign_controls.current_item": {
+        "ru": "Получатель {position} из {total}: {recipient}",
+        "en": "Recipient {position} of {total}: {recipient}",
+    },
+    "campaign_controls.elapsed_remaining": {
+        "ru": "Прошло: {elapsed}  ·  Осталось: ~{remaining}",
+        "en": "Elapsed: {elapsed}  ·  Remaining: ~{remaining}",
+    },
+    "campaign_controls.elapsed_only": {"ru": "Прошло: {elapsed}", "en": "Elapsed: {elapsed}"},
 
     # ---- account_widget --------------------------------------------------
     "account_widget.status.connected": {"ru": "Подключён", "en": "Connected"},

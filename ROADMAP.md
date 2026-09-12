@@ -374,16 +374,42 @@ Still deferred.
 
 ## Campaign Controls
 
-- [ ] Pause campaign
-- [ ] Resume campaign
-- [ ] Cancel campaign
-- [ ] Show current recipient
-- [ ] Show current campaign step
-- [ ] Show progress
-- [ ] Show elapsed time
-- [ ] Estimate remaining time
-- [ ] Calculate approximate campaign duration before start
-- [ ] Preserve safe partial-progress behavior
+- [x] Pause campaign — already implemented before this stage
+      (`CampaignManager.pause`/`CampaignControlsWidget`'s Pause button);
+      unchanged here
+- [x] Resume campaign — already implemented before this stage; unchanged
+- [x] Cancel campaign — already implemented before this stage (the Stop
+      button/`CampaignManager.stop`); unchanged
+- [x] Show current recipient — new `CampaignManager.current_item_changed`
+      signal (item, 1-based position, total), emitted once per recipient
+      right as its send begins (never on internal retries -- those don't
+      re-dispatch a new queue item); displayed as "Получатель {n} из
+      {total}: {recipient}" while a campaign is running
+      (`CampaignControlsWidget.set_current_item`)
+- [x] Show current campaign step — interpreted as the same position/total
+      shown above (this app has no other notion of "step" visible to the
+      user within a single recipient's send -- media-plan sub-steps are
+      an internal resume mechanism, not user-facing)
+- [x] Show progress — already implemented before this stage (progress bar
+      + totals line); unchanged
+- [x] Show elapsed time — `CampaignControlsWidget` now owns a 1-second
+      `QTimer`, started once by `MainWindow` right when a campaign
+      actually starts (`start_elapsed_timer`, not on every pause/resume)
+      and stopped when it finishes (`stop_elapsed_timer`)
+- [x] Estimate remaining time — computed live each tick from the observed
+      average time per completed item once at least one has completed
+      (`elapsed / done * pending`), falling back to the configured
+      min/max interval's midpoint before anything has completed yet
+- [x] Calculate approximate campaign duration before start —
+      `recipient_count × average configured interval`, shown above the
+      Start button and kept live as the Recipients list or the interval
+      setting changes (`CampaignControlsWidget.set_recipient_count`/
+      `set_interval_summary`); hidden once the campaign is actually
+      running (the live elapsed/remaining display takes over)
+- [x] Preserve safe partial-progress behavior — none of this touches
+      `next_step`-based resume, retry, or FloodWait handling; verified by
+      the full existing `test_campaign_manager.py` suite still passing
+      unchanged
 
 ## Retry
 

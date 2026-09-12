@@ -480,6 +480,52 @@ async def test_double_click_start_does_not_launch_two_campaigns(qapp, tmp_path):
         assert mock_campaign_cls.call_count == 1
 
 
+async def test_start_campaign_starts_the_elapsed_timer_and_wires_current_item(qapp, tmp_path):
+    # Campaign Controls (v1.6): elapsed/remaining time and the current-
+    # recipient label are driven by the widget's own timer and by
+    # CampaignManager.current_item_changed -- both must actually be
+    # started/connected when a real campaign starts, not just exist as
+    # dead code.
+    window = _make_window(tmp_path)
+    fake_account_manager = MagicMock()
+    fake_account = Account(
+        id=1, phone="+70001112233", telegram_user_id=1, username="u", display_name="U",
+        session_name="s", created_at="now", last_used_at=None,
+    )
+    fake_account_manager.active_account_id = 1
+    window._service.account_manager = fake_account_manager
+    window._service.account_repository.get_by_id = MagicMock(return_value=fake_account)
+    fake_client = MagicMock()
+    fake_client.is_user_authorized = AsyncMock(return_value=True)
+    fake_account_manager.ensure_connected = AsyncMock(return_value=fake_client)
+
+    window._recipient_widget._text_edit.setPlainText("@testuser")
+    window._recipient_widget.flush()
+    window._message_text = "hello"
+    window._on_form_state_changed()
+    window._update_message_preview()
+
+    with patch("app.ui.main_window.CampaignManager") as mock_campaign_cls, \
+         patch.object(window._campaign_controls, "start_elapsed_timer") as mock_start_timer:
+        mock_campaign = MagicMock()
+        mock_campaign_cls.return_value = mock_campaign
+        window._on_start_requested()
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+    mock_start_timer.assert_called_once()
+    mock_campaign.current_item_changed.connect.assert_called_once_with(window._campaign_controls.set_current_item)
+
+
+async def test_campaign_finished_stops_the_elapsed_timer(qapp, tmp_path):
+    from app.campaign.campaign_state import CampaignStatus
+
+    window = _make_window(tmp_path)
+    with patch.object(window._campaign_controls, "stop_elapsed_timer") as mock_stop_timer:
+        window._on_campaign_finished(CampaignStatus.COMPLETED.value)
+    mock_stop_timer.assert_called_once()
+
+
 async def test_start_blocked_by_an_unreadable_attachment(qapp, tmp_path):
     # Stage 4: a file that exists but can't be opened for reading (locked,
     # permission-denied) must block campaign start with a clear error,

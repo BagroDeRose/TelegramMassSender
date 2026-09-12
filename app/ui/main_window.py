@@ -1099,6 +1099,7 @@ class MainWindow(QMainWindow):
 
     def _on_recipients_changed(self, summary) -> None:
         self._recipient_count_label.setText(str(len(summary.valid_recipients)))
+        self._campaign_controls.set_recipient_count(len(summary.valid_recipients))
 
     # ---- account management -------------------------------------------------
 
@@ -1369,12 +1370,14 @@ class MainWindow(QMainWindow):
         campaign.state_changed.connect(self._on_campaign_state_changed)
         campaign.progress_changed.connect(self._campaign_controls.update_progress)
         campaign.progress_changed.connect(self._update_results_stats)
+        campaign.current_item_changed.connect(self._campaign_controls.set_current_item)
         campaign.log_message.connect(self._journal.append)
         campaign.flood_wait_started.connect(self._on_flood_wait_started)
         campaign.flood_wait_tick.connect(self._on_flood_wait_tick)
         campaign.finished.connect(self._on_campaign_finished)
 
         campaign.start()
+        self._campaign_controls.start_elapsed_timer()
         self._campaign_controls.set_running_state(True, paused=False)
         self._results_status_label.setText(tr("main_window.results.running"))
         self._update_results_page()
@@ -1404,6 +1407,7 @@ class MainWindow(QMainWindow):
         )
 
     def _on_campaign_finished(self, status_value: str) -> None:
+        self._campaign_controls.stop_elapsed_timer()
         self._campaign_controls.set_running_state(False)
         self._campaign_controls.set_status_text("")
         self._account_widget.set_enabled_switching(True)

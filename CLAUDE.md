@@ -17,9 +17,16 @@ described below.
 - `app/ui/` — PySide6 widgets/dialogs/pages:
   - `main_window.py` — top-level window, orchestrates the service layer and
     all pages; sidebar navigation between Campaign/Accounts/Results/Settings.
-  - `sidebar.py`, `campaign_controls.py`, `account_widget.py`,
-    `recipient_widget.py`, `attachments_widget.py`, `journal_widget.py`,
-    `stat_card.py`, `empty_state.py` — page/widget components.
+  - `sidebar.py`, `account_widget.py`, `recipient_widget.py`,
+    `attachments_widget.py`, `journal_widget.py`, `stat_card.py`,
+    `empty_state.py` — page/widget components.
+  - `campaign_controls.py` — Start/Pause/Stop, progress, and (v1.6) the
+    pre-start duration estimate (recipient count × average configured
+    interval) plus the live elapsed-time/remaining-time display (a
+    1-second `QTimer` owned by the widget itself, started once by
+    `MainWindow` when a campaign actually starts, not on every
+    pause/resume) and the current-recipient label, driven by
+    `CampaignManager.current_item_changed`.
   - `message_editor.py` / `message_editor_dialog.py` / `message_preview.py`
     — rich-text message editor and its preview.
   - `login_dialog.py`, `dialogs.py` — account connection and confirmation
@@ -105,7 +112,7 @@ described below.
   `MainWindow.retranslate_ui()` the same way theme switching already
   dispatches `apply_theme()`. Deliberately not gettext or Qt Linguist
   (.ts/.qm + lupdate/lrelease) — this app has no other use for either.
-- `tests/` — pytest + pytest-asyncio (`asyncio_mode = auto`), 488 tests,
+- `tests/` — pytest + pytest-asyncio (`asyncio_mode = auto`), 505 tests,
   using `tests/mocks/mock_telegram_client.py` and
   `tests/mocks/fake_client_manager.py` instead of a real Telegram
   connection. CI runs this suite on `windows-latest` with
@@ -131,7 +138,7 @@ reproduced with a failing test first, then fixed.
 
 **Tests.** After any code change, run the targeted test file, then the
 full suite (`pytest tests/ -v`). Don't delete or weaken existing tests just
-to make the suite pass. The current baseline is 488 passed, 0 failures —
+to make the suite pass. The current baseline is 505 passed, 0 failures —
 if that number changes, know exactly why before saying the change is done.
 
 **GUI.** Never block the Qt event loop or the asyncio event loop.
