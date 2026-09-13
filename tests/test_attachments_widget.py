@@ -877,7 +877,7 @@ def test_selection_property_unaffected_by_theme_apply(qapp, tmp_path):
     assert tile.property("selected") == "true"
 
 
-def test_selecting_a_tile_never_draws_the_native_focus_rectangle(qapp, tmp_path):
+def test_attachments_list_qss_suppresses_the_native_focus_rectangle(qapp):
     # Regression test for the dark-theme "dashed/dotted outline on a
     # selected attachment card" bug. Root cause: clicking a tile to select
     # it also makes that QListWidgetItem the view's *current* item, and
@@ -888,71 +888,41 @@ def test_selecting_a_tile_never_draws_the_native_focus_rectangle(qapp, tmp_path)
     # `[selected="true"]` background, but that native focus rect is a
     # *separate* paint step done by the view underneath/around it, so it
     # was visible as a stray dashed border regardless of the tile's own
-    # QSS. `theme.py`'s `#attachmentsList::item` rules only set
+    # QSS. `theme.py`'s `#attachmentsList::item` rules used to only set
     # `background-color`/`border`, never `outline` -- and `outline` is
-    # specifically what Qt's stylesheet engine uses to suppress
-    # PE_FrameFocusRect (border does not affect it).
+    # specifically the QSS property Qt's stylesheet engine uses to
+    # suppress PE_FrameFocusRect (border does not affect it; this is
+    # documented Qt behavior, not something this suite needs to
+    # re-verify at the Qt-internals level every run).
     #
-    # This installs a QProxyStyle that counts PE_FrameFocusRect draw
-    # calls -- a direct, code-level check of what Qt's style machinery
-    # actually did, not a guess from a screenshot (raw pixel screenshots
-    # of this element were confirmed, separately, to be too subtle/
-    # theme-engine-dependent in this sandbox's offscreen software
-    # rasterizer to eyeball reliably; this probe is exact regardless).
-    #
-    # The probe is installed via widget.setStyle(), not
-    # QApplication.setStyle() -- QApplication.setStyle() takes ownership
-    # of the style object it replaces and deletes it, so restoring the
-    # "original" style object afterward would hand Qt a pointer to
-    # already-deleted C++ memory (confirmed: this crashed the whole test
-    # process with a Windows access violation on the next test's widget
-    # construction). QWidget.setStyle() does not transfer ownership and
-    # only affects that widget's subtree, so it needs no restoration at
-    # all -- the widget itself is discarded at the end of the test.
-    from PySide6.QtWidgets import QProxyStyle, QStyle
-
+    # This was originally verified dynamically: a QProxyStyle installed
+    # on a real, shown, selected tile counted actual PE_FrameFocusRect
+    # draw calls (2 before this fix, 0 after) -- a direct, code-level
+    # confirmation of the root cause and the fix, done once during
+    # investigation. That approach is deliberately NOT what ships here:
+    # installing a custom QStyle on a widget outlives the widget itself
+    # in a way this suite's shared, session-scoped `qapp` could not
+    # safely unwind (confirmed by reproducing a real Windows access
+    # violation from it, both immediately on the next test and, in a
+    # revised form, much later during pytest's own process-exit cleanup
+    # on CI specifically -- a real, if delayed, Qt/PySide6 object-lifetime
+    # hazard, not a false alarm). The regression this test actually needs
+    # to catch -- "did someone remove outline: none from this selector
+    # block" -- doesn't require touching QStyle machinery at all: it's
+    # fully determined by the generated stylesheet text.
     from app.ui import theme
 
-    focus_rect_calls = {"count": 0}
-
-    class _ProbeStyle(QProxyStyle):
-        def drawPrimitive(self, element, option, painter, widget=None):
-            if element == QStyle.PrimitiveElement.PE_FrameFocusRect:
-                focus_rect_calls["count"] += 1
-            super().drawPrimitive(element, option, painter, widget)
-
-    original_stylesheet = qapp.styleSheet()
-    probe = _ProbeStyle(qapp.style())
-    widget = None
-    try:
-        qapp.setStyleSheet(theme.stylesheet_for(theme.THEME_DARK))
-
-        widget, paths = _make_widget_with_files(tmp_path, ["a.pdf"])
-        widget.setStyle(probe)
-        # Real painting (and thus PE_FrameFocusRect) only happens for an
-        # actually-shown widget -- an unshown widget's repaint() is a
-        # near no-op under the offscreen platform, which would make this
-        # probe pass vacuously regardless of the QSS fix.
-        widget.show()
-        qapp.processEvents()
-        tile = _tile_widget(widget, 0)
-
-        QTest.mousePress(tile, Qt.MouseButton.LeftButton, pos=QPoint(10, 10))
-        QTest.mouseRelease(tile, Qt.MouseButton.LeftButton, pos=QPoint(10, 10))
-        qapp.processEvents()
-        assert widget._list.currentItem() is widget._list.item(0)
-        assert tile.property("selected") == "true"
-
-        focus_rect_calls["count"] = 0  # ignore any churn from initial layout/selection
-        widget._list.viewport().repaint()
-        widget.repaint()
-        qapp.processEvents()
-
-        assert focus_rect_calls["count"] == 0
-    finally:
-        if widget is not None:
-            widget.close()
-        qapp.setStyleSheet(original_stylesheet)
+    for theme_name in (theme.THEME_DARK, theme.THEME_LIGHT):
+        css = theme.stylesheet_for(theme_name)
+        marker = "QListWidget#attachmentsList::item,"
+        start = css.index(marker)
+        end = css.index("}", start)
+        block = css[start:end]
+        assert "outline: none" in block, f"{theme_name}: #attachmentsList item rule lost outline: none"
+        assert "QListWidget#attachmentsList {" in css
+        list_start = css.index("QListWidget#attachmentsList {")
+        list_end = css.index("}", list_start)
+        assert "outline: none" in css[list_start:list_end]
 
 
 def test_removing_the_selected_tile_leaves_a_valid_selection_state(qapp, tmp_path):
