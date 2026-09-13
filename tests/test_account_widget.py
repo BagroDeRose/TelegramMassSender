@@ -145,3 +145,16 @@ def test_multiple_accounts_each_get_independent_rename_buttons(qapp):
     widget._rename_buttons[1].click()
 
     assert requests == [2]
+
+
+def test_rename_and_delete_buttons_have_accessible_names(qapp):
+    # Both are icon-only (no visible button text), so a screen reader has
+    # nothing else to announce for them without an explicit accessible
+    # name -- a tooltip alone is a separate accessibility role, not
+    # automatically used as the name.
+    account = _make_account()
+    widget = AccountWidget()
+    widget.set_accounts([_status(account)])
+
+    assert widget._rename_buttons[0].accessibleName()
+    assert widget._delete_buttons[0].accessibleName()

@@ -957,10 +957,26 @@ QLabel#thumbnailMeta {
 QWidget#attachmentTile {
     background-color: transparent;
     border-radius: ${radius_md}px;
+    /* Transparent, not absent -- a tile's size must stay identical
+       whether or not the focus ring below is showing, or gaining/losing
+       keyboard focus would visibly shift/resize the tile by the border
+       width. */
+    border: 2px solid transparent;
 }
 
 QWidget#attachmentTile[selected="true"] {
     background-color: $accent_soft;
+}
+
+/* Deliberate, QSS-driven keyboard-focus ring for the tile itself --
+   NOT the native QAbstractItemView "current item" focus rectangle
+   (QStyle::PE_FrameFocusRect), which is unconditionally suppressed above
+   via outline:none on #attachmentsList (see that rule's comment for the
+   dark-theme dashed-outline bug this replaces). Keyboard/accessibility
+   users still need visible focus; $focus_ring is the same token every
+   other focusable input in the app already uses. */
+QWidget#attachmentTile[focused="true"] {
+    border: 2px solid $focus_ring;
 }
 
 /* ---- saved report cards ----------------------------------------------------- */

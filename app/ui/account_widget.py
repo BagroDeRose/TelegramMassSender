@@ -154,6 +154,10 @@ class AccountWidget(QWidget):
         rename_button.setProperty("accountId", account.id)
         rename_button.setIcon(icons.icon("edit", tokens.text_muted, 12))
         rename_button.setToolTip(tr("account_widget.rename_tooltip"))
+        # Icon-only button: a screen reader has nothing else to announce
+        # here (its tooltip text is a separate accessibility role, not
+        # automatically used as the name).
+        rename_button.setAccessibleName(tr("account_widget.rename_tooltip"))
         rename_button.clicked.connect(lambda: self.rename_requested.emit(account.id))
         name_row.addWidget(rename_button)
         name_row.addStretch(1)
@@ -205,6 +209,7 @@ class AccountWidget(QWidget):
         delete_button.setProperty("accountId", account.id)
         delete_button.setIcon(icons.icon("close", theme.current_tokens().text_muted, 12))
         delete_button.setToolTip(tr("account_widget.delete_tooltip"))
+        delete_button.setAccessibleName(tr("account_widget.delete_tooltip"))
         delete_button.clicked.connect(lambda: self.delete_account_requested.emit(account.id))
         actions.addWidget(delete_button)
         self._delete_buttons.append(delete_button)

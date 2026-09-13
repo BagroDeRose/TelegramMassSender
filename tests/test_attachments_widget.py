@@ -1033,3 +1033,95 @@ def test_files_dropped_signal_is_wired_to_add_file(qapp, tmp_path):
     widget._list.files_dropped.emit([str(new_file)])
 
     assert [x.path for x in widget.get_attachments()] == [paths[0], new_file]
+
+
+# ---- keyboard accessibility (ROADMAP v1.8) -----------------------------------
+#
+# Before this stage, _AttachmentTile had no focus policy at all (the
+# QWidget default is Qt.NoFocus) -- a tile could only ever be selected,
+# removed, or reordered with a mouse, unreachable by Tab and invisible to
+# a screen reader (no accessibleName either, since none of its child
+# labels are independently focusable).
+
+
+def test_tile_has_a_real_focus_policy(qapp, tmp_path):
+    widget, paths = _make_widget_with_files(tmp_path, ["a.pdf"])
+    tile = _tile_widget(widget, 0)
+    assert tile.focusPolicy() != Qt.FocusPolicy.NoFocus
+
+
+def test_tile_has_an_accessible_name_and_description(qapp, tmp_path):
+    widget, paths = _make_widget_with_files(tmp_path, ["report.pdf"])
+    tile = _tile_widget(widget, 0)
+    assert tile.accessibleName() == "report.pdf"
+    assert tile.accessibleDescription()  # non-empty; exact text covered by _meta_text tests
+
+
+def test_tab_focus_sets_the_focused_property_for_qss(qapp, tmp_path):
+    widget, paths = _make_widget_with_files(tmp_path, ["a.pdf"])
+    widget.show()
+    # Explicit activation, not just show(): this suite's qapp fixture is
+    # session-scoped, so by the time this test runs, other tests' windows
+    # may still exist and hold "active window" status -- setFocus() alone
+    # doesn't reliably deliver a real focusInEvent to a widget whose
+    # top-level window isn't the active one.
+    widget.activateWindow()
+    qapp.processEvents()
+    tile = _tile_widget(widget, 0)
+
+    tile.setFocus(Qt.FocusReason.TabFocusReason)
+    qapp.processEvents()
+    assert tile.property("focused") == "true"
+
+    tile.clearFocus()
+    qapp.processEvents()
+    assert tile.property("focused") == "false"
+
+
+def test_space_key_toggles_selection(qapp, tmp_path):
+    widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf"])
+    tile = _tile_widget(widget, 0)
+    assert widget._list.item(0).isSelected() is False
+
+    QTest.keyClick(tile, Qt.Key.Key_Space)
+    assert widget._list.item(0).isSelected() is True
+
+    QTest.keyClick(tile, Qt.Key.Key_Space)
+    assert widget._list.item(0).isSelected() is False
+
+
+def test_space_key_toggles_without_clearing_other_selected_tiles(qapp, tmp_path):
+    widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf"])
+    widget._list.item(0).setSelected(True)
+    tile_2 = _tile_widget(widget, 2)
+
+    QTest.keyClick(tile_2, Qt.Key.Key_Space)
+
+    assert widget._list.item(0).isSelected() is True
+    assert widget._list.item(2).isSelected() is True
+
+
+def test_delete_key_removes_the_focused_tile(qapp, tmp_path):
+    widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf"])
+    tile = _tile_widget(widget, 0)
+
+    QTest.keyClick(tile, Qt.Key.Key_Delete)
+
+    assert [a.path for a in widget.get_attachments()] == [paths[1]]
+
+
+def test_backspace_key_also_removes_the_focused_tile(qapp, tmp_path):
+    widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf"])
+    tile = _tile_widget(widget, 1)
+
+    QTest.keyClick(tile, Qt.Key.Key_Backspace)
+
+    assert [a.path for a in widget.get_attachments()] == [paths[0]]
+
+
+def test_theme_qss_defines_a_focus_ring_for_the_tile(qapp):
+    from app.ui import theme
+
+    for theme_name in (theme.THEME_DARK, theme.THEME_LIGHT):
+        css = theme.stylesheet_for(theme_name)
+        assert 'QWidget#attachmentTile[focused="true"]' in css

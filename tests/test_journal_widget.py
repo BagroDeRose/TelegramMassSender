@@ -73,3 +73,16 @@ def test_old_lines_are_trimmed(qapp):
         journal.append(f"message {i}")
     assert journal._list.count() == _MAX_VISIBLE_LINES
     assert "message" in journal._list.item(0).text()  # oldest trimmed, not newest
+
+
+def test_collapse_button_has_an_accessible_name(qapp):
+    # Icon-only button (no visible text) -- a screen reader has nothing
+    # else to announce for it without an explicit accessible name.
+    journal = JournalWidget()
+    assert journal._collapse_button.accessibleName()
+
+
+def test_collapse_button_accessible_name_survives_retranslation(qapp):
+    journal = JournalWidget()
+    journal.retranslate_ui()
+    assert journal._collapse_button.accessibleName()

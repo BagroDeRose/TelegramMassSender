@@ -128,11 +128,20 @@ class _AttachmentTile(QWidget):
     """
 
     drag_requested = Signal(object)  # emits the QListWidgetItem this tile represents
+    remove_requested = Signal(object)  # emits the QListWidgetItem this tile represents (Delete/Backspace key)
 
     def __init__(self, item: QListWidgetItem, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._item = item
         self._press_pos: Optional[QPoint] = None
+        # Accessibility (ROADMAP v1.8): a plain QWidget has no focus
+        # policy by default, so without this the tile could only ever be
+        # selected/removed/dragged with a mouse -- unreachable by Tab and
+        # invisible to a screen reader. StrongFocus (not just TabFocus)
+        # also allows click-to-focus, matching every other clickable
+        # control in the app.
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setProperty("focused", "false")
 
     def mousePressEvent(self, event) -> None:  # noqa: N802 (Qt override)
         if event.button() == Qt.MouseButton.LeftButton:
@@ -200,6 +209,46 @@ class _AttachmentTile(QWidget):
             selection_model.setCurrentIndex(index, QItemSelectionModel.SelectionFlag.Current)
             return
         selection_model.setCurrentIndex(index, QItemSelectionModel.SelectionFlag.ClearAndSelect)
+
+    def focusInEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        # A deliberate, QSS-driven focus ring on the tile itself (see
+        # #attachmentTile[focused] in theme.py) -- NOT the native
+        # QAbstractItemView "current item" focus rectangle
+        # (QStyle::PE_FrameFocusRect), which theme.py explicitly
+        # suppresses via outline:none (see the dark-theme dashed-outline
+        # bugfix). Keyboard users still need to see where focus is; this
+        # is a correctly-scoped replacement for it, not a reintroduction
+        # of that bug.
+        self.setProperty("focused", "true")
+        self.style().unpolish(self)
+        self.style().polish(self)
+        super().focusInEvent(event)
+
+    def focusOutEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        self.setProperty("focused", "false")
+        self.style().unpolish(self)
+        self.style().polish(self)
+        super().focusOutEvent(event)
+
+    def keyPressEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        key = event.key()
+        if key == Qt.Key.Key_Space:
+            # Toggle this tile's selection -- the same convention
+            # QAbstractItemView itself uses for Space in extended-
+            # selection mode, kept consistent with Ctrl+click above.
+            list_widget = self._item.listWidget()
+            if list_widget is not None:
+                selection_model = list_widget.selectionModel()
+                index = list_widget.indexFromItem(self._item)
+                selection_model.select(index, QItemSelectionModel.SelectionFlag.Toggle)
+                selection_model.setCurrentIndex(index, QItemSelectionModel.SelectionFlag.Current)
+            event.accept()
+            return
+        if key in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):
+            self.remove_requested.emit(self._item)
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
 
 class _ReorderableListWidget(QListWidget):
@@ -426,6 +475,7 @@ class AttachmentsWidget(QWidget):
         tile = self._build_tile(item, path)
         self._list.setItemWidget(item, tile)
         tile.drag_requested.connect(self._list.start_tile_drag)
+        tile.remove_requested.connect(self._remove_item)
 
     def _rebuild_tiles(self, *, selected_paths: Optional[set] = None) -> None:
         """Rebuild every tile from self._paths, in its current order. Used
@@ -476,6 +526,12 @@ class AttachmentsWidget(QWidget):
         # own -- only QFrame-derived widgets do that automatically.
         tile.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         tile.setProperty("selected", "false")
+        # Accessibility (ROADMAP v1.8): a screen reader has no other text
+        # to announce for this composite widget (its child labels are all
+        # WA_TransparentForMouseEvents decoration, not focusable in their
+        # own right) -- accessibleName is what gets read when the tile
+        # itself receives focus.
+        tile.setAccessibleName(path.name)
         tile.setFixedWidth(_TILE_SIZE)
         column = QVBoxLayout(tile)
         column.setContentsMargins(0, 0, 0, 0)
@@ -513,6 +569,7 @@ class AttachmentsWidget(QWidget):
             meta_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             meta_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
             column.addWidget(meta_label)
+            tile.setAccessibleDescription(meta_text)
 
         remove_button = QToolButton(tile)
         remove_button.setObjectName("chipRemoveButton")

@@ -52,6 +52,7 @@ class JournalWidget(QFrame):
         self._collapse_button = QToolButton(self)
         self._collapse_button.setObjectName("journalToggleButton")
         self._collapse_button.setToolTip(tr("journal_widget.hide_tooltip"))
+        self._collapse_button.setAccessibleName(tr("journal_widget.hide_tooltip"))
         self._collapse_button.clicked.connect(self.toggle_requested.emit)
         header.addWidget(self._collapse_button)
         layout.addLayout(header)
@@ -81,6 +82,7 @@ class JournalWidget(QFrame):
     def retranslate_ui(self) -> None:
         self._title.setText(tr("journal_widget.title"))
         self._collapse_button.setToolTip(tr("journal_widget.hide_tooltip"))
+        self._collapse_button.setAccessibleName(tr("journal_widget.hide_tooltip"))
 
     def _sync_collapse_icon(self) -> None:
         self._collapse_button.setIcon(icons.icon("close", theme.current_tokens().text_muted, 12))
