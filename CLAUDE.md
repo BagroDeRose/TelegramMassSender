@@ -32,6 +32,13 @@ described below.
 - `app/ui/` — PySide6 widgets/dialogs/pages:
   - `main_window.py` — top-level window, orchestrates the service layer and
     all pages; sidebar navigation between Campaign/Accounts/Results/Settings.
+    (v1.8) Owns a `QSystemTrayIcon` (Show/Exit menu; only actually shown
+    when `QSystemTrayIcon.isSystemTrayAvailable()`); minimizing hides the
+    window to tray instead of the taskbar (restorable from the tray icon),
+    and native tray notifications fire on campaign completion and on a
+    campaign-ending critical error, alongside the existing status-bar
+    text/modal dialog respectively -- "Exit" in the tray menu always goes
+    through the normal `closeEvent`, never a separate shutdown path.
     The Results page's recipient-results list (v1.6 Retry, v1.7 Filter
     results) shows `_report_source`'s items filtered by a combo (default:
     Failed, preserving Retry's original behavior) -- only FAILED rows are
@@ -155,14 +162,18 @@ described below.
   `MainWindow.retranslate_ui()` the same way theme switching already
   dispatches `apply_theme()`. Deliberately not gettext or Qt Linguist
   (.ts/.qm + lupdate/lrelease) — this app has no other use for either.
-- `tests/` — pytest + pytest-asyncio (`asyncio_mode = auto`), 592 tests,
+- `tests/` — pytest + pytest-asyncio (`asyncio_mode = auto`), 612 tests,
   using `tests/mocks/mock_telegram_client.py` and
   `tests/mocks/fake_client_manager.py` instead of a real Telegram
   connection. CI runs this suite on `windows-latest` with
   `QT_QPA_PLATFORM=offscreen` (`.github/workflows/tests.yml`).
 
 Packaging: `telegram_mass_sender.spec` (PyInstaller, portable onedir build,
-bundles `assets/`), invoked by `build_windows.bat`.
+bundles `assets/`), invoked by `build_windows.bat`. (v1.8)
+`scripts/generate_version_info.py` generates `version_info.txt` (the
+Windows EXE version resource -- CompanyName/FileVersion/ProductName/etc.,
+shown in Explorer's file Properties) from `app.version.APP_VERSION` before
+each build; gitignored, never hand-edited.
 
 ## Development rules & constraints
 
@@ -181,7 +192,7 @@ reproduced with a failing test first, then fixed.
 
 **Tests.** After any code change, run the targeted test file, then the
 full suite (`pytest tests/ -v`). Don't delete or weaken existing tests just
-to make the suite pass. The current baseline is 592 passed, 0 failures —
+to make the suite pass. The current baseline is 612 passed, 0 failures —
 if that number changes, know exactly why before saying the change is done.
 
 **GUI.** Never block the Qt event loop or the asyncio event loop.

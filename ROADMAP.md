@@ -745,12 +745,47 @@ previously-untested module).
 
 ## Windows Integration
 
-- [ ] System tray support
-- [ ] Minimize to tray
-- [ ] Campaign completion notification
-- [ ] Critical error notification
-- [ ] Windows application metadata/version information
-- [ ] Verify application icon everywhere
+- [x] System tray support — `MainWindow._setup_system_tray` creates a
+      `QSystemTrayIcon` (the same `assets/icons/app.ico`) with a Show/Exit
+      context menu; only actually shown when
+      `QSystemTrayIcon.isSystemTrayAvailable()` (false under this
+      project's offscreen test platform, so nothing leaks a real icon
+      during the test suite). Left/double-click restores the window
+- [x] Minimize to tray — minimizing hides the window from the taskbar
+      entirely (restorable via the tray icon) rather than leaving a
+      minimized entry there, only when a tray actually exists to restore
+      it from. The actual `hide()` is deferred one event-loop tick via
+      `QTimer.singleShot(0, ...)` -- calling it synchronously from inside
+      `changeEvent` loses a real reentrancy race against the window
+      manager's own in-progress minimize transition (confirmed directly:
+      the window stayed visible despite `hide()` being called). Maximized
+      state is remembered and restored correctly
+- [x] Campaign completion notification — a native tray notification on
+      `CampaignStatus.COMPLETED`, in addition to the existing status-bar
+      message; a user-initiated Stop does not notify (not a completion or
+      an error)
+- [x] Critical error notification — a native tray notification on
+      `CampaignStatus.ERROR`, alongside the existing modal error dialog
+      (the dialog alone wouldn't be seen if the window is minimized to
+      tray)
+- [x] Windows application metadata/version information —
+      `scripts/generate_version_info.py` generates the PyInstaller
+      version-resource file (`version_info.txt`, gitignored, regenerated
+      at build time from `app.version.APP_VERSION`) embedded via the
+      `.spec`'s `EXE(..., version=...)`; shows CompanyName/
+      FileDescription/FileVersion/ProductName/ProductVersion/
+      LegalCopyright in Windows Explorer's file Properties dialog.
+      Generated rather than hand-maintained so it can't drift from
+      `APP_VERSION` -- PyInstaller's version-file format only accepts a
+      single `eval()`'d expression (confirmed from its own loader source),
+      which rules out a plain `from app.version import APP_VERSION`
+      inside the file itself
+- [x] Verify application icon everywhere — `assets/icons/app.ico` already
+      carries six real embedded resolutions (16-256px, confirmed via
+      `QIcon.availableSizes()`), is set as the `QApplication`'s window
+      icon before any window is constructed (so every dialog/QMessageBox
+      inherits it automatically -- confirmed no dialog overrides it), and
+      is the EXE's taskbar icon via the `.spec`'s `icon=` parameter
 
 ## Accessibility
 

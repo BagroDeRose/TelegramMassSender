@@ -11,6 +11,18 @@ that stability.
 """
 from PyInstaller.utils.hooks import collect_submodules
 
+import sys as _sys
+_sys.path.insert(0, SPECPATH)
+from scripts.generate_version_info import main as _generate_version_info
+
+# Regenerated here (not just by build_windows.bat) so this stays correct
+# regardless of how the spec is invoked -- e.g. `pyinstaller
+# telegram_mass_sender.spec` run directly, bypassing the batch script.
+# See scripts/generate_version_info.py for why this can't just be a
+# static, hand-maintained file (app.version.APP_VERSION is the one source
+# of truth for the version number).
+_generate_version_info()
+
 block_cipher = None
 
 # Telethon has no bundled PyInstaller hook and touches a large tree of
@@ -51,6 +63,7 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon="assets/icons/app.ico",
+    version="version_info.txt",
 )
 
 coll = COLLECT(

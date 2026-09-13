@@ -38,6 +38,18 @@ STRINGS: Dict[str, Dict[str, str]] = {
     "main_window.results.completed": {"ru": "✓ Рассылка завершена", "en": "✓ Campaign completed"},
     "main_window.results.stopped": {"ru": "■ Рассылка остановлена", "en": "■ Campaign stopped"},
     "main_window.results.error": {"ru": "! Рассылка остановлена из-за критической ошибки", "en": "! Campaign stopped due to a critical error"},
+    "main_window.tray.show": {"ru": "Показать окно", "en": "Show window"},
+    "main_window.tray.exit": {"ru": "Выход", "en": "Exit"},
+    "main_window.notifications.campaign_completed_title": {"ru": "Рассылка завершена", "en": "Campaign completed"},
+    "main_window.notifications.campaign_completed_body": {
+        "ru": "Рассылка успешно завершена. Откройте приложение, чтобы посмотреть результаты.",
+        "en": "The campaign finished successfully. Open the app to view the results.",
+    },
+    "main_window.notifications.critical_error_title": {"ru": "Критическая ошибка", "en": "Critical error"},
+    "main_window.notifications.campaign_error_body": {
+        "ru": "Рассылка остановлена из-за критической ошибки. Откройте приложение для подробностей.",
+        "en": "The campaign was stopped due to a critical error. Open the app for details.",
+    },
     "main_window.flood_wait.started": {
         "ru": "Telegram временно ограничил отправку. Необходимо подождать: {duration}",
         "en": "Telegram has temporarily limited sending. Waiting: {duration}",

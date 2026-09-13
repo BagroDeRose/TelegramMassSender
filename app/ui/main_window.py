@@ -11,8 +11,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from PySide6.QtCore import QUrl, Qt
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import QEvent, QTimer, QUrl, Qt
+from PySide6.QtGui import QDesktopServices, QIcon
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSpinBox,
     QStackedWidget,
+    QSystemTrayIcon,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -50,7 +51,7 @@ from app.campaign.presets import PresetError
 from app.recipients import groups
 from app.recipients.groups import RecipientGroupError
 from app.campaign import report_library
-from app.config.paths import get_reports_dir
+from app.config.paths import get_reports_dir, get_resource_path
 from app.config.settings import (
     MAX_ALLOWED_DELAY_SECONDS,
     MIN_ALLOWED_DELAY_SECONDS,
@@ -217,6 +218,8 @@ class MainWindow(QMainWindow):
         # first is still connecting -- see _on_start_requested/_start_campaign.
         self._campaign_starting = False
         self._close_event = close_event
+        self._tray_icon: Optional[QSystemTrayIcon] = None
+        self._restore_maximized_from_tray = False
 
         self._database = database if database is not None else Database()
         self._service = TelegramService(self._database)
@@ -270,6 +273,7 @@ class MainWindow(QMainWindow):
         self._refresh_groups_combo()
         self._refresh_diagnostics()
         self.statusBar().showMessage(tr("main_window.status.ready"))
+        self._setup_system_tray()
 
         asyncio.ensure_future(self._refresh_accounts())
 
@@ -1640,6 +1644,11 @@ class MainWindow(QMainWindow):
         if status == CampaignStatus.COMPLETED:
             self.statusBar().showMessage(tr("main_window.status.campaign_completed"))
             self._results_status_label.setText(tr("main_window.results.completed"))
+            self._notify(
+                tr("main_window.notifications.campaign_completed_title"),
+                tr("main_window.notifications.campaign_completed_body"),
+                QSystemTrayIcon.MessageIcon.Information,
+            )
         elif status == CampaignStatus.STOPPED:
             self.statusBar().showMessage(tr("main_window.status.campaign_stopped"))
             self._results_status_label.setText(tr("main_window.results.stopped"))
@@ -1650,6 +1659,11 @@ class MainWindow(QMainWindow):
                 self,
                 tr("main_window.dialogs.campaign_error_title"),
                 tr("main_window.dialogs.campaign_error_message"),
+            )
+            self._notify(
+                tr("main_window.notifications.critical_error_title"),
+                tr("main_window.notifications.campaign_error_body"),
+                QSystemTrayIcon.MessageIcon.Critical,
             )
         self._current_campaign = None
         self._on_form_state_changed()
@@ -2006,6 +2020,79 @@ class MainWindow(QMainWindow):
             return
         show_info(self, tr("main_window.dialogs.export_report_title"), tr("main_window.dialogs.export_report_saved", path=path_str))
 
+    # ---- system tray -------------------------------------------------------------
+
+    def _setup_system_tray(self) -> None:
+        """Always constructed (cheap, and lets tests exercise the wiring),
+        but only actually shown when the platform genuinely has a tray to
+        show it in -- QSystemTrayIcon.isSystemTrayAvailable() is False
+        under the offscreen platform this suite runs under, so this is a
+        safe no-op there rather than a real icon appearing anywhere."""
+        icon_path = get_resource_path("assets", "icons", "app.ico")
+        icon = QIcon(str(icon_path)) if icon_path.exists() else self.windowIcon()
+        self._tray_icon = QSystemTrayIcon(icon, self)
+        self._tray_icon.setToolTip(WINDOW_TITLE)
+
+        # QSystemTrayIcon.setContextMenu() does NOT take ownership of the
+        # menu (per Qt's own docs) -- stored on self so this stays alive
+        # for the window's lifetime; a plain local would be eligible for
+        # Python/shiboken garbage collection the moment this method
+        # returns, leaving the tray icon's context menu pointer dangling
+        # (the same class of Qt object-lifetime hazard already caught
+        # twice this session with QStyle/QProxyStyle).
+        self._tray_menu = QMenu()
+        show_action = self._tray_menu.addAction(tr("main_window.tray.show"))
+        show_action.triggered.connect(self._restore_from_tray)
+        self._tray_menu.addSeparator()
+        exit_action = self._tray_menu.addAction(tr("main_window.tray.exit"))
+        exit_action.triggered.connect(self.close)
+        self._tray_icon.setContextMenu(self._tray_menu)
+        self._tray_icon.activated.connect(self._on_tray_icon_activated)
+
+        if QSystemTrayIcon.isSystemTrayAvailable():
+            self._tray_icon.show()
+
+    def _on_tray_icon_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
+        if reason in (QSystemTrayIcon.ActivationReason.Trigger, QSystemTrayIcon.ActivationReason.DoubleClick):
+            self._restore_from_tray()
+
+    def _restore_from_tray(self) -> None:
+        if self._restore_maximized_from_tray:
+            self.showMaximized()
+        else:
+            self.showNormal()
+        self.activateWindow()
+        self.raise_()
+
+    def changeEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        # "Minimize to tray": once minimized, hide from the taskbar
+        # entirely rather than leaving a minimized entry there -- only
+        # when a tray icon actually exists to restore it from, so the
+        # window can never become unreachable (e.g. no tray on this
+        # platform/desktop environment).
+        if (
+            event.type() == QEvent.Type.WindowStateChange
+            and self.isMinimized()
+            and self._tray_icon is not None
+            and QSystemTrayIcon.isSystemTrayAvailable()
+        ):
+            self._restore_maximized_from_tray = bool(self.windowState() & Qt.WindowState.WindowMaximized)
+            # Deferred rather than calling self.hide() synchronously here:
+            # this event fires *during* the window manager's own minimize
+            # transition, and a reentrant hide() at that exact point loses
+            # the race against it (confirmed directly -- the window stayed
+            # visible even though hide() was called). Queuing it for the
+            # next event-loop iteration lets the minimize finish first.
+            QTimer.singleShot(0, self.hide)
+        super().changeEvent(event)
+
+    def _notify(self, title: str, message: str, icon: QSystemTrayIcon.MessageIcon) -> None:
+        """Best-effort native notification -- only actually shown if the
+        tray icon itself is visible (nothing to anchor a notification to
+        otherwise); never raises or blocks the caller."""
+        if self._tray_icon is not None and self._tray_icon.isVisible():
+            self._tray_icon.showMessage(title, message, icon, 8000)
+
     # ---- shutdown --------------------------------------------------------------
 
     def closeEvent(self, event) -> None:  # noqa: N802 (Qt override)
@@ -2018,6 +2105,8 @@ class MainWindow(QMainWindow):
                 return
         event.ignore()
         self._shutdown_in_progress = True
+        if self._tray_icon is not None:
+            self._tray_icon.hide()
         asyncio.ensure_future(self._perform_shutdown())
 
     def _save_window_state(self) -> None:
