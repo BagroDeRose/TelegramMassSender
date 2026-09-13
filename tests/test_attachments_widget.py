@@ -9,7 +9,7 @@ from PySide6.QtCore import QPoint, Qt
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QWidget
 
-from app.ui.attachments_widget import AttachmentsWidget
+from app.ui.attachments_widget import _REORDER_MIME_TYPE, AttachmentsWidget
 
 
 def _write_minimal_png(path):
@@ -360,8 +360,136 @@ def test_initial_order_matches_add_order_before_any_reorder(qapp, tmp_path):
 
 
 def test_moving_first_item_to_end(qapp, tmp_path):
+    # target_row == the pre-drop item count (here 3) is
+    # _ReorderableListWidget.dropEvent's sentinel for "dropped past every
+    # tile" -- move to the very end. target_row == 2 (the last tile's own
+    # *row*) means something different: "insert immediately before that
+    # tile" -- see test_moving_item_onto_the_last_tile_inserts_before_it.
     widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf"])
-    widget._on_tile_reorder_requested(0, 2)
+    widget._on_tile_reorder_requested(0, 3)
+    assert [a.path for a in widget.get_attachments()] == [paths[1], paths[2], paths[0]]
+
+
+def test_moving_item_onto_the_last_tile_inserts_before_it(qapp, tmp_path):
+    # Regression test for the drag-and-drop reordering bug: dropping
+    # directly on a target tile must always mean "insert immediately
+    # before that tile," regardless of which direction the drag came
+    # from. Before the fix, target_row was reused as a raw list index
+    # straight from the pre-drop (source-still-present) list, so a
+    # forward drag (like this one) landed *after* the target while the
+    # identical drop gesture from the other direction landed *before* it
+    # -- the same physical action meaning two different things depending
+    # on drag direction, which is what made reordering feel unreliable.
+    widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf"])
+    widget._on_tile_reorder_requested(0, 2)  # drop "a" directly on "c" (row 2)
+    assert [a.path for a in widget.get_attachments()] == [paths[1], paths[0], paths[2]]
+
+
+def test_dropping_on_the_same_tile_from_either_direction_lands_in_the_same_place(qapp, tmp_path):
+    # The core invariant the drag-and-drop bug violated: the same physical
+    # drop target must mean the same thing regardless of which direction
+    # the drag came from. Here two independent widgets each drop one item
+    # directly onto "c" -- once forward (dragging "a" rightward onto it)
+    # and once backward (dragging "d" leftward onto it) -- and both must
+    # place the dragged item in the same relative position (immediately
+    # before "c").
+    forward_widget, forward_paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf", "d.pdf"])
+    forward_widget._on_tile_reorder_requested(0, 2)  # drag "a" (row 0) onto "c" (row 2)
+    forward_result = [p.name for p in [a.path for a in forward_widget.get_attachments()]]
+
+    backward_widget, backward_paths = _make_widget_with_files(tmp_path, ["x.pdf", "y.pdf", "c2.pdf", "z.pdf"])
+    backward_widget._on_tile_reorder_requested(3, 2)  # drag "z" (row 3) onto "c2" (row 2)
+    backward_result = [p.name for p in [a.path for a in backward_widget.get_attachments()]]
+
+    # In both cases the dragged item must end up immediately before "c" --
+    # i.e. as the second-to-last of four items, directly preceding the
+    # target it was dropped on.
+    assert forward_result == ["b.pdf", "a.pdf", "c.pdf", "d.pdf"]
+    assert backward_result == ["x.pdf", "y.pdf", "z.pdf", "c2.pdf"]
+
+
+def test_real_drop_event_on_a_specific_tile_reorders_via_the_actual_event_path(qapp, tmp_path):
+    # Closes the gap explicitly flagged during investigation: every other
+    # reorder test drives AttachmentsWidget._on_tile_reorder_requested (or
+    # the tile_reorder_requested signal) directly, never exercising
+    # _ReorderableListWidget.dropEvent itself -- the code that actually
+    # computes *which* row a real drop landed on via
+    # self.indexAt(event.position().toPoint()). A test that only calls
+    # the reorder method by hand cannot catch a bug in that position ->
+    # row computation. This builds a real QDropEvent carrying the same
+    # custom reorder MIME type start_tile_drag() uses, positioned at the
+    # actual on-screen center of a specific tile (via visualItemRect, so
+    # this is real Qt layout geometry, not a guessed coordinate), and
+    # dispatches it straight into dropEvent() -- the same call a genuine
+    # OS-level drop would trigger.
+    from PySide6.QtCore import QMimeData
+    from PySide6.QtGui import QDropEvent
+
+    widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf", "d.pdf"])
+    widget.show()
+    qapp.processEvents()
+
+    target_item = widget._list.item(2)  # "c.pdf"
+    target_center = widget._list.visualItemRect(target_item).center()
+    # Sanity check: the geometry this test relies on is real and distinct
+    # per item, not e.g. every item collapsed onto the same point.
+    assert widget._list.visualItemRect(widget._list.item(0)).center() != target_center
+
+    mime = QMimeData()
+    mime.setData(_REORDER_MIME_TYPE, b"0")  # dragging row 0 ("a.pdf")
+    event = QDropEvent(
+        target_center.toPointF(),
+        Qt.DropAction.MoveAction,
+        mime,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    event._mime_keepalive = mime  # see _make_drop_event's note on QDropEvent's mimeData lifetime
+
+    widget._list.dropEvent(event)
+    qapp.processEvents()
+
+    assert event.isAccepted()
+    # "a" dropped directly on "c" -> lands immediately before "c", the
+    # same direction-independent rule proven by the handler-level tests
+    # above -- this time reached through the real event path.
+    assert [a.path for a in widget.get_attachments()] == [paths[1], paths[0], paths[2], paths[3]]
+
+
+def test_real_drop_event_past_the_last_tile_appends_at_the_end(qapp, tmp_path):
+    # Same real-event-path proof as above, for the "dropped in the
+    # trailing empty space past every tile" case -- indexAt() returns an
+    # invalid index there, which dropEvent must translate into the
+    # count()-sized append sentinel, not silently do nothing.
+    from PySide6.QtCore import QMimeData
+    from PySide6.QtGui import QDropEvent
+
+    widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf"])
+    widget.resize(500, 400)
+    widget.show()
+    qapp.processEvents()
+
+    last_item_rect = widget._list.visualItemRect(widget._list.item(2))
+    # Well below the last row of tiles -- real empty space with no item
+    # underneath, confirmed via indexAt itself rather than assumed.
+    far_below = last_item_rect.bottomLeft() + QPoint(0, 500)
+    assert not widget._list.indexAt(far_below).isValid()
+
+    mime = QMimeData()
+    mime.setData(_REORDER_MIME_TYPE, b"0")  # dragging row 0 ("a.pdf")
+    event = QDropEvent(
+        far_below.toPointF(),
+        Qt.DropAction.MoveAction,
+        mime,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    event._mime_keepalive = mime
+
+    widget._list.dropEvent(event)
+    qapp.processEvents()
+
+    assert event.isAccepted()
     assert [a.path for a in widget.get_attachments()] == [paths[1], paths[2], paths[0]]
 
 
@@ -372,15 +500,17 @@ def test_moving_last_item_to_beginning(qapp, tmp_path):
 
 
 def test_moving_item_to_the_middle(qapp, tmp_path):
+    # Drop "a" directly on "c" (row 2 of [a, b, c, d]) -> "a" lands
+    # immediately before "c": [b, a, c, d].
     widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf", "d.pdf"])
     widget._on_tile_reorder_requested(0, 2)
-    assert [a.path for a in widget.get_attachments()] == [paths[1], paths[2], paths[0], paths[3]]
+    assert [a.path for a in widget.get_attachments()] == [paths[1], paths[0], paths[2], paths[3]]
 
 
 def test_multiple_reorders_compose_to_the_correct_final_order(qapp, tmp_path):
     widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf", "d.pdf"])
     # a b c d
-    widget._on_tile_reorder_requested(0, 3)  # -> b c d a
+    widget._on_tile_reorder_requested(0, 4)  # target_row 4 == count -> true append -> b c d a
     widget._on_tile_reorder_requested(1, 0)  # -> c b d a
     widget._on_tile_reorder_requested(3, 1)  # -> c a b d
     expected = [paths[2], paths[0], paths[1], paths[3]]
@@ -391,7 +521,7 @@ def test_reorder_via_actual_qt_signal_not_just_direct_handler_call(qapp, tmp_pat
     # Proves the wiring itself (connect() in __init__), not just that the
     # handler function works when called directly.
     widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf"])
-    widget._list.tile_reorder_requested.emit(0, 2)
+    widget._list.tile_reorder_requested.emit(0, 3)  # sentinel -> true append
     assert [a.path for a in widget.get_attachments()] == [paths[1], paths[2], paths[0]]
 
 
@@ -421,7 +551,7 @@ def test_reorder_with_out_of_range_rows_is_ignored_not_corrupting_order(qapp, tm
 
 def test_remove_after_reorder_removes_the_correct_file(qapp, tmp_path):
     widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf"])
-    widget._on_tile_reorder_requested(0, 2)  # -> b c a
+    widget._on_tile_reorder_requested(0, 3)  # sentinel -> true append -> b c a
     # Displayed order is now [b, c, a]; removing row 1 must remove c.
     item = widget._list.item(1)
     widget._remove_item(item)
@@ -430,7 +560,7 @@ def test_remove_after_reorder_removes_the_correct_file(qapp, tmp_path):
 
 def test_add_after_reorder_appends_without_corrupting_existing_order(qapp, tmp_path):
     widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf"])
-    widget._on_tile_reorder_requested(0, 2)  # -> b c a
+    widget._on_tile_reorder_requested(0, 3)  # sentinel -> true append -> b c a
     new_path = tmp_path / "d.pdf"
     new_path.write_bytes(b"x")
     widget.add_file(new_path)
@@ -451,7 +581,7 @@ def test_clear_after_reorder_leaves_widget_empty(qapp, tmp_path):
 
 def test_missing_file_validation_after_reorder_reports_correct_paths(qapp, tmp_path):
     widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf"])
-    widget._on_tile_reorder_requested(0, 2)  # -> b c a
+    widget._on_tile_reorder_requested(0, 3)  # sentinel -> true append -> b c a
     paths[0].unlink()  # "a.pdf" -- now at the end of the displayed order
 
     assert widget.missing_files() == [paths[0]]
@@ -459,7 +589,7 @@ def test_missing_file_validation_after_reorder_reports_correct_paths(qapp, tmp_p
 
 def test_theme_apply_after_reorder_does_not_raise_and_keeps_correct_icons(qapp, tmp_path):
     widget, paths = _make_widget_with_files(tmp_path, ["clip.mp4", "song.mp3", "c.pdf"])
-    widget._on_tile_reorder_requested(0, 2)  # -> song.mp3, c.pdf, clip.mp4
+    widget._on_tile_reorder_requested(0, 3)  # sentinel -> true append -> song.mp3, c.pdf, clip.mp4
 
     widget.apply_theme()  # must not raise, and must re-tint the rebuilt tiles
 
@@ -481,7 +611,7 @@ def test_send_plan_consumes_attachments_in_the_reordered_display_order(qapp, tmp
     from app.telegram.media_sender import build_media_send_plan
 
     widget, paths = _make_widget_with_files(tmp_path, ["a.jpg", "b.pdf", "c.jpg"])
-    widget._on_tile_reorder_requested(0, 2)  # -> b.pdf, c.jpg, a.jpg
+    widget._on_tile_reorder_requested(0, 3)  # sentinel -> true append -> b.pdf, c.jpg, a.jpg
 
     plan = build_media_send_plan(widget.get_attachments(), "caption", [])
 
@@ -726,7 +856,7 @@ def test_selection_survives_reorder(qapp, tmp_path):
     widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf"])
     widget._list.item(0).setSelected(True)  # select "a.pdf"
 
-    widget._on_tile_reorder_requested(0, 2)  # -> b, c, a
+    widget._on_tile_reorder_requested(0, 3)  # sentinel -> true append -> b, c, a
 
     # "a.pdf" is now the last tile (index 2) and must still be selected.
     new_order = [a.path for a in widget.get_attachments()]
@@ -745,6 +875,84 @@ def test_selection_property_unaffected_by_theme_apply(qapp, tmp_path):
 
     tile = widget._tiles[id(widget._list.item(0))].widget
     assert tile.property("selected") == "true"
+
+
+def test_selecting_a_tile_never_draws_the_native_focus_rectangle(qapp, tmp_path):
+    # Regression test for the dark-theme "dashed/dotted outline on a
+    # selected attachment card" bug. Root cause: clicking a tile to select
+    # it also makes that QListWidgetItem the view's *current* item, and
+    # QAbstractItemView's own delegate paints a native focus indicator
+    # (QStyle::PE_FrameFocusRect -- a dashed rectangle on Windows styles)
+    # for the current item unless the stylesheet explicitly disables it.
+    # The custom tile widget sits on top of the item and draws its own
+    # `[selected="true"]` background, but that native focus rect is a
+    # *separate* paint step done by the view underneath/around it, so it
+    # was visible as a stray dashed border regardless of the tile's own
+    # QSS. `theme.py`'s `#attachmentsList::item` rules only set
+    # `background-color`/`border`, never `outline` -- and `outline` is
+    # specifically what Qt's stylesheet engine uses to suppress
+    # PE_FrameFocusRect (border does not affect it).
+    #
+    # This installs a QProxyStyle that counts PE_FrameFocusRect draw
+    # calls -- a direct, code-level check of what Qt's style machinery
+    # actually did, not a guess from a screenshot (raw pixel screenshots
+    # of this element were confirmed, separately, to be too subtle/
+    # theme-engine-dependent in this sandbox's offscreen software
+    # rasterizer to eyeball reliably; this probe is exact regardless).
+    #
+    # The probe is installed via widget.setStyle(), not
+    # QApplication.setStyle() -- QApplication.setStyle() takes ownership
+    # of the style object it replaces and deletes it, so restoring the
+    # "original" style object afterward would hand Qt a pointer to
+    # already-deleted C++ memory (confirmed: this crashed the whole test
+    # process with a Windows access violation on the next test's widget
+    # construction). QWidget.setStyle() does not transfer ownership and
+    # only affects that widget's subtree, so it needs no restoration at
+    # all -- the widget itself is discarded at the end of the test.
+    from PySide6.QtWidgets import QProxyStyle, QStyle
+
+    from app.ui import theme
+
+    focus_rect_calls = {"count": 0}
+
+    class _ProbeStyle(QProxyStyle):
+        def drawPrimitive(self, element, option, painter, widget=None):
+            if element == QStyle.PrimitiveElement.PE_FrameFocusRect:
+                focus_rect_calls["count"] += 1
+            super().drawPrimitive(element, option, painter, widget)
+
+    original_stylesheet = qapp.styleSheet()
+    probe = _ProbeStyle(qapp.style())
+    widget = None
+    try:
+        qapp.setStyleSheet(theme.stylesheet_for(theme.THEME_DARK))
+
+        widget, paths = _make_widget_with_files(tmp_path, ["a.pdf"])
+        widget.setStyle(probe)
+        # Real painting (and thus PE_FrameFocusRect) only happens for an
+        # actually-shown widget -- an unshown widget's repaint() is a
+        # near no-op under the offscreen platform, which would make this
+        # probe pass vacuously regardless of the QSS fix.
+        widget.show()
+        qapp.processEvents()
+        tile = _tile_widget(widget, 0)
+
+        QTest.mousePress(tile, Qt.MouseButton.LeftButton, pos=QPoint(10, 10))
+        QTest.mouseRelease(tile, Qt.MouseButton.LeftButton, pos=QPoint(10, 10))
+        qapp.processEvents()
+        assert widget._list.currentItem() is widget._list.item(0)
+        assert tile.property("selected") == "true"
+
+        focus_rect_calls["count"] = 0  # ignore any churn from initial layout/selection
+        widget._list.viewport().repaint()
+        widget.repaint()
+        qapp.processEvents()
+
+        assert focus_rect_calls["count"] == 0
+    finally:
+        if widget is not None:
+            widget.close()
+        qapp.setStyleSheet(original_stylesheet)
 
 
 def test_removing_the_selected_tile_leaves_a_valid_selection_state(qapp, tmp_path):

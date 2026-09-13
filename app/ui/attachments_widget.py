@@ -263,9 +263,18 @@ class _ReorderableListWidget(QListWidget):
         if mime.hasFormat(_REORDER_MIME_TYPE):
             source_row = int(bytes(mime.data(_REORDER_MIME_TYPE)).decode("ascii"))
             index = self.indexAt(event.position().toPoint())
-            target_row = index.row() if index.isValid() else self.count() - 1
+            # self.count() (one past the last valid item row) is a
+            # deliberate, distinct sentinel from "the last item's own
+            # row" -- it means "dropped past every tile" (the cursor
+            # wasn't over any item, e.g. in the trailing empty space of
+            # the wrapped grid), which AttachmentsWidget._on_tile_reorder_
+            # requested treats as "move to the very end," as opposed to
+            # dropping ON the last tile, which means "insert immediately
+            # before the last tile" -- see that method for why these must
+            # stay distinct.
+            target_row = index.row() if index.isValid() else self.count()
             event.acceptProposedAction()
-            if target_row >= 0 and target_row != source_row:
+            if target_row != source_row:
                 self.tile_reorder_requested.emit(source_row, target_row)
         elif mime.hasUrls():
             paths = [url.toLocalFile() for url in mime.urls() if url.toLocalFile()]
@@ -380,13 +389,34 @@ class AttachmentsWidget(QWidget):
             self.add_file(Path(file_path))
 
     def _on_tile_reorder_requested(self, source_row: int, target_row: int) -> None:
-        if not (0 <= source_row < len(self._paths)) or not (0 <= target_row < len(self._paths)):
+        # target_row == old_len (one past the last valid row) is
+        # _ReorderableListWidget.dropEvent's sentinel for "dropped past
+        # every tile" -- move to the very end. Anything in 0..old_len-1
+        # means "insert immediately before whichever tile is currently at
+        # that row."
+        old_len = len(self._paths)
+        if not (0 <= source_row < old_len) or not (0 <= target_row <= old_len):
             return  # stale/out-of-range row -- ignore rather than corrupt order
         # Captured by path (stable identity) rather than row, since every
         # row shifts once self._paths is mutated below.
         selected_paths = {self._paths[self._list.row(i)] for i in self._list.selectedItems()}
+        target_path = self._paths[target_row] if target_row < old_len else None
         path = self._paths.pop(source_row)
-        self._paths.insert(target_row, path)
+        if target_path is None:
+            insert_at = len(self._paths)  # dropped past the last tile -> truly append
+        else:
+            # Re-locate the target by identity rather than reusing
+            # target_row directly: popping source_row may have shifted
+            # every row after it left by one, and reusing the stale
+            # pre-pop index here is exactly what made a forward drag land
+            # *after* its target while the identical drop gesture in the
+            # opposite direction landed *before* it -- the same physical
+            # "drop on this tile" meaning two different things depending
+            # on which way the drag came from. Insert position is always
+            # "immediately before the target tile," regardless of
+            # direction, once the target is found by its stable identity.
+            insert_at = self._paths.index(target_path)
+        self._paths.insert(insert_at, path)
         self._rebuild_tiles(selected_paths=selected_paths)
 
     def _append_tile(self, path: Path) -> None:

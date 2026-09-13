@@ -145,25 +145,59 @@ Still deferred.
       mechanism to keep in sync. Each tile (`_AttachmentTile`) detects the
       gesture itself via `grabMouse()`/explicit event acceptance rather
       than a viewport-level event filter, verified directly via
-      `QWidget.mouseGrabber()` (Qt's own grab-state introspection) after
-      an event-filter-based first attempt was found, via real hardware
-      testing, to never receive a real mouse move at all. Click/Ctrl-click/
-      Shift-click selection is implemented explicitly against the list's
-      `QItemSelectionModel`, and the native `QListWidget::item:selected`
-      paint is neutralized in favor of a deliberate `[selected]`-driven
-      highlight on the tile itself (`app/ui/attachments_widget.py::_AttachmentTile`,
-      `_ReorderableListWidget`). The reorder gesture's *logic* is
-      exhaustively covered by automated tests and independently verified
-      selection rendering visually in both themes; the physical mouse
-      drag itself could not be exercised by this environment's synthetic
-      input and was confirmed on real hardware by the project owner.
+      `QWidget.mouseGrabber()` (Qt's own grab-state introspection).
+      Click/Ctrl-click/Shift-click selection is implemented explicitly
+      against the list's `QItemSelectionModel`, and the native
+      `QListWidget::item:selected` paint is neutralized in favor of a
+      deliberate `[selected]`-driven highlight on the tile itself
+      (`app/ui/attachments_widget.py::_AttachmentTile`,
+      `_ReorderableListWidget`).
+      **Correction (re-audited after a user report that reordering was
+      still unreliable in practice):** a real bug survived the stage
+      described above -- `_on_tile_reorder_requested` reused the drop
+      target's row index as a raw insertion index straight from the
+      pre-drop list, so the *same* drop gesture (release directly on a
+      given tile) landed the dragged item *after* that tile for a forward
+      drag but *before* it for a backward drag -- confirmed and quantified
+      by replaying every (source, target) pair over a 4-item list, all 12
+      of which showed this exact asymmetry. Fixed by re-locating the drop
+      target by stable path identity *after* the source is removed, so
+      "drop on tile X" now always means "insert immediately before X,"
+      regardless of drag direction; a drop past the last tile (an invalid
+      `indexAt()` hit) is a distinct "true append" case handled via its
+      own sentinel. Regression tests now exercise this through a real
+      `QDropEvent` dispatched into `_ReorderableListWidget.dropEvent()`
+      itself (not just the handler called directly), and assert the
+      direction-independence invariant explicitly
+      (`tests/test_attachments_widget.py`). Real OS-level mouse-drag
+      injection still cannot be exercised by this project's automated/
+      sandboxed environments -- verified instead via real Qt rendering
+      (`QWidget.grab()`) of an actual drop event's before/after tile
+      layout, cross-checked against `get_attachments()`'s send order to
+      confirm the two never diverge.
 - [x] Remove attachments individually
 - [x] Clear attachment queue
 - [x] Improve attachment preview — every tile (including images, which
       previously showed nothing but the thumbnail) now shows a
       `<size> · <TYPE>` line (`app/ui/attachments_widget.py::_meta_text`);
       long filenames already elide with a full-path tooltip; spacing and
-      both themes visually re-verified
+      both themes visually re-verified.
+      **Correction (re-audited after a user report of a stray dashed/
+      dotted outline on a selected tile in dark theme):** root cause was
+      Qt's native "current item" focus indicator
+      (`QStyle::PE_FrameFocusRect`), which `QAbstractItemView` paints for
+      whichever item is current -- selecting a tile also makes it the
+      list's current item -- and which `theme.py`'s QSS never disabled
+      (`border: none` suppresses the native selection background, but not
+      this separate focus-rect paint step; only the `outline` QSS
+      property does). Fixed by adding `outline: none` to the
+      `#attachmentsList` item rules. Confirmed via a `QProxyStyle` probe
+      counting real `PE_FrameFocusRect` draw calls on an actually-shown,
+      actually-selected tile (2 calls before the fix, 0 after) -- a
+      direct, code-level check of Qt's own style machinery, chosen over
+      screenshot comparison after the sandbox's offscreen rasterizer
+      proved too subtle/font-dependent to eyeball reliably. Regression
+      test in `tests/test_attachments_widget.py`.
 - [x] Show file type and size — see above
 - [x] Show useful validation errors — missing-file and unreadable-file
       errors each name the affected file(s) and, for an unreadable file,

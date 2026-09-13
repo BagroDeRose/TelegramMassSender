@@ -752,12 +752,30 @@ QListWidget::item:selected {
    draw their own deliberate [selected] state (see #attachmentTile below)
    -- the native item-selected paint above is drawn behind the tile at the
    item's own rect rather than the tile's actual rounded shape, so it's
-   neutralized here rather than left to show through at the edges. */
+   neutralized here rather than left to show through at the edges.
+
+   `outline: none` is required separately from `border: none` -- Qt's
+   QAbstractItemView delegate paints the "current item" focus indicator
+   (QStyle::PE_FrameFocusRect, a dashed/dotted rectangle on the native
+   Windows style this app uses) as its own paint step, controlled only by
+   the QSS `outline` property, not `border`. Clicking a tile to select it
+   also makes that QListWidgetItem the view's "current" item, so without
+   this the native focus rect was drawn across the item's rect on top of
+   (and misaligned with) the custom tile -- reproduced and confirmed via a
+   real click + widget.grab() before this fix; see the attachments_widget
+   test suite's selection-rendering regression tests for the programmatic
+   check that this stays suppressed. */
 QListWidget#attachmentsList::item,
 QListWidget#attachmentsList::item:selected,
-QListWidget#attachmentsList::item:hover {
+QListWidget#attachmentsList::item:hover,
+QListWidget#attachmentsList::item:focus {
     background-color: transparent;
     border: none;
+    outline: none;
+}
+
+QListWidget#attachmentsList {
+    outline: none;
 }
 
 /* ---- attachment chips ---------------------------------------------------- */
