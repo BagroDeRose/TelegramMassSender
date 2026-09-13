@@ -703,16 +703,45 @@ previously-untested module).
 
 ## Accounts
 
-- [ ] Rename local account alias
-- [ ] Show avatar
-- [ ] Show phone number where appropriate
-- [ ] Show username
-- [ ] Show connection status
-- [ ] Reconnect account
-- [ ] Log out account
-- [ ] Remove local account/session
-- [ ] Confirm destructive actions
-- [ ] Never persist 2FA password
+- [x] Rename local account alias — new `accounts.local_alias` column
+      (migrated in for existing installs by `Database._migrate`, since
+      `CREATE TABLE IF NOT EXISTS` alone never reaches a table that
+      already exists), `AccountRepository.rename`/`AccountManager.rename_account`,
+      and a pencil-icon button on each account card
+      (`app/ui/account_widget.py`) opening a `QInputDialog` (matching the
+      existing saved-report rename pattern in `main_window.py`). Distinct
+      from `display_name` (Telegram's own profile name, refreshed from
+      the server) -- the alias is purely local and takes priority over it
+      when set; a blank alias clears back to the default. Not gated by
+      the mid-campaign account-switch guard, since renaming a local label
+      doesn't affect the active session
+- [x] Show avatar — initial-letter avatar (`app/ui/icons.py::avatar_pixmap`),
+      already implemented before this stage
+- [x] Show phone number where appropriate — always shown on the account
+      card unless it would just repeat the title (i.e. no alias/display
+      name set, so the phone already *is* the title)
+- [x] Show username — `@username` shown on the card when present, already
+      implemented before this stage
+- [x] Show connection status — connected/connection-problem/reauth-required/
+      not-authorized, each with distinct text and color
+      (`_status_text_and_variant`), already implemented before this stage
+- [x] Reconnect account — already implemented before this stage
+- [x] Log out account — `AccountManager.delete_account` now calls
+      `ClientManager.log_out` (Telethon's own `log_out()`, which actually
+      invalidates the session on Telegram's servers) before removing the
+      local session file/DB row; `disconnect()` alone (the previous
+      behavior) only closed the local connection and left the session
+      technically still valid server-side. Best-effort and never blocks
+      local removal -- an unreachable network or an already-invalid
+      session still lets the account be removed from the app
+- [x] Remove local account/session — same action as "Log out" above (one
+      user action, the account card's delete button); already implemented
+      before this stage, now paired with a real server-side logout too
+- [x] Confirm destructive actions — `confirm_delete_account` dialog before
+      any delete, already implemented before this stage
+- [x] Never persist 2FA password — `login_dialog.py` discards the entered
+      password immediately after use; never written to disk, settings, or
+      logs, already the case before this stage
 
 ## Windows Integration
 

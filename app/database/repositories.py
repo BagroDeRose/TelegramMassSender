@@ -62,6 +62,16 @@ class AccountRepository:
                 (account_id,),
             )
 
+    def rename(self, account_id: int, local_alias: Optional[str]) -> None:
+        """Sets the user's own local display alias for this account,
+        distinct from `display_name` (Telegram's own first/last name,
+        refreshed by update_profile) -- a blank/whitespace-only alias is
+        stored as NULL, which falls back to display_name/phone in the UI
+        rather than showing a literal empty name."""
+        normalized = local_alias.strip() if local_alias else None
+        with self._db.cursor() as cur:
+            cur.execute("UPDATE accounts SET local_alias = ? WHERE id = ?", (normalized or None, account_id))
+
     def delete(self, account_id: int) -> None:
         with self._db.cursor() as cur:
             cur.execute("DELETE FROM accounts WHERE id = ?", (account_id,))
@@ -74,6 +84,7 @@ class AccountRepository:
             telegram_user_id=row["telegram_user_id"],
             username=row["username"],
             display_name=row["display_name"],
+            local_alias=row["local_alias"],
             session_name=row["session_name"],
             created_at=row["created_at"],
             last_used_at=row["last_used_at"],

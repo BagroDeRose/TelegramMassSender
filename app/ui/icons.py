@@ -84,6 +84,22 @@ def _draw_close(p: QPainter) -> None:
     p.drawLine(QPointF(18, 6), QPointF(6, 18))
 
 
+def _draw_edit(p: QPainter) -> None:
+    # A simple pencil: shaft + tip, used for rename actions (e.g. the
+    # account card's local alias) -- deliberately the same stroke weight
+    # as every other glyph here, not a filled/solid icon.
+    shaft = QPainterPath()
+    shaft.moveTo(4, 20)
+    shaft.lineTo(5, 16.2)
+    shaft.lineTo(15.2, 6)
+    shaft.lineTo(18.5, 9.3)
+    shaft.lineTo(8.3, 19.5)
+    shaft.closeSubpath()
+    p.drawPath(shaft)
+    p.drawLine(QPointF(13, 8.2), QPointF(16.3, 11.5))
+    p.drawLine(QPointF(4, 20), QPointF(8.3, 19.5))
+
+
 def _draw_check_circle(p: QPainter) -> None:
     p.drawEllipse(QRectF(3, 3, 18, 18))
     path = QPainterPath()
@@ -184,6 +200,7 @@ _DRAWERS: Dict[str, Callable[[QPainter], None]] = {
     "attachment": _draw_attachment,
     "document": _draw_document,
     "close": _draw_close,
+    "edit": _draw_edit,
     "check_circle": _draw_check_circle,
     "error_circle": _draw_error_circle,
     "clock": _draw_clock,

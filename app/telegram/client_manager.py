@@ -56,6 +56,25 @@ class ClientManager:
             await client.disconnect()
             logger.info("Telegram client отключён: %s", session_name)
 
+    async def log_out(self, session_name: str) -> None:
+        """Best-effort server-side session invalidation via Telethon's own
+        log_out() -- disconnect() alone only closes the local socket and
+        leaves the session technically still valid on Telegram's servers
+        until it expires or is revoked from another device/session list.
+        Never raises: removing the local account/session must always be
+        able to proceed (this is called right before that), even if the
+        network is unreachable or the session was already invalidated."""
+        client = self._clients.get(session_name)
+        if client is None:
+            return
+        try:
+            if not client.is_connected():
+                await client.connect()
+            await client.log_out()
+            logger.info("Выполнен выход из аккаунта на сервере Telegram: %s", session_name)
+        except Exception as exc:  # noqa: BLE001 - best-effort; local removal must still proceed
+            logger.warning("Не удалось выполнить выход из аккаунта на сервере Telegram (%s): %s", session_name, exc)
+
     async def disconnect_all(self) -> None:
         for session_name in list(self._clients.keys()):
             await self.disconnect(session_name)

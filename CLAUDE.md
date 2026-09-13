@@ -44,9 +44,15 @@ described below.
     independent of the filter. Duration is frozen once at completion
     (`_last_campaign_duration_seconds`) since `CampaignControlsWidget.
     elapsed_seconds()` keeps counting up and can't be re-read later.
-  - `sidebar.py`, `account_widget.py`, `recipient_widget.py`,
-    `attachments_widget.py`, `journal_widget.py`, `stat_card.py`,
-    `empty_state.py` — page/widget components.
+  - `sidebar.py`, `recipient_widget.py`, `attachments_widget.py`,
+    `journal_widget.py`, `stat_card.py`, `empty_state.py` — page/widget
+    components.
+  - `account_widget.py` — one card per account (avatar, username, phone,
+    connection status). (v1.8) A card's title prefers the user's own
+    local alias (`Account.local_alias`, set via the card's rename
+    button/`QInputDialog`) over Telegram's own profile name, which wins
+    over the phone number; the phone is otherwise always shown on the
+    card unless it would just repeat the title.
   - `campaign_controls.py` — Start/Pause/Stop, progress, and (v1.6) the
     pre-start duration estimate (recipient count × average configured
     interval) plus the live elapsed-time/remaining-time display (a
@@ -75,7 +81,13 @@ described below.
     thumbnail generation.
 - `app/telegram/` — Telethon (MTProto) integration:
   - `client_manager.py`, `account_manager.py`, `authentication.py` — client
-    lifecycle, multi-account session management/switching.
+    lifecycle, multi-account session management/switching. (v1.8)
+    `AccountManager.delete_account` calls `ClientManager.log_out` (real,
+    server-side Telethon session invalidation, not just closing the local
+    connection) before removing the local session file/DB row -- one user
+    action covers both "log out" and "remove local account/session";
+    best-effort and never blocks local removal if the server call fails
+    (offline, already-invalid session).
   - `sender.py`, `media_sender.py` — message/media sending, album batching,
     caption-vs-leading-message logic. `media_sender.AttachmentKind`
     (PHOTO/VIDEO/ANIMATION/IMAGE_OTHER/AUDIO/ARCHIVE/DOCUMENT) is the single
@@ -143,7 +155,7 @@ described below.
   `MainWindow.retranslate_ui()` the same way theme switching already
   dispatches `apply_theme()`. Deliberately not gettext or Qt Linguist
   (.ts/.qm + lupdate/lrelease) — this app has no other use for either.
-- `tests/` — pytest + pytest-asyncio (`asyncio_mode = auto`), 569 tests,
+- `tests/` — pytest + pytest-asyncio (`asyncio_mode = auto`), 592 tests,
   using `tests/mocks/mock_telegram_client.py` and
   `tests/mocks/fake_client_manager.py` instead of a real Telegram
   connection. CI runs this suite on `windows-latest` with
@@ -169,7 +181,7 @@ reproduced with a failing test first, then fixed.
 
 **Tests.** After any code change, run the targeted test file, then the
 full suite (`pytest tests/ -v`). Don't delete or weaken existing tests just
-to make the suite pass. The current baseline is 569 passed, 0 failures —
+to make the suite pass. The current baseline is 592 passed, 0 failures —
 if that number changes, know exactly why before saying the change is done.
 
 **GUI.** Never block the Qt event loop or the asyncio event loop.

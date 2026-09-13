@@ -16,7 +16,7 @@ A Windows desktop application that sends personal Telegram messages to a list of
 
 TelegramMassSender sends the *same message, personally, to each recipient in a list* — one Telegram message per person, from the user's own account, the way you'd write to each of them individually. It is not a bot, not a bulk-marketing tool, and does not send to groups or channels. It integrates directly with Telegram's native **MTProto** protocol via **Telethon** — not the Bot API — and runs a real async event loop (**qasync**) bridging Qt's UI thread with `asyncio` network I/O.
 
-It supports multiple Telegram accounts, rich text formatting, media/album attachments, per-recipient `{name}` personalization (including from a CSV column), phone-number recipient resolution, a Telegram-style live message preview, named message presets and recipient groups, an optional step-by-step Campaign Wizard, failed-recipient retry, structured diagnostics, a full Russian/English UI, and campaign reporting — all backed by a 569-test automated regression suite and a real Windows-packaged build (PyInstaller).
+It supports multiple Telegram accounts, rich text formatting, media/album attachments, per-recipient `{name}` personalization (including from a CSV column), phone-number recipient resolution, a Telegram-style live message preview, named message presets and recipient groups, an optional step-by-step Campaign Wizard, failed-recipient retry, structured diagnostics, a full Russian/English UI, and campaign reporting — all backed by a 592-test automated regression suite and a real Windows-packaged build (PyInstaller).
 
 ## Key Features
 
@@ -113,7 +113,7 @@ Ordinary parts — not oversold: the settings page is a straightforward form bou
 pytest tests/ -v
 ```
 
-**569 automated tests, 0 failures** (pytest + pytest-asyncio), run against a hand-built mock Telegram client (`tests/mocks/mock_telegram_client.py`) — no real Telegram account or network access needed. Coverage includes:
+**592 automated tests, 0 failures** (pytest + pytest-asyncio), run against a hand-built mock Telegram client (`tests/mocks/mock_telegram_client.py`) — no real Telegram account or network access needed. Coverage includes:
 
 - Recipient parsing and import (all supported formats including phone numbers and malformed input, TXT import, and content-based CSV column/name detection).
 - Rich-text formatting and UTF-16 entity offset correctness, including the `{name}` placeholder (typed, CSV-supplied, and at message lengths well past Telegram's own text limit).
@@ -139,7 +139,7 @@ This is distinct from **manual packaged-build validation**: before each release,
 
 This project's requirements, architecture, and scope were defined and directed by the developer (BagroDeRose). Implementation was done with extensive AI assistance — primarily **Claude Code** — used for writing code, debugging, writing tests, code review, and documentation, always under human direction and verification rather than as unsupervised generation:
 
-- Every change is covered by the automated test suite (569 tests, pytest/pytest-asyncio, mocked Telegram client).
+- Every change is covered by the automated test suite (592 tests, pytest/pytest-asyncio, mocked Telegram client).
 - Bug fixes follow a reproduce → understand root cause → write a failing test → fix → regression test cycle, not guesswork.
 - A dedicated code review and security/privacy audit was performed before each public release (secret storage, log contents, session handling, git history sanitization).
 - The packaged Windows `.exe` is manually launched and validated before release — a successful build is not treated as sufficient on its own.
@@ -794,7 +794,7 @@ build_windows.bat
 .venv\Scripts\python -m pytest tests/ -v
 ```
 
-На момент подготовки этой версии README полный набор тестов проходит целиком: **569 тестов, 0 ошибок** (pytest + pytest-asyncio). Тесты используют собственный мок Telegram-клиента (`tests/mocks/mock_telegram_client.py`) вместо настоящего сервера Telegram, поэтому для их запуска не нужен ни интернет, ни реальный Telegram-аккаунт. Тесты также запускаются автоматически в GitHub Actions при каждом push/PR — см. значок «Tests» в начале README.
+На момент подготовки этой версии README полный набор тестов проходит целиком: **592 тестов, 0 ошибок** (pytest + pytest-asyncio). Тесты используют собственный мок Telegram-клиента (`tests/mocks/mock_telegram_client.py`) вместо настоящего сервера Telegram, поэтому для их запуска не нужен ни интернет, ни реальный Telegram-аккаунт. Тесты также запускаются автоматически в GitHub Actions при каждом push/PR — см. значок «Tests» в начале README.
 
 #### Технологический стек
 
@@ -818,7 +818,7 @@ Windows-приложение на **Python + PySide6** (Qt для интерфе
 
 #### Как разрабатывался этот проект
 
-Требования, архитектуру и объём функциональности этого проекта определял автор репозитория. AI-инструменты (Claude Code) активно использовались в реализации, отладке, написании тестов, ревью кода и подготовке документации — но под его руководством и с его проверкой на каждом шаге, а не как автономная генерация без контроля. Это не означает, что код не проверялся: каждое изменение сопровождается автоматическими тестами (сейчас это упомянутые выше 569 тестов на pytest/pytest-asyncio с мок-клиентом Telegram), а исправление ошибок в проекте ведётся по принципу «сначала воспроизвести проблему → понять причину → написать тест → исправить → прогнать регрессионные тесты», а не «на глаз». Перед публикацией репозитория отдельно проведены обзор кода и проверка безопасности/приватности (хранение секретов, содержимое логов, работа с сессиями), а собранный Windows-EXE запускался и проверялся вручную, а не считался готовым сразу по факту успешной сборки.
+Требования, архитектуру и объём функциональности этого проекта определял автор репозитория. AI-инструменты (Claude Code) активно использовались в реализации, отладке, написании тестов, ревью кода и подготовке документации — но под его руководством и с его проверкой на каждом шаге, а не как автономная генерация без контроля. Это не означает, что код не проверялся: каждое изменение сопровождается автоматическими тестами (сейчас это упомянутые выше 592 тестов на pytest/pytest-asyncio с мок-клиентом Telegram), а исправление ошибок в проекте ведётся по принципу «сначала воспроизвести проблему → понять причину → написать тест → исправить → прогнать регрессионные тесты», а не «на глаз». Перед публикацией репозитория отдельно проведены обзор кода и проверка безопасности/приватности (хранение секретов, содержимое логов, работа с сессиями), а собранный Windows-EXE запускался и проверялся вручную, а не считался готовым сразу по факту успешной сборки.
 
 #### Где на диске хранятся данные пользователя
 

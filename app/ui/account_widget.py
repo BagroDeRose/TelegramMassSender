@@ -43,10 +43,19 @@ def _status_text_and_variant(status: AccountStatus) -> tuple[str, str]:
 
 
 def _avatar_initial(account) -> str:
-    for candidate in (account.display_name, account.username, account.phone.lstrip("+")):
+    for candidate in (account.local_alias, account.display_name, account.username, account.phone.lstrip("+")):
         if candidate:
             return candidate[0]
     return "?"
+
+
+def _display_name(account) -> str:
+    """The name shown as the card's title -- a user-set local alias wins
+    over Telegram's own profile name, which wins over the phone number.
+    Distinct from account.display_name (Telegram's own first/last name,
+    refreshed from the server) -- this is what the *card* shows, not what
+    gets persisted."""
+    return account.local_alias or account.display_name or account.phone
 
 
 class AccountWidget(QWidget):
@@ -54,6 +63,7 @@ class AccountWidget(QWidget):
     add_account_requested = Signal()
     delete_account_requested = Signal(int)  # account_id
     reconnect_requested = Signal(int)  # account_id
+    rename_requested = Signal(int)  # account_id
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -62,6 +72,7 @@ class AccountWidget(QWidget):
         self._delete_buttons: List[QToolButton] = []
         self._use_buttons: List[QPushButton] = []
         self._reconnect_buttons: List[QPushButton] = []
+        self._rename_buttons: List[QToolButton] = []
 
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
@@ -106,6 +117,7 @@ class AccountWidget(QWidget):
         self._delete_buttons = []
         self._use_buttons = []
         self._reconnect_buttons = []
+        self._rename_buttons = []
 
     def _build_card(self, status: AccountStatus, is_active: bool) -> QFrame:
         account = status.account
@@ -131,13 +143,32 @@ class AccountWidget(QWidget):
 
         text_col = QVBoxLayout()
         text_col.setSpacing(2)
-        name_label = QLabel(account.display_name or account.phone, card)
+        display_name = _display_name(account)
+        name_row = QHBoxLayout()
+        name_row.setSpacing(4)
+        name_label = QLabel(display_name, card)
         name_label.setObjectName("accountName")
-        text_col.addWidget(name_label)
+        name_row.addWidget(name_label)
+        rename_button = QToolButton(card)
+        rename_button.setObjectName("toolbarButton")
+        rename_button.setProperty("accountId", account.id)
+        rename_button.setIcon(icons.icon("edit", tokens.text_muted, 12))
+        rename_button.setToolTip(tr("account_widget.rename_tooltip"))
+        rename_button.clicked.connect(lambda: self.rename_requested.emit(account.id))
+        name_row.addWidget(rename_button)
+        name_row.addStretch(1)
+        self._rename_buttons.append(rename_button)
+        text_col.addLayout(name_row)
         if account.username:
             username_label = QLabel(f"@{account.username}", card)
             username_label.setObjectName("accountMeta")
             text_col.addWidget(username_label)
+        # Always shown unless it would just repeat the title above (no
+        # alias/display_name set, so the phone is already the name).
+        if display_name != account.phone:
+            phone_label = QLabel(account.phone, card)
+            phone_label.setObjectName("accountMeta")
+            text_col.addWidget(phone_label)
 
         state_text, variant = _status_text_and_variant(status)
         dot_color = getattr(tokens, _VARIANT_TOKEN_FIELD.get(variant, "text_muted"), tokens.text_muted)
@@ -228,4 +259,6 @@ class AccountWidget(QWidget):
         for button in self._use_buttons:
             button.setEnabled(enabled and button.property("active") != "true")
         for button in self._reconnect_buttons:
+            button.setEnabled(enabled)
+        for button in self._rename_buttons:
             button.setEnabled(enabled)

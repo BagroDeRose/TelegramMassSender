@@ -12,6 +12,7 @@ class Account:
     telegram_user_id: Optional[int]
     username: Optional[str]
     display_name: Optional[str]
+    local_alias: Optional[str]
     session_name: str
     created_at: str
     last_used_at: Optional[str]

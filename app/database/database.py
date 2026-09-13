@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS accounts (
     telegram_user_id INTEGER,
     username TEXT,
     display_name TEXT,
+    local_alias TEXT,
     session_name TEXT NOT NULL UNIQUE,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     last_used_at TEXT
@@ -93,7 +94,20 @@ class Database:
             self._connection.execute("PRAGMA foreign_keys = ON")
             self._connection.executescript(SCHEMA)
             self._connection.commit()
+            self._migrate()
         return self._connection
+
+    def _migrate(self) -> None:
+        """Additive, idempotent column migrations for tables that already
+        existed before a given field was introduced -- CREATE TABLE IF NOT
+        EXISTS above is a no-op against an already-existing table, so a new
+        column never reaches a database file created by an earlier version
+        of the app without this."""
+        assert self._connection is not None
+        existing_columns = {row[1] for row in self._connection.execute("PRAGMA table_info(accounts)")}
+        if "local_alias" not in existing_columns:
+            self._connection.execute("ALTER TABLE accounts ADD COLUMN local_alias TEXT")
+            self._connection.commit()
 
     @contextmanager
     def cursor(self) -> Iterator[sqlite3.Cursor]:

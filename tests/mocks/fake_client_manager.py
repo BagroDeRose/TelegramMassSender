@@ -15,6 +15,13 @@ class FakeClientManager:
         self.raise_on_check: Dict[str, BaseException] = {}  # session_name -> exception instance
         self.disconnected: List[str] = []
         self.removed: List[str] = []
+        self.logged_out: List[str] = []
+        # session_name -> exception instance: log_out() itself never
+        # raises (see ClientManager.log_out's contract), it just records
+        # the attempt failed here instead -- mirrors the real
+        # implementation's best-effort/never-blocks-removal behavior.
+        self.raise_on_log_out: Dict[str, BaseException] = {}
+        self.log_out_failures: List[str] = []
 
     async def connect(self, session_name: str) -> None:
         return None
@@ -26,6 +33,11 @@ class FakeClientManager:
 
     async def disconnect(self, session_name: str) -> None:
         self.disconnected.append(session_name)
+
+    async def log_out(self, session_name: str) -> None:
+        self.logged_out.append(session_name)
+        if session_name in self.raise_on_log_out:
+            self.log_out_failures.append(session_name)
 
     def remove(self, session_name: str) -> None:
         self.removed.append(session_name)

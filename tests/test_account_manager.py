@@ -46,6 +46,27 @@ def test_register_account_is_idempotent_by_phone(repo):
     assert len(repo.list_all()) == 1
 
 
+def test_rename_account_sets_local_alias(repo):
+    manager = make_manager(repo)
+    account = manager.register_account("+70001112233")
+    assert account.local_alias is None
+
+    renamed = manager.rename_account(account, "Work account")
+
+    assert renamed.local_alias == "Work account"
+    assert repo.get_by_id(account.id).local_alias == "Work account"
+
+
+def test_rename_account_blank_clears_the_alias(repo):
+    manager = make_manager(repo)
+    account = manager.register_account("+70001112233")
+    manager.rename_account(account, "Work account")
+
+    cleared = manager.rename_account(account, "   ")
+
+    assert cleared.local_alias is None
+
+
 async def test_check_status_authorized(repo):
     client_manager = FakeClientManager()
     manager = make_manager(repo, client_manager)
@@ -156,6 +177,44 @@ async def test_delete_account_removes_only_that_account(repo):
     assert repo.get_by_id(remove.id) is None
     assert repo.get_by_id(keep.id) is not None
     assert remove.session_name in client_manager.removed
+
+
+async def test_delete_account_logs_out_on_the_server_before_removing_locally(repo):
+    # "Log out" and "remove local account/session" are one user action:
+    # delete_account must attempt a real server-side session invalidation
+    # (not just close the local connection) before the local session file/
+    # DB row are gone -- otherwise the session stays valid on Telegram's
+    # servers indefinitely after being "removed" from the app.
+    client_manager = FakeClientManager()
+    manager = make_manager(repo, client_manager)
+    account = manager.register_account("+70001112233")
+
+    await manager.delete_account(account)
+
+    assert account.session_name in client_manager.logged_out
+
+
+async def test_delete_account_still_removes_locally_even_if_server_logout_fails(repo):
+    # log_out() failing (offline, session already invalid, etc.) must
+    # never block local removal -- "remove this account" always has to
+    # succeed locally regardless of Telegram's own reachability.
+    client_manager = FakeClientManager()
+    account_holder = {}
+
+    def register_and_fail(repo):
+        manager = make_manager(repo, client_manager)
+        account = manager.register_account("+70001112233")
+        client_manager.raise_on_log_out[account.session_name] = ConnectionError("offline")
+        account_holder["account"] = account
+        return manager
+
+    manager = register_and_fail(repo)
+    account = account_holder["account"]
+
+    await manager.delete_account(account)
+
+    assert account.session_name in client_manager.log_out_failures
+    assert repo.get_by_id(account.id) is None
 
 
 async def test_delete_account_clears_active_account_id_if_it_was_active(repo):

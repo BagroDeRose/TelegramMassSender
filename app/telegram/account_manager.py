@@ -124,7 +124,19 @@ class AccountManager:
         self._active_account_id = account_id
         logger.info("Активный аккаунт переключён: %s", account_id)
 
+    def rename_account(self, account: Account, local_alias: Optional[str]) -> Account:
+        self._repository.rename(account.id, local_alias)
+        refreshed = self._repository.get_by_id(account.id)
+        assert refreshed is not None
+        return refreshed
+
     async def delete_account(self, account: Account) -> None:
+        # log_out() (real server-side session invalidation) is attempted
+        # first and never raises -- it must not block local removal below
+        # even if the network is unreachable or the session is already
+        # invalid, since "remove this account from the app" always needs
+        # to succeed locally regardless of Telegram's own reachability.
+        await self._client_manager.log_out(account.session_name)
         await self._client_manager.disconnect(account.session_name)
         self._client_manager.remove(account.session_name)
         session_base = get_session_path(account.session_name)

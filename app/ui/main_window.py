@@ -990,6 +990,7 @@ class MainWindow(QMainWindow):
         self._account_widget.account_selected.connect(self._on_account_selected)
         self._account_widget.delete_account_requested.connect(self._on_delete_account_requested)
         self._account_widget.reconnect_requested.connect(self._on_reconnect_requested)
+        self._account_widget.rename_requested.connect(self._on_rename_account_requested)
 
         self._recipient_widget.recipients_changed.connect(self._on_form_state_changed)
         self._recipient_widget.recipients_changed.connect(self._on_recipients_changed)
@@ -1441,6 +1442,29 @@ class MainWindow(QMainWindow):
 
     def _on_reconnect_requested(self, account_id: int) -> None:
         asyncio.ensure_future(self._refresh_accounts(select_id=account_id))
+
+    def _on_rename_account_requested(self, account_id: int) -> None:
+        # Deliberately not gated by _can_switch_accounts() -- unlike
+        # switching or deleting, renaming a purely local, cosmetic alias
+        # has no effect on an in-flight campaign's active account, so
+        # there's nothing unsafe about allowing it at any time (same
+        # reasoning as reconnect, just above, which is likewise ungated).
+        account_manager = self._service.account_manager
+        if account_manager is None:
+            return
+        account = self._service.account_repository.get_by_id(account_id)
+        if account is None:
+            return
+        new_alias, ok = QInputDialog.getText(
+            self,
+            tr("main_window.dialogs.rename_account_title"),
+            tr("main_window.dialogs.account_alias_label"),
+            text=account.local_alias or "",
+        )
+        if not ok:
+            return
+        account_manager.rename_account(account, new_alias)
+        asyncio.ensure_future(self._refresh_accounts())
 
     def _active_account(self) -> Optional[Account]:
         account_manager = self._service.account_manager

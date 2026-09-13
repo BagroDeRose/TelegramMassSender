@@ -9,7 +9,7 @@ from app.ui import icons
 
 
 def test_known_icon_names_produce_nonnull_icon(qapp):
-    for name in ("campaign", "accounts", "results", "settings", "attachment", "close", "check_circle", "error_circle", "clock", "plus", "video", "audio", "archive"):
+    for name in ("campaign", "accounts", "results", "settings", "attachment", "close", "edit", "check_circle", "error_circle", "clock", "plus", "video", "audio", "archive"):
         icon = icons.icon(name, "#ffffff", size=18)
         assert not icon.isNull()
         pixmap = icon.pixmap(18, 18)

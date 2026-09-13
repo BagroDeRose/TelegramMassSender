@@ -16,6 +16,7 @@ def _fake_client_factory():
     client = MagicMock()
     client.connect = AsyncMock()
     client.disconnect = AsyncMock()
+    client.log_out = AsyncMock()
     client.is_user_authorized = AsyncMock(return_value=True)
     client.is_connected = MagicMock(return_value=False)
     return client
@@ -125,6 +126,47 @@ async def test_remove_stops_tracking_the_session():
         manager.get_or_create("session_a")
         manager.remove("session_a")
         assert manager.get_active_client("session_a") is None
+
+
+async def test_log_out_is_safe_when_never_connected():
+    with patch("app.telegram.client_manager.TelegramClient", side_effect=lambda *a, **k: _fake_client_factory()):
+        manager = ClientManager(api_id=1, api_hash="x")
+        await manager.log_out("never_created")  # must not raise
+
+
+async def test_log_out_calls_client_log_out_for_a_tracked_session():
+    fake_client = _fake_client_factory()
+    fake_client.is_connected.return_value = True
+    with patch("app.telegram.client_manager.TelegramClient", return_value=fake_client):
+        manager = ClientManager(api_id=1, api_hash="x")
+        manager.get_or_create("session_a")
+        await manager.log_out("session_a")
+    fake_client.log_out.assert_awaited_once()
+    fake_client.connect.assert_not_awaited()  # already connected -- no redundant connect
+
+
+async def test_log_out_connects_first_when_not_connected():
+    fake_client = _fake_client_factory()
+    fake_client.is_connected.return_value = False
+    with patch("app.telegram.client_manager.TelegramClient", return_value=fake_client):
+        manager = ClientManager(api_id=1, api_hash="x")
+        manager.get_or_create("session_a")
+        await manager.log_out("session_a")
+    fake_client.connect.assert_awaited_once()
+    fake_client.log_out.assert_awaited_once()
+
+
+async def test_log_out_never_raises_even_if_the_server_call_fails():
+    # Best-effort: local account/session removal (the caller) must always
+    # be able to proceed even if Telegram's server is unreachable or the
+    # session is already invalid.
+    fake_client = _fake_client_factory()
+    fake_client.is_connected.return_value = True
+    fake_client.log_out.side_effect = ConnectionError("network unreachable")
+    with patch("app.telegram.client_manager.TelegramClient", return_value=fake_client):
+        manager = ClientManager(api_id=1, api_hash="x")
+        manager.get_or_create("session_a")
+        await manager.log_out("session_a")  # must not raise
 
 
 async def test_is_authorized_connects_first_then_checks():

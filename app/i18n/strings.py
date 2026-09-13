@@ -359,6 +359,8 @@ STRINGS: Dict[str, Dict[str, str]] = {
     "main_window.dialogs.export_report_file_filter": {"ru": "CSV файлы (*.csv)", "en": "CSV files (*.csv)"},
     "main_window.dialogs.export_report_saved": {"ru": "Отчёт сохранён: {path}", "en": "Report saved: {path}"},
     "main_window.dialogs.rename_report_title": {"ru": "Переименовать отчёт", "en": "Rename report"},
+    "main_window.dialogs.rename_account_title": {"ru": "Переименовать аккаунт", "en": "Rename account"},
+    "main_window.dialogs.account_alias_label": {"ru": "Название (только в этом приложении):", "en": "Name (local to this app only):"},
     "main_window.dialogs.export_report_write_failed": {"ru": "Не удалось сохранить файл: {error}", "en": "Couldn't save the file: {error}"},
 
     # ---- sidebar ------------------------------------------------------------
@@ -415,6 +417,7 @@ STRINGS: Dict[str, Dict[str, str]] = {
     "account_widget.use_button_inactive": {"ru": "Использовать", "en": "Use"},
     "account_widget.delete_tooltip": {"ru": "Удалить аккаунт", "en": "Delete account"},
     "account_widget.switching": {"ru": "Переключение…", "en": "Switching…"},
+    "account_widget.rename_tooltip": {"ru": "Переименовать аккаунт", "en": "Rename account"},
 
     # ---- recipient_widget -----------------------------------------------
     "recipient_widget.placeholder": {

@@ -36,7 +36,7 @@ async def test_start_enabled_once_all_preconditions_met(qapp, tmp_path):
     fake_account_manager = MagicMock()
     fake_account = Account(
         id=1, phone="+70001112233", telegram_user_id=1, username="u", display_name="U",
-        session_name="s", created_at="now", last_used_at=None,
+        local_alias=None, session_name="s", created_at="now", last_used_at=None,
     )
     fake_account_manager.active_account_id = 1
     window._service.account_manager = fake_account_manager
@@ -441,7 +441,7 @@ async def test_double_click_start_does_not_launch_two_campaigns(qapp, tmp_path):
     fake_account_manager = MagicMock()
     fake_account = Account(
         id=1, phone="+70001112233", telegram_user_id=1, username="u", display_name="U",
-        session_name="s", created_at="now", last_used_at=None,
+        local_alias=None, session_name="s", created_at="now", last_used_at=None,
     )
     fake_account_manager.active_account_id = 1
     window._service.account_manager = fake_account_manager
@@ -491,7 +491,7 @@ async def test_start_campaign_starts_the_elapsed_timer_and_wires_current_item(qa
     fake_account_manager = MagicMock()
     fake_account = Account(
         id=1, phone="+70001112233", telegram_user_id=1, username="u", display_name="U",
-        session_name="s", created_at="now", last_used_at=None,
+        local_alias=None, session_name="s", created_at="now", last_used_at=None,
     )
     fake_account_manager.active_account_id = 1
     window._service.account_manager = fake_account_manager
@@ -536,7 +536,7 @@ async def test_start_blocked_by_an_unreadable_attachment(qapp, tmp_path):
     fake_account_manager = MagicMock()
     fake_account = Account(
         id=1, phone="+70001112233", telegram_user_id=1, username="u", display_name="U",
-        session_name="s", created_at="now", last_used_at=None,
+        local_alias=None, session_name="s", created_at="now", last_used_at=None,
     )
     fake_account_manager.active_account_id = 1
     window._service.account_manager = fake_account_manager
@@ -573,7 +573,7 @@ async def test_start_blocked_by_an_attachment_deleted_after_being_added(qapp, tm
     fake_account_manager = MagicMock()
     fake_account = Account(
         id=1, phone="+70001112233", telegram_user_id=1, username="u", display_name="U",
-        session_name="s", created_at="now", last_used_at=None,
+        local_alias=None, session_name="s", created_at="now", last_used_at=None,
     )
     fake_account_manager.active_account_id = 1
     window._service.account_manager = fake_account_manager
@@ -606,7 +606,7 @@ async def test_account_add_delete_disabled_during_campaign(qapp, tmp_path):
     window = _make_window(tmp_path)
     fake_account = Account(
         id=1, phone="+70001112233", telegram_user_id=1, username="u", display_name="U",
-        session_name="s", created_at="now", last_used_at=None,
+        local_alias=None, session_name="s", created_at="now", last_used_at=None,
     )
     window._account_widget.set_accounts([AccountStatus(account=fake_account, is_authorized=True, needs_reauth=False)], 1)
 
