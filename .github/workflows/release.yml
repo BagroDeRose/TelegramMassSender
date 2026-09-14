@@ -1,0 +1,85 @@
+name: Release
+
+# Triggered only by pushing a version tag (e.g. `v1.4.0`) -- this is
+# additive to, not a replacement for, the existing manual release process
+# (build_windows.bat + a hand-run `gh release create`), which stays
+# available as a fallback if this workflow ever needs to be bypassed.
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history, not the default shallow clone -- `gh release
+          # create --generate-notes` below needs to diff against the
+          # previous tag to build the auto-changelog.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run full test suite
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: pytest tests/ -v
+
+      - name: Build with PyInstaller
+        run: python -m PyInstaller telegram_mass_sender.spec --noconfirm
+
+      - name: Package release artifact
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "dist/TelegramMassSender/*" -DestinationPath "TelegramMassSender-Windows.zip"
+
+      - name: Verify no secrets or session data made it into the artifact
+        shell: pwsh
+        run: |
+          # Defense in depth: this runner is a fresh checkout with no real
+          # credentials/session files ever present, so this should always
+          # find nothing -- but "Never publish secrets/session data" is
+          # explicit enough (ROADMAP v2.0 Release Engineering) to verify
+          # rather than assume, refusing to publish rather than silently
+          # continuing if anything unexpected shows up.
+          $forbidden = @("*.session", "*.session-journal", "secrets.dat", "*.env", "*.log")
+          $listing = Get-ChildItem -Path "dist/TelegramMassSender" -Recurse -File
+          $matches = $listing | Where-Object {
+              $name = $_.Name
+              $forbidden | Where-Object { $name -like $_ }
+          }
+          if ($matches) {
+              Write-Error "Forbidden file(s) found in the build output -- refusing to publish:`n$($matches.FullName -join "`n")"
+              exit 1
+          }
+          Write-Host "No secrets/session/log files found in the packaged build."
+
+      - name: Generate SHA-256 checksum
+        shell: pwsh
+        run: |
+          $hash = Get-FileHash -Path "TelegramMassSender-Windows.zip" -Algorithm SHA256
+          "$($hash.Hash)  TelegramMassSender-Windows.zip" | Out-File -FilePath "TelegramMassSender-Windows.zip.sha256" -Encoding ascii
+          Write-Host "SHA-256: $($hash.Hash)"
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          gh release create "${{ github.ref_name }}" `
+            "TelegramMassSender-Windows.zip" `
+            "TelegramMassSender-Windows.zip.sha256" `
+            --title "Telegram Mass Sender ${{ github.ref_name }}" `
+            --generate-notes

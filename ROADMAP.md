@@ -912,14 +912,36 @@ previously-untested module).
 
 ## Release Engineering
 
-- [ ] Automated Windows build in GitHub Actions
-- [ ] Run full test suite
-- [ ] Build PyInstaller application
-- [ ] Produce release artifact
-- [ ] Generate SHA-256 checksum
-- [ ] Publish GitHub Release
-- [ ] Keep manual release as fallback
-- [ ] Never publish secrets/session data
+- [x] Automated Windows build in GitHub Actions — new
+      `.github/workflows/release.yml`, triggered by pushing a `v*` tag
+      (additive to `tests.yml`, which still runs on every push/PR)
+- [x] Run full test suite — the workflow's first real step, `pytest
+      tests/ -v`; a release is never built from code that hasn't just
+      passed in that exact CI run
+- [x] Build PyInstaller application — `python -m PyInstaller
+      telegram_mass_sender.spec --noconfirm`, the same spec (and thus
+      the same `scripts/generate_version_info.py`-generated version
+      resource, app icon, bundled `assets/`) the manual process uses
+- [x] Produce release artifact — `dist/TelegramMassSender/*` compressed
+      to `TelegramMassSender-Windows.zip`, matching the existing
+      v1.0.0-v1.3.0 manual releases' asset naming
+- [x] Generate SHA-256 checksum — computed via `Get-FileHash`, published
+      alongside the artifact as `TelegramMassSender-Windows.zip.sha256`
+- [x] Publish GitHub Release — `gh release create` with
+      `--generate-notes` (GitHub's own commit-based auto-changelog since
+      the previous tag; `actions/checkout`'s `fetch-depth: 0` is required
+      for this to see that history at all)
+- [x] Keep manual release as fallback — `build_windows.bat` and a
+      hand-run `gh release create` are both untouched; nothing about the
+      automated workflow removes or requires them
+- [x] Never publish secrets/session data — an explicit verification step
+      scans the built output for `*.session`/`*.session-journal`/
+      `secrets.dat`/`*.env`/`*.log` and refuses to publish if any are
+      found, before the release step ever runs. Defense in depth: a
+      GitHub-hosted runner is a fresh checkout with no real credentials
+      or session files ever present to begin with, but the checklist
+      item says "never," not "shouldn't," so this verifies rather than
+      assumes
 
 ---
 
