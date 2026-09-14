@@ -47,6 +47,11 @@ DEFAULT_DEBUG_LOGGING = False
 # 0 is the "no account was active" sentinel -- real account ids are SQLite
 # autoincrement, starting at 1, so 0 never collides with a real row.
 DEFAULT_ACTIVE_ACCOUNT_ID = 0
+# ROADMAP v2.0 Onboarding: the first-run welcome dialog is shown exactly
+# once, the first time the app ever launches with no persisted setting
+# for this yet -- flipped to True the moment that dialog closes
+# (Get Started/Try Demo/Skip alike), never shown again after.
+DEFAULT_ONBOARDING_COMPLETED = False
 
 SETTINGS_KEY_MIN_DELAY = "min_delay_seconds"
 SETTINGS_KEY_MAX_DELAY = "max_delay_seconds"
@@ -65,6 +70,7 @@ SETTINGS_KEY_REPORTS_DIRECTORY = "reports_directory"
 SETTINGS_KEY_AUTO_SAVE_REPORTS = "auto_save_reports"
 SETTINGS_KEY_DEBUG_LOGGING = "debug_logging"
 SETTINGS_KEY_ACTIVE_ACCOUNT_ID = "active_account_id"
+SETTINGS_KEY_ONBOARDING_COMPLETED = "onboarding_completed"
 
 
 class SettingsValidationError(ValueError):
@@ -116,6 +122,7 @@ class AppSettings:
     # recreated fresh every run and has no memory of its own). 0 means
     # "none" -- see DEFAULT_ACTIVE_ACCOUNT_ID.
     active_account_id: int = DEFAULT_ACTIVE_ACCOUNT_ID
+    onboarding_completed: bool = DEFAULT_ONBOARDING_COMPLETED
 
     def validate(self) -> None:
         validate_delay_range(self.min_delay_seconds, self.max_delay_seconds)

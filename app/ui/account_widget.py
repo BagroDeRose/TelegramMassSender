@@ -64,6 +64,7 @@ class AccountWidget(QWidget):
     delete_account_requested = Signal(int)  # account_id
     reconnect_requested = Signal(int)  # account_id
     rename_requested = Signal(int)  # account_id
+    try_demo_mode_requested = Signal()
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -83,6 +84,10 @@ class AccountWidget(QWidget):
         self._add_button.setObjectName("primaryButton")
         self._add_button.clicked.connect(self.add_account_requested.emit)
         top_row.addWidget(self._add_button)
+        self._try_demo_button = QPushButton(tr("account_widget.try_demo_button"), self)
+        self._try_demo_button.setObjectName("ghostButton")
+        self._try_demo_button.clicked.connect(self.try_demo_mode_requested.emit)
+        top_row.addWidget(self._try_demo_button)
         top_row.addStretch(1)
         self._layout.addLayout(top_row)
 
@@ -229,6 +234,7 @@ class AccountWidget(QWidget):
 
     def retranslate_ui(self) -> None:
         self._add_button.setText(tr("account_widget.add_account_button"))
+        self._try_demo_button.setText(tr("account_widget.try_demo_button"))
         retranslate_empty_state(self._empty_label, tr("account_widget.empty_title"), tr("account_widget.empty_body"))
         # Every card's text is fully rebuilt from tr() calls anyway -- same
         # rebuild apply_theme() already relies on for its own baked-in
@@ -259,6 +265,7 @@ class AccountWidget(QWidget):
 
     def set_enabled_switching(self, enabled: bool) -> None:
         self._add_button.setEnabled(enabled)
+        self._try_demo_button.setEnabled(enabled)
         for button in self._delete_buttons:
             button.setEnabled(enabled)
         for button in self._use_buttons:

@@ -1095,6 +1095,18 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
     background: none;
 }
 
+/* ---- demo mode banner (ROADMAP v2.0) --------------------------------------- */
+
+QFrame#demoBanner {
+    background-color: $warning_soft;
+    border-bottom: 2px solid $warning;
+}
+
+QLabel#demoBannerLabel {
+    color: $warning;
+    font-weight: 700;
+}
+
 /* ---- dialogs -------------------------------------------------------------- */
 
 QDialog {

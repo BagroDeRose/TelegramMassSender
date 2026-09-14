@@ -850,26 +850,65 @@ previously-untested module).
 
 ## Demo Mode
 
-- [ ] Add fully local Demo Mode
-- [ ] No Telegram authentication required
-- [ ] No real messages sent
-- [ ] Simulated recipients
-- [ ] Simulated campaign progress
-- [ ] Simulated success/failure results
-- [ ] Allow recruiter/user to explore the application safely
-- [ ] Clearly indicate Demo Mode
+- [x] Add fully local Demo Mode — new `app/telegram/demo_client.py`
+      (`DemoTelegramClient`/`DemoClientManager`, duck-compatible with
+      Telethon/`ClientManager` for exactly the surface this app calls)
+      and `TelegramService.enter_demo_mode()`, which swaps in a
+      `DemoClientManager` and seeds one pre-authorized demo account --
+      no real network connection ever opens. Reachable from the Accounts
+      page ("Попробовать демо-режим" next to "+ Добавить аккаунт") or
+      from the first-run `OnboardingDialog`
+- [x] No Telegram authentication required — `enter_demo_mode()` never
+      reads or writes `SecureStorage`/real API credentials; the demo
+      account is already-authorized by construction
+      (`DemoTelegramClient.is_user_authorized()` always returns `True`)
+- [x] No real messages sent — `DemoTelegramClient` never opens a socket;
+      `send_message`/`send_file`/album sending are entirely fabricated
+      locally
+- [x] Simulated recipients — any recipient the user types resolves
+      through the real, unmodified `RecipientResolver` against
+      `DemoTelegramClient.get_entity`, which fabricates a plausible fake
+      `User` (or a realistic "not found" failure) for any identifier
+- [x] Simulated campaign progress — proven end-to-end: an unmodified,
+      real `CampaignManager` runs a full campaign directly against
+      `DemoTelegramClient` in
+      `tests/test_demo_mode.py::test_a_real_campaign_runs_to_completion_against_the_demo_client`
+- [x] Simulated success/failure results — `DemoTelegramClient.FAILURE_RATE`
+      (12%) gives a realistic mix, high enough to exercise retry/results/
+      diagnostics without making the demo feel broken
+- [x] Allow recruiter/user to explore the application safely — reachable
+      at any time from the Accounts page, not just first-run onboarding;
+      blocked (like account switching) only while a real campaign is
+      already active, same guard as switching/deleting an account
+- [x] Clearly indicate Demo Mode — a persistent, high-contrast banner
+      (`$warning`/`$warning_soft` tokens) spanning the full width above
+      the entire app shell, with its own "Выйти из демо-режима"/"Exit
+      Demo Mode" button; visually verified in both themes
+      (`window.grab()`)
 
 ## Onboarding
 
-- [ ] First-run welcome screen
-- [ ] Explain basic workflow
-- [ ] Add account
-- [ ] Add recipients
-- [ ] Write message
-- [ ] Add attachments
-- [ ] Preview
-- [ ] Start campaign
-- [ ] Optional skip button
+- [x] First-run welcome screen — new `app/ui/onboarding_dialog.py`
+      (`OnboardingDialog`), shown once by `MainWindow.maybe_show_onboarding()`
+      when `AppSettings.onboarding_completed` is `False`. Deliberately
+      NOT called from `MainWindow.__init__` -- a blocking modal dialog
+      started mid-construction would hang every test that constructs
+      `MainWindow` directly, since a fresh test database's
+      `onboarding_completed` is always `False`; only `app/main.py`'s real
+      entry point calls it, once, right after `window.show()`
+- [x] Explain basic workflow — the dialog lists all six steps below, in
+      order
+- [x] Add account
+- [x] Add recipients
+- [x] Write message
+- [x] Add attachments
+- [x] Preview
+- [x] Start campaign
+- [x] Optional skip button — "Пропустить"/"Skip", alongside "Начать"/
+      "Get Started" (opens the real `LoginDialog`) and "Попробовать
+      демо-режим"/"Try Demo Mode" (activates Demo Mode, see above); any
+      choice persists `onboarding_completed = True` so the dialog never
+      shows again
 
 ## Release Engineering
 
@@ -918,6 +957,38 @@ Do NOT turn TelegramMassSender into:
 - [ ] Linux/macOS application unless explicitly reconsidered
 - [ ] Web application
 - [ ] Docker-based deployment
+
+---
+
+# Known Issues (flagged, not yet root-caused)
+
+- **Accounts page "+ Добавить аккаунт" button: partial text glitch after
+  the account list first populates, light theme only.** Found while
+  visually verifying Demo Mode (v2.0). Real, reproducible: the button's
+  leading `"+ До"` renders as a faint, misplaced fragment while the rest
+  of the label (`"бавить аккаунт"`) renders correctly, only after
+  `AccountWidget.set_accounts()` first adds a card (i.e. the page's
+  content height grows and the wrapping `QScrollArea` reflows) --
+  confirmed present on unmodified `main` (via `git stash`), so it
+  predates and is unrelated to any v2.0 work. Confirmed NOT reproducible
+  in three narrower contexts: `AccountWidget` alone (no `MainWindow`/
+  `QScrollArea`), the empty-account-list state, and dark theme with an
+  otherwise-identical script (though dark's accent color is close enough
+  to the light one that a subtle stale-pixel artifact could plausibly be
+  present but simply not visible against it -- not confirmed either way).
+  Tried and did not fix it: explicit `repaint()`/`update()` on the
+  button, the widget, the window, and the scroll area's viewport;
+  pre-applying the stylesheet before construction instead of relying on
+  `_apply_theme()`. The combination of "only after a dynamic relayout"
+  and "unfixed by explicit repaint calls" points at the offscreen QPA
+  platform's own software text rasterizer/paint-cache (used only by this
+  project's automated verification and CI, never by a real user) rather
+  than application code -- but this is not confirmed, since this sandbox
+  has no way to render on a real GPU-accelerated Windows display to rule
+  the app out conclusively. **Needs verification against the actual
+  packaged EXE on a real Windows desktop** (part of the release-candidate
+  build/smoke-test pass) before being dismissed as sandbox-only or
+  accepted as a real, fixable bug.
 
 ---
 

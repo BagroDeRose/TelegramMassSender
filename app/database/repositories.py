@@ -168,6 +168,9 @@ class SettingsRepository:
             active_account_id=_int(
                 settings_module.SETTINGS_KEY_ACTIVE_ACCOUNT_ID, settings_module.DEFAULT_ACTIVE_ACCOUNT_ID
             ),
+            onboarding_completed=_bool(
+                settings_module.SETTINGS_KEY_ONBOARDING_COMPLETED, settings_module.DEFAULT_ONBOARDING_COMPLETED
+            ),
         )
 
     def save_app_settings(self, settings) -> None:
@@ -191,6 +194,9 @@ class SettingsRepository:
         self.set(settings_module.SETTINGS_KEY_AUTO_SAVE_REPORTS, "1" if settings.auto_save_reports else "0")
         self.set(settings_module.SETTINGS_KEY_DEBUG_LOGGING, "1" if settings.debug_logging else "0")
         self.set(settings_module.SETTINGS_KEY_ACTIVE_ACCOUNT_ID, str(settings.active_account_id))
+        self.set(
+            settings_module.SETTINGS_KEY_ONBOARDING_COMPLETED, "1" if settings.onboarding_completed else "0"
+        )
 
 
 class SavedReportRepository:

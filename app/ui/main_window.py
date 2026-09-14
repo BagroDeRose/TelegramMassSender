@@ -67,6 +67,7 @@ from app.i18n import LANGUAGE_LABELS, VALID_LANGUAGES, get_language, set_languag
 from app.logging.logger import get_logger
 from app.telegram.account_manager import Account
 from app.telegram.exceptions import AccountSwitchBlockedError
+from app.security.secure_storage import SecureStorage
 from app.telegram.service import TelegramService
 from app.telegram.template import expand_name_placeholder
 from app.ui import theme
@@ -87,6 +88,11 @@ from app.ui.dialogs import (
 from app.ui.empty_state import build_empty_state, retranslate_empty_state
 from app.ui.journal_widget import JournalWidget
 from app.ui.login_dialog import LoginDialog
+from app.ui.onboarding_dialog import (
+    ACTION_GET_STARTED as ONBOARDING_ACTION_GET_STARTED,
+    ACTION_TRY_DEMO as ONBOARDING_ACTION_TRY_DEMO,
+    OnboardingDialog,
+)
 from app.ui.message_editor_dialog import MessageEditorDialog
 from app.ui.message_preview import MessagePreviewWidget
 from app.ui.recipient_widget import RecipientWidget
@@ -190,6 +196,7 @@ class MainWindow(QMainWindow):
         self,
         close_event: Optional[asyncio.Event] = None,
         database: Optional[Database] = None,
+        secure_storage: Optional[SecureStorage] = None,
     ) -> None:
         super().__init__()
         self._logger = get_logger()
@@ -222,7 +229,7 @@ class MainWindow(QMainWindow):
         self._restore_maximized_from_tray = False
 
         self._database = database if database is not None else Database()
-        self._service = TelegramService(self._database)
+        self._service = TelegramService(self._database, secure_storage=secure_storage)
         self._saved_report_repo = SavedReportRepository(self._database)
         self._preset_repo = PresetRepository(self._database)
         self._group_repo = RecipientGroupRepository(self._database)
@@ -474,7 +481,30 @@ class MainWindow(QMainWindow):
         self._journal = JournalWidget(self)
 
         central = QWidget(self)
-        root = QHBoxLayout(central)
+        outer = QVBoxLayout(central)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        # Demo Mode banner (ROADMAP v2.0): a persistent, unmissable strip
+        # above the whole app shell -- not just a status-bar label, which
+        # would be too easy to overlook for something this important
+        # ("clearly indicate Demo Mode"). Hidden by default; shown only
+        # while self._service.is_demo_mode is True.
+        self._demo_banner = QFrame(central)
+        self._demo_banner.setObjectName("demoBanner")
+        self._demo_banner.setVisible(False)
+        banner_layout = QHBoxLayout(self._demo_banner)
+        banner_layout.setContentsMargins(SPACE_LG, SPACE_SM, SPACE_LG, SPACE_SM)
+        self._demo_banner_label = QLabel(tr("main_window.demo_banner.text"), self._demo_banner)
+        self._demo_banner_label.setObjectName("demoBannerLabel")
+        banner_layout.addWidget(self._demo_banner_label, 1)
+        self._demo_exit_button = QPushButton(tr("main_window.demo_banner.exit_button"), self._demo_banner)
+        self._demo_exit_button.clicked.connect(self._on_exit_demo_mode_clicked)
+        banner_layout.addWidget(self._demo_exit_button)
+        outer.addWidget(self._demo_banner)
+
+        row = QWidget(central)
+        root = QHBoxLayout(row)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
@@ -488,6 +518,7 @@ class MainWindow(QMainWindow):
         self._stack.addWidget(_scrollable_page(self._build_results_page()))
         self._stack.addWidget(_scrollable_page(self._build_settings_page()))
         root.addWidget(self._stack, 1)
+        outer.addWidget(row, 1)
 
         self.setCentralWidget(central)
 
@@ -995,6 +1026,7 @@ class MainWindow(QMainWindow):
         self._account_widget.delete_account_requested.connect(self._on_delete_account_requested)
         self._account_widget.reconnect_requested.connect(self._on_reconnect_requested)
         self._account_widget.rename_requested.connect(self._on_rename_account_requested)
+        self._account_widget.try_demo_mode_requested.connect(self._on_try_demo_mode_requested)
 
         self._recipient_widget.recipients_changed.connect(self._on_form_state_changed)
         self._recipient_widget.recipients_changed.connect(self._on_recipients_changed)
@@ -1469,6 +1501,52 @@ class MainWindow(QMainWindow):
             return
         account_manager.rename_account(account, new_alias)
         asyncio.ensure_future(self._refresh_accounts())
+
+    # ---- demo mode (ROADMAP v2.0) -----------------------------------------------
+
+    def _on_try_demo_mode_requested(self) -> None:
+        if not self._can_switch_accounts():
+            show_error(self, tr("main_window.dialogs.unavailable_title"), tr("main_window.dialogs.add_account_unavailable"))
+            return
+        self._enter_demo_mode()
+
+    def _enter_demo_mode(self) -> None:
+        self._service.enter_demo_mode()
+        self._demo_banner.setVisible(True)
+        asyncio.ensure_future(self._refresh_accounts())
+        self.statusBar().showMessage(tr("main_window.demo_banner.text"))
+
+    def _on_exit_demo_mode_clicked(self) -> None:
+        if not self._can_switch_accounts():
+            show_error(self, tr("main_window.dialogs.unavailable_title"), tr("main_window.dialogs.delete_account_unavailable"))
+            return
+        self._service.exit_demo_mode()
+        self._demo_banner.setVisible(False)
+        asyncio.ensure_future(self._refresh_accounts())
+        self.statusBar().showMessage(tr("main_window.status.ready"))
+
+    def maybe_show_onboarding(self) -> None:
+        """Shown once, the first time the app has no persisted
+        onboarding_completed setting -- deliberately NOT called from
+        __init__ (a blocking modal dialog started mid-construction would
+        hang every test that constructs MainWindow directly, since a
+        fresh test database's onboarding_completed is always False).
+        Only app.main.main() calls this, once, right after window.show()
+        -- the one real entry point that should ever see it."""
+        settings = self._service.settings_repository.load_app_settings()
+        if settings.onboarding_completed:
+            return
+        dialog = OnboardingDialog(self)
+        dialog.exec()
+        settings.onboarding_completed = True
+        try:
+            self._service.settings_repository.save_app_settings(settings)
+        except SettingsValidationError:
+            pass
+        if dialog.action == ONBOARDING_ACTION_GET_STARTED:
+            self._on_add_account_requested()
+        elif dialog.action == ONBOARDING_ACTION_TRY_DEMO:
+            self._enter_demo_mode()
 
     def _active_account(self) -> Optional[Account]:
         account_manager = self._service.account_manager

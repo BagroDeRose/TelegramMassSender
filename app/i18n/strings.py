@@ -430,6 +430,12 @@ STRINGS: Dict[str, Dict[str, str]] = {
     "account_widget.delete_tooltip": {"ru": "Удалить аккаунт", "en": "Delete account"},
     "account_widget.switching": {"ru": "Переключение…", "en": "Switching…"},
     "account_widget.rename_tooltip": {"ru": "Переименовать аккаунт", "en": "Rename account"},
+    "account_widget.try_demo_button": {"ru": "Попробовать демо-режим", "en": "Try Demo Mode"},
+    "main_window.demo_banner.text": {
+        "ru": "ДЕМО-РЕЖИМ — аккаунты и получатели поддельные, реальные сообщения не отправляются",
+        "en": "DEMO MODE — accounts and recipients are simulated, no real messages are sent",
+    },
+    "main_window.demo_banner.exit_button": {"ru": "Выйти из демо-режима", "en": "Exit Demo Mode"},
 
     # ---- recipient_widget -----------------------------------------------
     "recipient_widget.placeholder": {
@@ -546,6 +552,26 @@ STRINGS: Dict[str, Dict[str, str]] = {
 
     # ---- login_dialog -------------------------------------------------------
     "login_dialog.title": {"ru": "Подключение Telegram", "en": "Connect Telegram"},
+    "onboarding_dialog.title": {"ru": "Добро пожаловать", "en": "Welcome"},
+    "onboarding_dialog.welcome_title": {"ru": "Добро пожаловать в Telegram Mass Sender", "en": "Welcome to Telegram Mass Sender"},
+    "onboarding_dialog.welcome_body": {
+        "ru": "Это приложение отправляет персональные сообщения в Telegram по одному, от вашего собственного аккаунта — не бот и не массовая рассылка по группам/каналам.",
+        "en": "This app sends personal Telegram messages one by one, from your own account — not a bot, and never to groups or channels.",
+    },
+    "onboarding_dialog.steps_title": {"ru": "Как это работает", "en": "How it works"},
+    "onboarding_dialog.step_account": {"ru": "Подключите аккаунт Telegram", "en": "Connect a Telegram account"},
+    "onboarding_dialog.step_recipients": {"ru": "Добавьте получателей", "en": "Add recipients"},
+    "onboarding_dialog.step_message": {"ru": "Напишите сообщение", "en": "Write your message"},
+    "onboarding_dialog.step_attachments": {"ru": "При желании добавьте вложения", "en": "Optionally add attachments"},
+    "onboarding_dialog.step_preview": {"ru": "Проверьте предпросмотр", "en": "Check the preview"},
+    "onboarding_dialog.step_start": {"ru": "Запустите рассылку", "en": "Start the campaign"},
+    "onboarding_dialog.demo_note": {
+        "ru": "Не хотите подключать реальный аккаунт прямо сейчас? Попробуйте демо-режим — полностью локальный, без настоящей авторизации и без отправки настоящих сообщений.",
+        "en": "Not ready to connect a real account yet? Try Demo Mode — fully local, no real authentication, no real messages sent.",
+    },
+    "onboarding_dialog.get_started_button": {"ru": "Начать", "en": "Get Started"},
+    "onboarding_dialog.try_demo_button": {"ru": "Попробовать демо-режим", "en": "Try Demo Mode"},
+    "onboarding_dialog.skip_button": {"ru": "Пропустить", "en": "Skip"},
     "login_dialog.api_id_placeholder": {"ru": "напр. 12345678", "en": "e.g. 12345678"},
     "login_dialog.api_id_tooltip": {
         "ru": "Получается на my.telegram.org/apps (раздел API development tools)",

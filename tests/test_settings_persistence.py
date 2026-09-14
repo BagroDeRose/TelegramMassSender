@@ -40,6 +40,7 @@ def test_all_new_fields_roundtrip(tmp_path):
         settings.reports_directory = "D:/reports"
         settings.auto_save_reports = True
         settings.debug_logging = True
+        settings.onboarding_completed = True
         repo.save_app_settings(settings)
 
         reloaded = repo.load_app_settings()
@@ -54,6 +55,7 @@ def test_all_new_fields_roundtrip(tmp_path):
         assert reloaded.reports_directory == "D:/reports"
         assert reloaded.auto_save_reports is True
         assert reloaded.debug_logging is True
+        assert reloaded.onboarding_completed is True
     finally:
         db.close()
 

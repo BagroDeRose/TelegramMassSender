@@ -30,6 +30,7 @@ def main() -> int:
 
     window = MainWindow(close_event=close_event)
     window.show()
+    window.maybe_show_onboarding()
 
     try:
         run_event_loop(loop, close_event)
