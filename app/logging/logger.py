@@ -36,7 +36,10 @@ class SecretScrubbingFilter(logging.Filter):
         try:
             message = record.getMessage()
         except Exception:
-            return True
+            # A malformed %-style call (e.g. mismatched args) means this
+            # record can't be scrubbed -- drop it rather than emit it
+            # unredacted, since scrubbing is this filter's entire job.
+            return False
         scrubbed = message
         for pattern in _SECRET_PATTERNS:
             scrubbed = pattern.sub(r"\1***REDACTED***", scrubbed)

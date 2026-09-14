@@ -65,3 +65,14 @@ def test_session_value_scrubbed_from_log_message():
 def test_normal_log_messages_pass_through_unchanged():
     scrubbed = _filtered_message("Аккаунт успешно авторизован: +70001112233")
     assert scrubbed == "Аккаунт успешно авторизован: +70001112233"
+
+
+def test_record_that_cannot_be_scrubbed_is_dropped_not_emitted_raw():
+    # A malformed %-style call (msg/args mismatch) makes getMessage() raise,
+    # so the message can't be scrubbed -- the filter must drop the record
+    # (return False) rather than let a possibly-unredacted message through.
+    record = logging.LogRecord(
+        name="test", level=logging.INFO, pathname=__file__, lineno=1,
+        msg="api_hash=%d is not a number", args=("not_a_number",), exc_info=None,
+    )
+    assert SecretScrubbingFilter().filter(record) is False
