@@ -25,10 +25,16 @@ described below.
   password, or session file contents.
 - `app/diagnostic_bundle.py` — v1.7 Diagnostic Bundle:
   `export_diagnostic_bundle()` zips the Diagnostics report, the rotating
-  log files (already secret-scrubbed at write time), and a plain
-  `AppSettings` dump (API ID/Hash live elsewhere, in
-  `app.security.secure_storage`, so there's nothing to strip out of
-  settings) -- never touches session files.
+  log files (already secret-scrubbed at write time), and an `AppSettings`
+  dump (API ID/Hash live elsewhere, in `app.security.secure_storage`, so
+  there's nothing to strip out of settings) -- never touches session
+  files. Found via actually generating and inspecting a real bundle
+  during the release-candidate audit: a user-customized
+  `reports_directory` is very often somewhere under the user's own
+  Windows profile (e.g. Documents), which embeds their Windows account
+  name -- `_sanitize_reports_directory()` redacts just that `C:\Users\<name>\`
+  segment before the settings dump is written, only for this export
+  (the real path is still what every other use of the setting sees).
 - `app/ui/` — PySide6 widgets/dialogs/pages:
   - `main_window.py` — top-level window, orchestrates the service layer and
     all pages; sidebar navigation between Campaign/Accounts/Results/Settings.
@@ -162,7 +168,7 @@ described below.
   `MainWindow.retranslate_ui()` the same way theme switching already
   dispatches `apply_theme()`. Deliberately not gettext or Qt Linguist
   (.ts/.qm + lupdate/lrelease) — this app has no other use for either.
-- `tests/` — pytest + pytest-asyncio (`asyncio_mode = auto`), 678 tests,
+- `tests/` — pytest + pytest-asyncio (`asyncio_mode = auto`), 681 tests,
   using `tests/mocks/mock_telegram_client.py` and
   `tests/mocks/fake_client_manager.py` instead of a real Telegram
   connection. CI runs this suite on `windows-latest` with
@@ -192,7 +198,7 @@ reproduced with a failing test first, then fixed.
 
 **Tests.** After any code change, run the targeted test file, then the
 full suite (`pytest tests/ -v`). Don't delete or weaken existing tests just
-to make the suite pass. The current baseline is 678 passed, 0 failures —
+to make the suite pass. The current baseline is 681 passed, 0 failures —
 if that number changes, know exactly why before saying the change is done.
 
 **GUI.** Never block the Qt event loop or the asyncio event loop.

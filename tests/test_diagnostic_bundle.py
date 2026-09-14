@@ -88,6 +88,54 @@ def test_bundle_never_contains_credential_or_session_markers(tmp_path):
         db.close()
 
 
+def test_bundle_redacts_a_custom_reports_directory_under_the_user_profile(tmp_path):
+    # A custom reports folder is very often somewhere under the user's
+    # own Windows profile (e.g. Documents), which embeds their Windows
+    # account name -- found via a real, manually-generated bundle during
+    # the release-candidate privacy audit (not a hypothetical).
+    db = Database(db_path=tmp_path / "app.db")
+    try:
+        out_path = tmp_path / "bundle.zip"
+        settings = AppSettings(reports_directory=r"C:\Users\jsmith\Documents\TelegramMassSender\reports")
+        export_diagnostic_bundle(out_path, db, settings, "x", "y")
+
+        with zipfile.ZipFile(out_path) as bundle:
+            settings_data = json.loads(bundle.read("settings.json").decode("utf-8"))
+        assert "jsmith" not in settings_data["reports_directory"]
+        assert settings_data["reports_directory"] == r"C:\Users\<redacted>\Documents\TelegramMassSender\reports"
+    finally:
+        db.close()
+
+
+def test_bundle_leaves_the_default_empty_reports_directory_unchanged(tmp_path):
+    db = Database(db_path=tmp_path / "app.db")
+    try:
+        out_path = tmp_path / "bundle.zip"
+        export_diagnostic_bundle(out_path, db, AppSettings(), "x", "y")
+
+        with zipfile.ZipFile(out_path) as bundle:
+            settings_data = json.loads(bundle.read("settings.json").decode("utf-8"))
+        assert settings_data["reports_directory"] == ""
+    finally:
+        db.close()
+
+
+def test_bundle_leaves_a_non_profile_reports_directory_unchanged(tmp_path):
+    # Nothing to redact -- D:\ isn't under a user profile at all, so this
+    # must pass through untouched rather than being mangled.
+    db = Database(db_path=tmp_path / "app.db")
+    try:
+        out_path = tmp_path / "bundle.zip"
+        settings = AppSettings(reports_directory=r"D:\Reports\TelegramMassSender")
+        export_diagnostic_bundle(out_path, db, settings, "x", "y")
+
+        with zipfile.ZipFile(out_path) as bundle:
+            settings_data = json.loads(bundle.read("settings.json").decode("utf-8"))
+        assert settings_data["reports_directory"] == r"D:\Reports\TelegramMassSender"
+    finally:
+        db.close()
+
+
 def test_bundle_settings_json_round_trips_every_appsettings_field(tmp_path):
     from dataclasses import fields
 

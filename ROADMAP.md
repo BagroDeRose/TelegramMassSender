@@ -603,19 +603,26 @@ Still deferred.
 
 - [x] Export sanitized diagnostic ZIP — new `app/diagnostic_bundle.py`
       (`export_diagnostic_bundle`), an "Экспорт диагностического пакета"
-      button next to Copy/Refresh on the Diagnostics card. Built entirely
-      from already-sanitized sources -- nothing new to redact here
+      button next to Copy/Refresh on the Diagnostics card
 - [x] Include relevant logs — the same rotating log files
       `app/logging/logger.py` already scrubs of secrets at write time
       (`application.log` + rotated backups), included as-is
 - [x] Include application/version information — `diagnostics.txt`, the
       same report the Diagnostics card shows (app/Python/Telethon
       versions, DB/Telegram/session/network status)
-- [x] Include sanitized configuration — `settings.json`, a plain dump of
+- [x] Include sanitized configuration — `settings.json`, a dump of
       `AppSettings` (interval, retry count, theme, language, window
-      geometry, reports directory, etc.); nothing to sanitize out since
-      API ID/Hash live in `app.security.secure_storage`, a separate
-      DPAPI-encrypted file, never in `AppSettings`
+      geometry, reports directory, etc.). API ID/Hash live in
+      `app.security.secure_storage`, a separate DPAPI-encrypted file,
+      never in `AppSettings`, so there's nothing to strip out on that
+      front. **Correction (release-candidate audit):** this bundle was
+      never actually generated and inspected end-to-end before now --
+      doing so surfaced a real gap the "nothing to sanitize" claim above
+      had missed: a user-customized `reports_directory` is very often
+      somewhere under the user's own Windows profile (e.g. Documents),
+      which embeds their Windows account name. `_sanitize_reports_directory()`
+      now redacts that `C:\Users\<name>\` segment specifically for this
+      export (every other use of the setting still sees the real path)
 - [x] Never include Telegram session files — `app.config.paths.get_sessions_dir()`
       is never read by this module
 - [x] Never include credentials — API ID/Hash/2FA password are never in
