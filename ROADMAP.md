@@ -69,8 +69,10 @@ platform.
       languages) plus `tests/test_main_window_ux.py` (live language switch
       actually changes already-built widget text, persists across reload,
       and reset-settings doesn't silently flip it)
-- [ ] Create English portfolio screenshots — separate README/portfolio
-      task, not yet done
+- [x] Create English portfolio screenshots — all 6 of `docs/images/`'s
+      screenshots regenerated against the current UI, in English, with
+      only synthetic data (no real accounts/recipients/personal info);
+      see the release-candidate documentation stage for the full account
 
 ## Universal Attachments
 
@@ -947,19 +949,50 @@ previously-untested module).
 
 # Cross-cutting Engineering Goals
 
-- [ ] Maintain modular architecture
-- [ ] Keep UI independent from Telegram transport logic
-- [ ] Keep attachment abstraction generic
-- [ ] Preserve async/qasync architecture
-- [ ] Preserve UTF-16 Telegram entity correctness
-- [ ] Preserve Windows DPAPI credential protection
-- [ ] Preserve safe FloodWait handling
-- [ ] Preserve graceful shutdown
-- [ ] Preserve partial-send protection
-- [ ] Maintain strong regression test coverage
-- [ ] Keep application history intentionally limited
-- [ ] Avoid unnecessary database persistence
-- [ ] Avoid collecting sensitive user data
+These are ongoing properties of the codebase, not one-time deliverables
+-- checked here because each is currently true and verified (not because
+there's nothing left to watch), re-verified as part of this stage's
+audit rather than assumed to still hold from when each was first built:
+
+- [x] Maintain modular architecture — `app/ui`/`app/telegram`/`app/campaign`/
+      `app/recipients`/`app/security`/`app/config`/`app/database`/
+      `app/logging`/`app/i18n` stay separated by concern, per `CLAUDE.md`
+- [x] Keep UI independent from Telegram transport logic — `app/ui/*.py`
+      never imports Telethon directly; it goes through
+      `app/telegram/service.py`/`account_manager.py`/`client_manager.py`
+- [x] Keep attachment abstraction generic — `AttachmentKind` stays a
+      closed, extension-based classification table read by both
+      `media_sender.py` and the UI, not duplicated
+- [x] Preserve async/qasync architecture — every network call stays on
+      the shared qasync loop; nothing blocks the Qt event loop
+- [x] Preserve UTF-16 Telegram entity correctness — `template.py`/
+      `message_editor.py`/`message_preview.py` all still do entity-offset
+      math in surrogate-pair space
+- [x] Preserve Windows DPAPI credential protection — `app/security/dpapi.py`/
+      `secure_storage.py` unchanged; API ID/Hash still never touch plain
+      config, logs, or exception messages
+- [x] Preserve safe FloodWait handling — still waited out or cleanly
+      aborted everywhere it can occur (resolve and send alike), never
+      bypassed
+- [x] Preserve graceful shutdown — `MainWindow._perform_shutdown`/the
+      `close_event` mechanism (`tests/test_main_window_shutdown.py`)
+      unchanged
+- [x] Preserve partial-send protection — `next_step`-based resume in
+      `campaign_manager.py`/`media_sender.py` unchanged
+- [x] Maintain strong regression test coverage — 678 tests, 0 failures,
+      CI green (this stage alone added 86: 5 for the two attachment bug
+      fixes, 81 across v1.8/v2.0)
+- [x] Keep application history intentionally limited — presets/groups/
+      saved reports are still only ever created by an explicit user
+      action, never auto-logged
+- [x] Avoid unnecessary database persistence — the only new persisted
+      fields this stage (`accounts.local_alias`, `onboarding_completed`)
+      are both small, explicit, user-facing settings, not new implicit
+      history
+- [x] Avoid collecting sensitive user data — Demo Mode's simulated
+      recipients/results never touch a real network or real personal
+      data; nothing new here reads message contents or personal info
+      beyond what campaign sending already required
 
 ---
 
@@ -982,46 +1015,70 @@ Do NOT turn TelegramMassSender into:
 
 ---
 
-# Known Issues (flagged, not yet root-caused)
+# Known Issues
 
-- **Accounts page "+ Добавить аккаунт" button: partial text glitch after
-  the account list first populates, light theme only.** Found while
-  visually verifying Demo Mode (v2.0). Real, reproducible: the button's
-  leading `"+ До"` renders as a faint, misplaced fragment while the rest
-  of the label (`"бавить аккаунт"`) renders correctly, only after
-  `AccountWidget.set_accounts()` first adds a card (i.e. the page's
-  content height grows and the wrapping `QScrollArea` reflows) --
-  confirmed present on unmodified `main` (via `git stash`), so it
-  predates and is unrelated to any v2.0 work. Confirmed NOT reproducible
-  in three narrower contexts: `AccountWidget` alone (no `MainWindow`/
-  `QScrollArea`), the empty-account-list state, and dark theme with an
-  otherwise-identical script (though dark's accent color is close enough
-  to the light one that a subtle stale-pixel artifact could plausibly be
-  present but simply not visible against it -- not confirmed either way).
-  Tried and did not fix it: explicit `repaint()`/`update()` on the
-  button, the widget, the window, and the scroll area's viewport;
-  pre-applying the stylesheet before construction instead of relying on
-  `_apply_theme()`. The combination of "only after a dynamic relayout"
-  and "unfixed by explicit repaint calls" points at the offscreen QPA
-  platform's own software text rasterizer/paint-cache (used only by this
-  project's automated verification and CI, never by a real user) rather
-  than application code -- but this is not confirmed, since this sandbox
-  has no way to render on a real GPU-accelerated Windows display to rule
-  the app out conclusively. **Needs verification against the actual
-  packaged EXE on a real Windows desktop** (part of the release-candidate
-  build/smoke-test pass) before being dismissed as sandbox-only or
-  accepted as a real, fixable bug.
+None currently open. One issue was flagged, investigated, and retracted
+during this stage after finding its actual cause:
+
+- **Retracted: Accounts page "+ Add account" button partial-text
+  glitch.** Originally flagged as a possible real, pre-existing
+  rendering bug (reproducible via `window.grab()` after
+  `AccountWidget.set_accounts()` populated a card) and even seemed to
+  survive a `git stash` check against unmodified `main`. Root-caused
+  further: it was an artifact of the verification script itself, not
+  the app. The script reused one `asyncio` event loop across several
+  `loop.run_until_complete(...)` calls; `MainWindow.__init__` and
+  `_enter_demo_mode()` each independently schedule their own
+  `asyncio.ensure_future(self._refresh_accounts())`, and driving a
+  shared loop forward again later let those orphaned tasks execute
+  interleaved with the script's own explicit call, at some point
+  relative to Qt's paint queue that a real run never produces. Confirmed
+  directly: switching the same script to construct one isolated event
+  loop per call (`asyncio.run(...)`, matching how a real, single qasync
+  loop actually behaves for the lifetime of one app session) made the
+  glitch disappear completely, at the same window size/theme/language/
+  account count that reproduced it moments before. The earlier `git
+  stash` check "confirming" this on unmodified `main` used the same
+  flawed multi-call script both times, so it never actually ruled out
+  the script itself -- a reminder that a control run must vary only the
+  one thing being tested, not carry over an unexamined assumption from
+  the original repro.
 
 ---
 
 # Portfolio Goals
 
-- [ ] Keep README English-first
-- [ ] Keep Russian documentation available
-- [ ] Maintain English UI screenshots
-- [ ] Keep architecture diagram updated
-- [ ] Keep engineering highlights updated
-- [ ] Document major technical decisions
-- [ ] Keep CI green
-- [ ] Keep release artifacts reproducible
-- [ ] Maintain honest AI-assisted development disclosure
+Ongoing properties, re-verified as part of this stage rather than
+assumed to still hold:
+
+- [x] Keep README English-first — the English summary/features/screenshots/
+      architecture/highlights/testing/security sections stay first; the
+      full Russian user guide stays below them, unchanged in structure
+- [x] Keep Russian documentation available — unchanged, still complete
+- [x] Maintain English UI screenshots — all 6 of `docs/images/` were
+      stale (predated v1.8/v2.0's UI changes, and Russian rather than
+      English) and have been regenerated against the current UI in
+      English this stage, using only synthetic data
+- [x] Keep architecture diagram updated — the Mermaid diagram documents
+      layer boundaries (UI/orchestration/campaign/telegram/MTPROTO,
+      SQLite/DPAPI/config/CSV), which haven't structurally changed;
+      still accurate
+- [x] Keep engineering highlights updated — added the direction-dependent
+      drag-reorder bug and Demo Mode's duck-typed backend as two new
+      entries this stage
+- [x] Document major technical decisions — `CLAUDE.md` plus inline
+      comments at each real decision point (this stage: why Demo Mode
+      isn't shared code with the test mock, why onboarding can't run
+      from `__init__`, why the account-rename migration is generated
+      rather than a raw `ALTER TABLE`, why `SecureStorage` needed to
+      become injectable)
+- [x] Keep CI green — every commit this stage individually verified
+      green on GitHub Actions before moving to the next (one required a
+      follow-up fix: a test's `QSystemTrayIcon`-adjacent object-lifetime
+      issue that passed locally but crashed on the CI runner specifically)
+- [x] Keep release artifacts reproducible — `.github/workflows/release.yml`
+      builds from the same `.spec`/version-resource generation the manual
+      process uses, so an automated and a manual build of the same commit
+      produce the same artifact
+- [x] Maintain honest AI-assisted development disclosure — the top-of-README
+      disclosure line is unchanged and still accurate

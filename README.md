@@ -45,9 +45,9 @@ It supports multiple Telegram accounts, rich text formatting, media/album attach
 |---|---|
 | ![Accounts](docs/images/accounts.png) | ![Settings](docs/images/settings.png) |
 
-| Results & Journal |
-|---|
-| ![Results and Journal](docs/images/journal.png) |
+| Results & Journal | Demo Mode |
+|---|---|
+| ![Results and Journal](docs/images/journal.png) | ![Demo Mode](docs/images/demo-mode.png) |
 
 *All screenshots use synthetic demo data — no real Telegram accounts, recipients, or personal information.*
 
@@ -104,6 +104,8 @@ A few parts of this project involved real engineering problems, not just wiring 
 10. **One start path, three entry points.** The fast single-page workflow, the optional step-by-step Campaign Wizard, and failed-recipient Retry all funnel into the exact same validation/start method rather than each reimplementing it — a wizard or a retry can only ever start a campaign the same way the main "Start" button already does, so a fix or a safety check applied once covers all three.
 11. **Content-based CSV column detection.** CSV recipient import has no header-parsing or manual column-mapping step: each cell is tried against the same recipient-format recognizer the plain paste box already uses, so the first cell that looks like a username/ID/phone becomes that row's recipient regardless of column order, and another non-matching cell becomes that row's `{name}` value.
 12. **Automated regression testing** against a hand-built mock Telegram client, including reproduce-first regression tests for the bugs above.
+13. **A direction-dependent drag-reorder bug.** Attachment reordering looked fine in isolated tests but felt unreliable in practice: the same gesture — dropping one tile directly onto another — landed the dragged item *after* the target for a forward drag but *before* it for a backward drag, because the drop handler reused a stale, pre-drop row index as a raw insertion index. Reproduced and quantified by replaying every (source, target) pair over a small list (all of them showed the asymmetry), then fixed by re-locating the target by stable identity after the source is removed, making "drop on tile X" mean the same thing regardless of drag direction.
+14. **Demo Mode as a genuine duck-typed backend, not a mocked UI state.** `DemoTelegramClient` implements the same surface a real Telethon client does (entity resolution, message/album sending) with realistic random outcomes and zero network access — the real, unmodified `CampaignManager` runs an actual campaign against it, so Demo Mode exercises the same send/retry/results pipeline production traffic does, not a separate hand-faked code path.
 
 Ordinary parts — not oversold: the settings page is a straightforward form bound to a dataclass, SQLite access is plain parameterized `sqlite3`, and the CSV export itself is a standard `csv.writer`. None of that is architecturally novel; the value is in the items above.
 
