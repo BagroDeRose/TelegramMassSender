@@ -150,7 +150,7 @@ This is not a claim that every line was hand-typed, and it is not an unsupervise
 
 ## Download
 
-Latest release: **[v1.3.0](https://github.com/BagroDeRose/TelegramMassSender/releases/latest)** — download `TelegramMassSender-Windows.zip`, extract, and run `TelegramMassSender.exe`. No installation required. Full setup instructions (including obtaining a Telegram API ID/Hash) are in the [Russian user documentation](#документация-на-русском-языке) below.
+Latest release: **[v2.0.0](https://github.com/BagroDeRose/TelegramMassSender/releases/latest)** — download `TelegramMassSender-Windows.zip`, extract, and run `TelegramMassSender.exe`. No installation required. Full setup instructions (including obtaining a Telegram API ID/Hash) are in the [Russian user documentation](#документация-на-русском-языке) below.
 
 ## Limitations
 
