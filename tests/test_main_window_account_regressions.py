@@ -320,3 +320,112 @@ async def test_shutdown_cancels_in_flight_background_work(qapp, tmp_path):
     assert victim.cancelled() is True
     assert shutdown.cancelled() is False
     assert shutdown.exception() is None
+
+
+# ---- transition matrix: the awkward moments --------------------------------
+
+
+@pytest.mark.asyncio
+async def test_entering_demo_mode_immediately_after_startup(qapp, tmp_path):
+    # No _drain() first: the window's own construction-time refresh is
+    # still in flight, which is exactly when a user clicking straight
+    # through onboarding would hit this.
+    window = _make_window(tmp_path)
+    real = window._service.account_repository.create("+70000000050", "account_startup")
+
+    window._enter_demo_mode()
+    await _drain(window)
+    assert window._service.is_demo_mode is True
+
+    window._on_exit_demo_mode_clicked()
+    await _drain(window)
+    assert window._service.is_demo_mode is False
+    window._service.account_manager.switch_active_account(real.id)
+    assert window._service.account_manager.active_account_id == real.id
+
+
+@pytest.mark.asyncio
+async def test_a_demo_transition_does_not_interleave_with_a_running_refresh(qapp, tmp_path):
+    # The refresh collects statuses from whichever client manager was in
+    # use when it started. It must finish before the queued refresh runs,
+    # so the list the user is left looking at reflects the mode actually
+    # in effect.
+    window = _make_window(tmp_path)
+    window._service.account_repository.create("+70000000051", "account_interleave")
+    await _drain(window)
+
+    order = []
+    first_started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def slow_refresh(select_id=None):
+        order.append("refresh:start")
+        if not first_started.is_set():
+            first_started.set()
+            await release.wait()
+        order.append("refresh:end")
+
+    with patch.object(window, "_refresh_accounts_locked", slow_refresh):
+        slow = window._spawn(window._refresh_accounts(), "медленное обновление")
+        await first_started.wait()
+        window._enter_demo_mode()  # queues its own refresh behind the lock
+        release.set()
+        await _drain(window)
+        await asyncio.gather(slow, return_exceptions=True)
+
+    assert order[0] == "refresh:start"
+    assert order[1] == "refresh:end"  # the first refresh was never cut in half
+    assert window._service.is_demo_mode is True
+
+
+@pytest.mark.asyncio
+async def test_switching_accounts_after_deleting_one(qapp, tmp_path):
+    window = _make_window(tmp_path)
+    repo = window._service.account_repository
+    first = repo.create("+70000000052", "account_del_then_switch_a")
+    second = repo.create("+70000000053", "account_del_then_switch_b")
+    await _drain(window)
+
+    async def fake_delete(acc):
+        repo.delete(acc.id)
+
+    with patch.object(window._service.account_manager, "delete_account", fake_delete):
+        await asyncio.gather(
+            window._spawn(window._delete_account(first), "удаление"), return_exceptions=True
+        )
+
+    window._service.account_manager.switch_active_account(second.id)
+    assert window._service.account_manager.active_account_id == second.id
+    assert repo.get_by_id(first.id) is None
+
+
+@pytest.mark.asyncio
+async def test_demo_mode_right_before_shutdown_shuts_down_cleanly(qapp, tmp_path):
+    window = _make_window(tmp_path)
+    window._service.account_repository.create("+70000000054", "account_before_shutdown")
+    await _drain(window)
+
+    window._enter_demo_mode()
+    shutdown = window._spawn(window._perform_shutdown(), "завершение работы")
+    await asyncio.gather(shutdown, return_exceptions=True)
+
+    assert shutdown.exception() is None
+    assert not [t for t in window._background_tasks if not t.done()]
+
+
+@pytest.mark.asyncio
+async def test_demo_mode_is_blocked_while_a_campaign_is_active(qapp, tmp_path):
+    # Entering demo mode swaps the client manager the running campaign is
+    # sending through, so it must be refused, not merely discouraged.
+    window = _make_window(tmp_path)
+    await _drain(window)
+
+    class _ActiveCampaign:
+        is_active = True
+
+    window._current_campaign = _ActiveCampaign()
+    with patch("app.ui.main_window.show_error") as shown:
+        window._on_try_demo_mode_requested()
+
+    assert shown.called
+    assert window._service.is_demo_mode is False

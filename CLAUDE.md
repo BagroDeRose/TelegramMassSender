@@ -237,15 +237,21 @@ Long-running work (network calls, FloodWait waits) must be async/background,
 following the existing patterns in `app/telegram/qt_bridge.py` and
 `app/campaign/campaign_manager.py`.
 
-**Background tasks.** Never start one with a bare
-`asyncio.ensure_future(...)`. In `MainWindow` use `self._spawn(coro,
-description)`, which holds a reference to the task (asyncio may drop one
-nothing keeps alive) and observes its result, so a failure is logged
-instead of surfacing as "Task exception was never retrieved" at
-collection time. Anything else that owns a task observes it itself, the
-way `CampaignManager.start()` does. Observing is not the same as
-swallowing: do not wrap a coroutine body in a blanket `except Exception:
-pass`, which hides a real failure behind a UI that looks fine.
+**Background tasks.** Every background task needs a defined owner and
+somewhere its failure actually lands; otherwise a raising task surfaces
+only as asyncio's "Task exception was never retrieved" at collection
+time. In `MainWindow` use `self._spawn(coro, description)`, which holds a
+reference to the task (asyncio may drop one nothing keeps alive) and
+observes its result. Elsewhere, whatever owns the task observes it — the
+way `CampaignManager.start()` attaches a done-callback, since nothing
+awaits a campaign that ends on its own. `login_dialog.py`'s three
+`ensure_future` calls are the one deliberate exception: each coroutine
+catches everything itself and writes the failure into the dialog's own
+error label, and the dialog is parented to the window (no
+`WA_DeleteOnClose`), so it outlives the task and a late callback always
+finds a live widget. Observing is not the same as swallowing — do not
+wrap a coroutine body in a blanket `except Exception: pass`, which hides
+a real failure behind a UI that looks fine.
 
 **Account operations.** Refresh, switch, delete and the Demo Mode
 transitions all run under `MainWindow._account_lock`. They share client
