@@ -23,6 +23,14 @@ class CampaignAlreadyRunningError(TelegramMassSenderError):
     """Raised when trying to start a second campaign on the same account."""
 
 
+class AccountDeletionError(TelegramMassSenderError):
+    """Raised when an account could not be fully removed -- in practice a
+    Telegram session file still held open by another handle on Windows,
+    which reports WinError 32 rather than allowing the delete. Surfaced to
+    the UI instead of being swallowed, so the user is told the account is
+    still there rather than seeing a list that silently did not change."""
+
+
 class InvalidRecipientError(TelegramMassSenderError):
     """Raised when a recipient identifier cannot be parsed."""
 

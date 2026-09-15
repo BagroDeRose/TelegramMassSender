@@ -41,7 +41,15 @@ class TelegramService:
         self._client_manager: Optional[ClientManager] = None
         self.account_manager: Optional[AccountManager] = None
         self.is_demo_mode = False
+        # Set aside while demo mode is active so exiting restores the very
+        # same objects (and therefore the same live clients) rather than
+        # rebuilding them -- see enter_demo_mode.
+        self._real_client_manager: Optional[ClientManager] = None
+        self._real_account_manager: Optional[AccountManager] = None
         self._restore_from_storage()
+        # A demo account row left behind by v2.0.0, or by a crash while
+        # demo mode was active, must never be treated as a real account.
+        self.purge_demo_accounts()
 
     def _restore_from_storage(self) -> None:
         creds = self.secure_storage.load_api_credentials()
@@ -65,21 +73,29 @@ class TelegramService:
     def enter_demo_mode(self) -> Account:
         """Activates a fully local, simulated Telegram backend (ROADMAP
         v2.0 Demo Mode): a DemoClientManager that never opens a real
-        connection, wired the same way a real ClientManager is via
-        _activate() -- no real API ID/Hash needed or touched, and
-        nothing here reads from or writes to SecureStorage. Registers one
-        pre-seeded demo account (in whatever database this service's
-        account_repository already points at -- callers that want full
-        isolation from real accounts should construct MainWindow with an
-        in-memory Database in the first place, the same mechanism the
-        test suite already uses) and switches to it. Safe to call more
-        than once; each call re-seeds a fresh demo account rather than
-        reusing a stale one.
+        connection -- no real API ID/Hash is needed or touched, and
+        nothing here reads from or writes to SecureStorage.
+
+        The real ClientManager/AccountManager are *set aside*, not thrown
+        away, so exit_demo_mode() can put back the very same objects. The
+        previous version replaced them and rebuilt fresh ones on exit,
+        which orphaned every live TelegramClient: their Telethon
+        SQLiteSession files stayed open while the new manager opened a
+        second connection to the same file, which is where the
+        "database is locked" status-check failures came from.
         """
+        if self.is_demo_mode:
+            return self._demo_account()
+
+        self._real_client_manager = self._client_manager
+        self._real_account_manager = self.account_manager
         self._client_manager = DemoClientManager()
         self.account_manager = AccountManager(self.account_repository, self._client_manager)
         self.is_demo_mode = True
+        return self._demo_account()
 
+    def _demo_account(self) -> Account:
+        assert self.account_manager is not None
         account = self.account_manager.register_account(DEMO_ACCOUNT_PHONE)
         account = self.account_manager.update_profile(
             account,
@@ -91,15 +107,44 @@ class TelegramService:
         return account
 
     def exit_demo_mode(self) -> None:
-        """Restores whatever real configuration existed before
-        enter_demo_mode() was called -- a real ClientManager if real API
-        credentials were already stored, or the original unconfigured
-        state otherwise. Safe to call even if demo mode was never
+        """Puts back exactly the real ClientManager/AccountManager that
+        were in use before demo mode, and removes the demo account row so
+        it never shows up in -- or is connected as part of -- the user's
+        real account list. Safe to call even if demo mode was never
         entered."""
-        self._client_manager = None
-        self.account_manager = None
+        if not self.is_demo_mode:
+            return
+        self.purge_demo_accounts()
+        self._client_manager = self._real_client_manager
+        self.account_manager = self._real_account_manager
+        self._real_client_manager = None
+        self._real_account_manager = None
         self.is_demo_mode = False
-        self._restore_from_storage()
+        if self._client_manager is None:
+            # Credentials may have been configured while demo mode was
+            # active; pick them up rather than staying unconfigured.
+            self._restore_from_storage()
+
+    def purge_demo_accounts(self) -> int:
+        """Remove the demo account row from the real account list.
+
+        Called when leaving demo mode and again at startup: demo mode used
+        to persist "+10000000000" into the real accounts table and never
+        remove it, so a leftover row survives from v2.0.0 (and from any
+        crash while demo mode was active). Left in place, the next refresh
+        in real mode builds a genuine Telethon client for that fake
+        account and tries to connect it, which is both a real session file
+        on disk and a stream of connection errors in the log.
+
+        Only the session *row* is dropped here; a demo account never has a
+        real session file, because DemoClientManager never opens one.
+        """
+        removed = 0
+        for account in self.account_repository.list_all():
+            if account.phone == DEMO_ACCOUNT_PHONE:
+                self.account_repository.delete(account.id)
+                removed += 1
+        return removed
 
     async def shutdown(self) -> None:
         if self._client_manager is not None:

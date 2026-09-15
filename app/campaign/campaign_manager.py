@@ -161,6 +161,20 @@ class CampaignManager(QObject):
         if self._task is not None:
             raise RuntimeError("Кампания уже запущена")
         self._task = asyncio.ensure_future(self._run())
+        # stop() awaits this task and would see any error, but a campaign
+        # that ends on its own is never awaited by anyone -- without this
+        # callback an unexpected failure inside _run() surfaces only as
+        # asyncio's "Task exception was never retrieved" at collection
+        # time. CampaignManager owns the task, so it observes it here.
+        self._task.add_done_callback(self._on_task_finished)
+
+    def _on_task_finished(self, task: asyncio.Task) -> None:
+        if task.cancelled():
+            return
+        error = task.exception()
+        if error is not None:
+            logger.error("Рассылка завершилась непредвиденной ошибкой: %s", error)
+            self._log(tr("campaign_manager.journal.task_failed", error=str(error)))
 
     def pause(self) -> None:
         if self._state.status != CampaignStatus.RUNNING:

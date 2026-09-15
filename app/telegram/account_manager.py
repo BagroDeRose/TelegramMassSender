@@ -5,8 +5,10 @@ plumbing) and AccountRepository (persisted account metadata).
 from __future__ import annotations
 
 import asyncio
+import sqlite3
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable, List, Optional
 
 from app.config.paths import get_session_path
@@ -15,7 +17,14 @@ from app.database.repositories import AccountRepository
 from app.i18n import tr
 from app.logging.logger import get_logger
 from app.telegram.client_manager import ClientManager
-from app.telegram.exceptions import AccountSwitchBlockedError
+from app.telegram.exceptions import AccountDeletionError, AccountSwitchBlockedError
+
+# Bounded, deliberately small: this covers a session file that Windows
+# still reports as open for a moment after Telethon closed it, not a file
+# genuinely in use by a running client (which the disconnect above already
+# handled). Never an unbounded loop -- a still-locked file is reported.
+_SESSION_UNLINK_ATTEMPTS = 5
+_SESSION_UNLINK_RETRY_DELAY_SECONDS = 0.1
 
 logger = get_logger()
 
@@ -24,7 +33,18 @@ logger = get_logger()
 # genuine "this session is no longer authorized" -- see AccountStatus
 # .connection_error below and the check_status docstring for why this
 # distinction exists (it's the fix for accounts appearing to "disappear").
-_TRANSIENT_ERROR_TYPES = (ConnectionError, OSError, asyncio.TimeoutError, TimeoutError)
+_TRANSIENT_ERROR_TYPES = (
+    ConnectionError,
+    OSError,
+    asyncio.TimeoutError,
+    TimeoutError,
+    # "database is locked" from Telethon's own SQLiteSession file. This is
+    # a contention/timing problem, not an authorization one: the account's
+    # session is perfectly valid and the fix is to retry, so reporting it
+    # as needs_reauth (which is what the generic handler below did) made a
+    # working account look like it had to be logged in again.
+    sqlite3.OperationalError,
+)
 
 
 @dataclass
@@ -138,13 +158,49 @@ class AccountManager:
         # to succeed locally regardless of Telegram's own reachability.
         await self._client_manager.log_out(account.session_name)
         await self._client_manager.disconnect(account.session_name)
+        # remove() now also closes the session's sqlite connection, which
+        # is what actually releases the Windows file handle -- dropping the
+        # client from the dict alone left the file open.
         self._client_manager.remove(account.session_name)
         session_base = get_session_path(account.session_name)
         for suffix in (".session", ".session-journal"):
             candidate = session_base.with_suffix(suffix)
-            if candidate.exists():
-                candidate.unlink()
+            await self._unlink_session_file(candidate)
         self._repository.delete(account.id)
         if self._active_account_id == account.id:
             self._active_account_id = None
         logger.info("Аккаунт удалён: %s", account.phone)
+
+    async def _unlink_session_file(self, candidate: Path) -> None:
+        """Delete one session file, tolerating the brief window in which
+        Windows still reports the handle as open.
+
+        Telethon closes the session's sqlite connection synchronously, but
+        on Windows the handle can still be briefly held (an antivirus or
+        indexer scanning the file it just saw written is the usual
+        culprit), and the delete then fails with WinError 32. A short,
+        bounded retry covers that; it deliberately does NOT loop forever,
+        and a file that is still locked after the last attempt raises
+        AccountDeletionError instead of being silently ignored, because
+        leaving a stale session file behind while telling the user the
+        account is gone is exactly the kind of thing that should be
+        reported.
+        """
+        for attempt in range(_SESSION_UNLINK_ATTEMPTS):
+            if not candidate.exists():
+                return
+            try:
+                candidate.unlink()
+                return
+            except PermissionError as exc:
+                if attempt == _SESSION_UNLINK_ATTEMPTS - 1:
+                    logger.warning("Файл сессии занят другим процессом: %s (%s)", candidate.name, exc)
+                    raise AccountDeletionError(
+                        tr("account_manager.error.session_file_locked", name=candidate.name)
+                    ) from exc
+                await asyncio.sleep(_SESSION_UNLINK_RETRY_DELAY_SECONDS)
+            except OSError as exc:
+                logger.warning("Не удалось удалить файл сессии %s: %s", candidate.name, exc)
+                raise AccountDeletionError(
+                    tr("account_manager.error.session_file_locked", name=candidate.name)
+                ) from exc

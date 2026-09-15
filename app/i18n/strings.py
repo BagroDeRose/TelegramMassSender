@@ -300,6 +300,20 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "ru": "Удаление аккаунта недоступно во время рассылки.",
         "en": "You can't delete an account while a campaign is running.",
     },
+    "main_window.dialogs.delete_account_failed_title": {
+        "ru": "Не удалось удалить аккаунт",
+        "en": "Could not delete the account",
+    },
+    "main_window.dialogs.delete_account_failed": {
+        "ru": (
+            "Файл сессии занят другим процессом, поэтому аккаунт не был удалён полностью.\n"
+            "Закройте другие копии программы и попробуйте ещё раз."
+        ),
+        "en": (
+            "The session file is in use by another process, so the account was not fully removed.\n"
+            "Close any other copies of the application and try again."
+        ),
+    },
     "main_window.dialogs.switch_account_title": {"ru": "Переключение аккаунта", "en": "Switching account"},
     "main_window.dialogs.switch_account_failed": {
         "ru": "Не удалось переключить аккаунт.\nПроверьте подключение и состояние сессии.",
@@ -736,6 +750,10 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "ru": "Переключение аккаунта недоступно во время рассылки.",
         "en": "You can't switch accounts while a campaign is running.",
     },
+    "account_manager.error.session_file_locked": {
+        "ru": "Файл сессии {name} занят другим процессом и не может быть удалён.",
+        "en": "The session file {name} is in use by another process and cannot be deleted.",
+    },
 
     # ---- app/telegram/recipient_resolver.py: STATUS_LABELS, reach the Journal --
     "recipient_resolver.status.ready": {"ru": "Готов", "en": "Ready"},
@@ -765,6 +783,10 @@ STRINGS: Dict[str, Dict[str, str]] = {
     "campaign_manager.journal.resumed": {"ru": "▶ Рассылка возобновлена", "en": "▶ Campaign resumed"},
     "campaign_manager.journal.completed": {"ru": "✓ Рассылка завершена", "en": "✓ Campaign completed"},
     "campaign_manager.journal.stopped": {"ru": "■ Рассылка остановлена", "en": "■ Campaign stopped"},
+    "campaign_manager.journal.task_failed": {
+        "ru": "✖ Непредвиденная ошибка рассылки: {error}",
+        "en": "✖ Unexpected campaign error: {error}",
+    },
     "campaign_manager.journal.paused_after_flood": {
         "ru": "Рассылка приостановлена после ограничения Telegram. Нажмите «Продолжить», чтобы продолжить.",
         "en": "The campaign was paused after a Telegram limit. Click “Resume” to continue.",

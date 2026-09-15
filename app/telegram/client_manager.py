@@ -83,4 +83,25 @@ class ClientManager:
         return self._clients.get(session_name)
 
     def remove(self, session_name: str) -> None:
-        self._clients.pop(session_name, None)
+        """Drop the client and close its session file.
+
+        Dropping the client from the dict is not enough on Windows: a
+        Telethon SQLiteSession holds an open sqlite connection to the
+        .session file from the moment the client is constructed, and that
+        open handle makes deleting the file fail with WinError 32
+        (reproduced directly -- unlink() right after constructing a client
+        raises PermissionError, and succeeds once the session is closed).
+        A normal disconnect() already closes it; this covers a client that
+        was created but never connected, which is otherwise left holding
+        the file open with nothing to close it.
+        """
+        client = self._clients.pop(session_name, None)
+        if client is None:
+            return
+        session = getattr(client, "session", None)
+        if session is None:
+            return  # log_out() already closed and cleared it
+        try:
+            session.close()
+        except Exception as exc:  # noqa: BLE001 - never block removal on a close failure
+            logger.warning("Не удалось закрыть файл сессии %s: %s", session_name, exc)

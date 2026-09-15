@@ -66,7 +66,7 @@ from app.database.repositories import PresetRepository, RecipientGroupRepository
 from app.i18n import LANGUAGE_LABELS, VALID_LANGUAGES, get_language, set_language, tr
 from app.logging.logger import get_logger
 from app.telegram.account_manager import Account
-from app.telegram.exceptions import AccountSwitchBlockedError
+from app.telegram.exceptions import AccountDeletionError, AccountSwitchBlockedError
 from app.security.secure_storage import SecureStorage
 from app.telegram.service import TelegramService
 from app.telegram.template import expand_name_placeholder
@@ -227,6 +227,22 @@ class MainWindow(QMainWindow):
         self._close_event = close_event
         self._tray_icon: Optional[QSystemTrayIcon] = None
         self._restore_maximized_from_tray = False
+        # Every background task this window starts is kept here until it
+        # finishes, and every one of them gets its result observed in
+        # _on_background_task_done. Without that, a raising task (most
+        # visibly account deletion failing on a locked session file) is
+        # only reported by asyncio at garbage-collection time as
+        # "Task exception was never retrieved", with no handling at all.
+        # Holding the reference also stops the loop from dropping a task
+        # mid-flight, which asyncio explicitly documents as possible for
+        # tasks nothing keeps alive.
+        self._background_tasks: set = set()
+        # Account operations (refresh / switch / delete / demo mode) all
+        # touch the same client manager and session files, so they are run
+        # one at a time. Interleaving them is what let a status refresh
+        # rebuild a Telethon client -- reopening its session file -- in the
+        # middle of a delete, making the delete fail with WinError 32.
+        self._account_lock = asyncio.Lock()
 
         self._database = database if database is not None else Database()
         self._service = TelegramService(self._database, secure_storage=secure_storage)
@@ -282,7 +298,7 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(tr("main_window.status.ready"))
         self._setup_system_tray()
 
-        asyncio.ensure_future(self._refresh_accounts())
+        self._spawn(self._refresh_accounts(), "обновление списка аккаунтов")
 
     # ---- theme -----------------------------------------------------------------
 
@@ -1332,6 +1348,37 @@ class MainWindow(QMainWindow):
 
     # ---- account management -------------------------------------------------
 
+    def _spawn(self, coro, description: str):
+        """Start a background coroutine whose outcome is actually observed.
+
+        Every UI-triggered async operation goes through here instead of a
+        bare asyncio.ensure_future(). MainWindow is the right boundary to
+        observe them: it started them in response to a user action, and it
+        owns the widgets that have to reflect the result. A blanket
+        try/except inside each coroutine would instead hide real failures
+        (a delete silently not deleting, say) behind a UI that looks fine.
+        """
+        task = asyncio.ensure_future(coro)
+        self._background_tasks.add(task)
+        task.add_done_callback(lambda finished: self._on_background_task_done(finished, description))
+        return task
+
+    def _on_background_task_done(self, task, description: str) -> None:
+        self._background_tasks.discard(task)
+        if task.cancelled():
+            return
+        error = task.exception()
+        if error is None:
+            return
+        # Retrieving the exception here is what stops asyncio reporting it
+        # later as "Task exception was never retrieved".
+        self._logger.error("Фоновая операция «%s» завершилась ошибкой: %s", description, error)
+
+    def _cancel_background_tasks(self) -> None:
+        for task in list(self._background_tasks):
+            if not task.done():
+                task.cancel()
+
     def _can_switch_accounts(self) -> bool:
         return self._current_campaign is None or not self._current_campaign.is_active
 
@@ -1340,6 +1387,15 @@ class MainWindow(QMainWindow):
             self._service.account_manager.set_switch_guard(self._can_switch_accounts)
 
     async def _refresh_accounts(self, select_id: Optional[int] = None) -> None:
+        # Serialized against deletes/switches/demo transitions: this method
+        # calls check_status for every account, which builds and connects a
+        # Telethon client (and therefore opens its session file). Running
+        # that concurrently with a delete reopened the very session file
+        # the delete was about to remove.
+        async with self._account_lock:
+            await self._refresh_accounts_locked(select_id)
+
+    async def _refresh_accounts_locked(self, select_id: Optional[int] = None) -> None:
         self._ensure_switch_guard()
         account_manager = self._service.account_manager
         if account_manager is None:
@@ -1405,7 +1461,7 @@ class MainWindow(QMainWindow):
         dialog.account_ready.connect(lambda acc: result_holder.__setitem__("account", acc))
         if dialog.exec() == QDialog.DialogCode.Accepted:
             account = result_holder.get("account")
-            asyncio.ensure_future(self._refresh_accounts(select_id=account.id if account else None))
+            self._spawn(self._refresh_accounts(select_id=account.id if account else None), "обновление списка аккаунтов")
 
     def _on_account_selected(self, account_id: int) -> None:
         if self._account_switch_in_progress:
@@ -1415,7 +1471,7 @@ class MainWindow(QMainWindow):
         # _switch_account) must both see this guard, not just the second
         # one to actually start executing.
         self._account_switch_in_progress = True
-        asyncio.ensure_future(self._switch_account(account_id))
+        self._spawn(self._switch_account(account_id), "переключение аккаунта")
 
     async def _switch_account(self, account_id: int) -> None:
         """The single place app.telegram.account_manager's active-account
@@ -1467,17 +1523,30 @@ class MainWindow(QMainWindow):
             return
         if not confirm_delete_account(self, account.phone):
             return
-        asyncio.ensure_future(self._delete_account(account))
+        self._spawn(self._delete_account(account), "удаление аккаунта")
 
     async def _delete_account(self, account: Account) -> None:
         account_manager = self._service.account_manager
         if account_manager is None:
             return
-        await account_manager.delete_account(account)
+        async with self._account_lock:
+            try:
+                await account_manager.delete_account(account)
+            except AccountDeletionError as exc:
+                # The account could not be fully removed (most plausibly a
+                # session file still held open by Windows). Say so rather
+                # than leaving the user with a list that silently did not
+                # change, and keep the window usable.
+                self._logger.warning("Не удалось удалить аккаунт %s: %s", account.phone, exc)
+                show_error(
+                    self,
+                    tr("main_window.dialogs.delete_account_failed_title"),
+                    tr("main_window.dialogs.delete_account_failed"),
+                )
         await self._refresh_accounts()
 
     def _on_reconnect_requested(self, account_id: int) -> None:
-        asyncio.ensure_future(self._refresh_accounts(select_id=account_id))
+        self._spawn(self._refresh_accounts(select_id=account_id), "обновление списка аккаунтов")
 
     def _on_rename_account_requested(self, account_id: int) -> None:
         # Deliberately not gated by _can_switch_accounts() -- unlike
@@ -1500,7 +1569,7 @@ class MainWindow(QMainWindow):
         if not ok:
             return
         account_manager.rename_account(account, new_alias)
-        asyncio.ensure_future(self._refresh_accounts())
+        self._spawn(self._refresh_accounts(), "обновление списка аккаунтов")
 
     # ---- demo mode (ROADMAP v2.0) -----------------------------------------------
 
@@ -1511,19 +1580,45 @@ class MainWindow(QMainWindow):
         self._enter_demo_mode()
 
     def _enter_demo_mode(self) -> None:
-        self._service.enter_demo_mode()
-        self._demo_banner.setVisible(True)
-        asyncio.ensure_future(self._refresh_accounts())
-        self.statusBar().showMessage(tr("main_window.demo_banner.text"))
+        self._transition_demo_mode(enter=True)
 
     def _on_exit_demo_mode_clicked(self) -> None:
         if not self._can_switch_accounts():
             show_error(self, tr("main_window.dialogs.unavailable_title"), tr("main_window.dialogs.delete_account_unavailable"))
             return
-        self._service.exit_demo_mode()
-        self._demo_banner.setVisible(False)
-        asyncio.ensure_future(self._refresh_accounts())
-        self.statusBar().showMessage(tr("main_window.status.ready"))
+        self._transition_demo_mode(enter=False)
+
+    def _transition_demo_mode(self, *, enter: bool) -> None:
+        """Both demo-mode transitions.
+
+        The service-side swap itself is synchronous on purpose: it is pure
+        in-memory bookkeeping with no network call, and the banner and
+        is_demo_mode flag are what the next click is guarded against, so
+        deferring them would let a second click act on stale state.
+
+        Only the account refresh that follows is asynchronous, and it is
+        serialized behind _account_lock. A refresh already in flight when
+        the swap happens may still paint one stale list (it collected its
+        statuses from the previous client manager); the refresh queued
+        here runs after it and always reflects the mode actually in
+        effect, so the settled state is correct either way.
+        """
+        if enter == self._service.is_demo_mode:
+            return  # already in the requested mode
+        if enter:
+            self._service.enter_demo_mode()
+        else:
+            self._service.exit_demo_mode()
+        self._demo_banner.setVisible(enter)
+        # A half-finished switch belongs to the mode we just left.
+        self._account_switch_in_progress = False
+        self._spawn(
+            self._refresh_accounts(),
+            "вход в демо-режим" if enter else "выход из демо-режима",
+        )
+        self.statusBar().showMessage(
+            tr("main_window.demo_banner.text") if enter else tr("main_window.status.ready")
+        )
 
     def maybe_show_onboarding(self) -> None:
         """Shown once, the first time the app has no persisted
@@ -1620,10 +1715,11 @@ class MainWindow(QMainWindow):
         # one to actually start executing -- see _switch_account for the
         # same pattern applied to account switching.
         self._campaign_starting = True
-        asyncio.ensure_future(
+        self._spawn(
             self._start_campaign(
                 account, recipients, text, entities, attachments, rate_limiter, settings.retry_count, recipient_names
-            )
+            ),
+            "запуск рассылки",
         )
 
     async def _start_campaign(
@@ -1782,7 +1878,7 @@ class MainWindow(QMainWindow):
 
     def _on_stop_requested(self) -> None:
         if self._current_campaign is not None:
-            asyncio.ensure_future(self._current_campaign.stop())
+            self._spawn(self._current_campaign.stop(), "остановка рассылки")
 
     # ---- results page -----------------------------------------------------------
 
@@ -1914,10 +2010,11 @@ class MainWindow(QMainWindow):
             show_error(self, tr("main_window.dialogs.interval_title"), str(exc))
             return
         self._campaign_starting = True
-        asyncio.ensure_future(
+        self._spawn(
             self._start_campaign(
                 account, recipients, text, entities, attachments, rate_limiter, settings.retry_count, recipient_names
-            )
+            ),
+            "запуск рассылки",
         )
 
     def _on_save_report_clicked(self) -> None:
@@ -2185,7 +2282,7 @@ class MainWindow(QMainWindow):
         self._shutdown_in_progress = True
         if self._tray_icon is not None:
             self._tray_icon.hide()
-        asyncio.ensure_future(self._perform_shutdown())
+        self._spawn(self._perform_shutdown(), "завершение работы")
 
     def _save_window_state(self) -> None:
         settings = self._service.settings_repository.load_app_settings()
