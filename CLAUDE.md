@@ -57,9 +57,21 @@ described below.
     independent of the filter. Duration is frozen once at completion
     (`_last_campaign_duration_seconds`) since `CampaignControlsWidget.
     elapsed_seconds()` keeps counting up and can't be re-read later.
-  - `sidebar.py`, `recipient_widget.py`, `attachments_widget.py`,
-    `journal_widget.py`, `stat_card.py`, `empty_state.py` — page/widget
-    components.
+  - `sidebar.py`, `recipient_widget.py`, `journal_widget.py`,
+    `stat_card.py`, `empty_state.py` — page/widget components.
+  - `attachments_widget.py` — the attachment tile grid. `move_attachment(
+    from_index, to_index)` is the single canonical ordering operation:
+    `to_index` is the *final* index, which is what makes it
+    direction-independent; drag-and-drop, the Move earlier/later buttons
+    and Ctrl+Left/Right on a focused tile all route through it. (v2.0.0
+    used "insert immediately before the target tile" instead, which
+    matched the drop slot only for backward drags and left every forward
+    drag one slot short.) Decoded thumbnails and size/type metadata are
+    cached per path, because every reorder rebuilds all tiles and
+    re-decoding each image from disk cost ~208 ms per reorder for 12
+    photos; the metadata half of that cache is dropped on a language
+    switch since file sizes are localized. Tile contents are inset past
+    the tile border so its own selected/focus styling stays visible.
   - `account_widget.py` — one card per account (avatar, username, phone,
     connection status). (v1.8) A card's title prefers the user's own
     local alias (`Account.local_alias`, set via the card's rename
@@ -100,7 +112,17 @@ described below.
     connection) before removing the local session file/DB row -- one user
     action covers both "log out" and "remove local account/session";
     best-effort and never blocks local removal if the server call fails
-    (offline, already-invalid session).
+    (offline, already-invalid session). `ClientManager.remove()` also
+    closes the session's sqlite connection: constructing a TelegramClient
+    opens and locks its `.session` file on Windows, and that handle is
+    what makes deleting the file fail with WinError 32. Deletion retries a
+    locked file a bounded number of times and then raises
+    `AccountDeletionError` rather than silently leaving it behind.
+    `check_status` treats `sqlite3.OperationalError` ("database is
+    locked", raised by Telethon's own session file under contention) as a
+    connection problem, not as `needs_reauth` — it is a timing issue, and
+    reporting it as an authorization failure made valid accounts look
+    broken.
   - `sender.py`, `media_sender.py` — message/media sending, album batching,
     caption-vs-leading-message logic. `media_sender.AttachmentKind`
     (PHOTO/VIDEO/ANIMATION/IMAGE_OTHER/AUDIO/ARCHIVE/DOCUMENT) is the single
@@ -118,7 +140,16 @@ described below.
   - `template.py` — `{name}` placeholder expansion; works in UTF-16
     surrogate-pair space so formatting-entity offsets stay correct.
   - `service.py`, `qt_bridge.py` — glue between the Telethon client and the
-    Qt/qasync event loop.
+    Qt/qasync event loop. Demo Mode (`enter_demo_mode`/`exit_demo_mode`)
+    sets the real ClientManager/AccountManager aside and restores the
+    *same objects* on exit, rather than rebuilding them: rebuilding
+    orphaned every live TelegramClient, leaving its session file open
+    while a new manager opened a second sqlite connection to the same
+    file. `purge_demo_accounts()` removes the demo account row on exit and
+    again at startup, since v2.0.0 persisted it into the real accounts
+    table and never cleaned it up.
+  - `demo_client.py` — the simulated backend Demo Mode runs against
+    (see ROADMAP v2.0).
   - `exceptions.py` — Telegram-error taxonomy used by the campaign layer.
 - `app/campaign/` — send orchestration:
   - `campaign_manager.py`, `send_queue.py`, `campaign_state.py` — the send
@@ -205,6 +236,22 @@ if that number changes, know exactly why before saying the change is done.
 Long-running work (network calls, FloodWait waits) must be async/background,
 following the existing patterns in `app/telegram/qt_bridge.py` and
 `app/campaign/campaign_manager.py`.
+
+**Background tasks.** Never start one with a bare
+`asyncio.ensure_future(...)`. In `MainWindow` use `self._spawn(coro,
+description)`, which holds a reference to the task (asyncio may drop one
+nothing keeps alive) and observes its result, so a failure is logged
+instead of surfacing as "Task exception was never retrieved" at
+collection time. Anything else that owns a task observes it itself, the
+way `CampaignManager.start()` does. Observing is not the same as
+swallowing: do not wrap a coroutine body in a blanket `except Exception:
+pass`, which hides a real failure behind a UI that looks fine.
+
+**Account operations.** Refresh, switch, delete and the Demo Mode
+transitions all run under `MainWindow._account_lock`. They share client
+instances and session files, and interleaving them is what let a status
+refresh rebuild a Telethon client — reopening its session file — in the
+middle of a delete, making the delete fail with WinError 32.
 
 **Telegram.** Do not add anti-ban bypasses, flood-limit bypasses, spam
 mechanics, or ways to work around Telegram restrictions. Handle

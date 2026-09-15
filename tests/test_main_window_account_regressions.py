@@ -294,3 +294,29 @@ async def test_demo_mode_leaves_stored_credentials_untouched_through_the_window(
     after = window._service.secure_storage.load_api_credentials()
     assert before is not None and after is not None
     assert (after.api_id, after.api_hash) == (before.api_id, before.api_hash)
+
+
+@pytest.mark.asyncio
+async def test_shutdown_cancels_in_flight_background_work(qapp, tmp_path):
+    # An account refresh still running when the database closes would keep
+    # using it underneath the shutdown. Shutdown cancels and awaits the
+    # others first -- and must not cancel the shutdown task itself, which
+    # is started through the same _spawn().
+    window = _make_window(tmp_path)
+    await _drain(window)
+
+    started = asyncio.Event()
+
+    async def long_refresh():
+        started.set()
+        await asyncio.sleep(3600)
+
+    victim = window._spawn(long_refresh(), "долгое обновление")
+    await started.wait()
+
+    shutdown = window._spawn(window._perform_shutdown(), "завершение работы")
+    await asyncio.gather(shutdown, return_exceptions=True)
+
+    assert victim.cancelled() is True
+    assert shutdown.cancelled() is False
+    assert shutdown.exception() is None

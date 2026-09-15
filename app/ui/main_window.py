@@ -1374,10 +1374,21 @@ class MainWindow(QMainWindow):
         # later as "Task exception was never retrieved".
         self._logger.error("Фоновая операция «%s» завершилась ошибкой: %s", description, error)
 
-    def _cancel_background_tasks(self) -> None:
-        for task in list(self._background_tasks):
-            if not task.done():
-                task.cancel()
+    async def _cancel_background_tasks(self) -> None:
+        """Cancel and await every background task except the caller's own.
+
+        Called during shutdown: an account refresh still in flight would
+        otherwise keep using the database and client manager after
+        _perform_shutdown has closed them. Awaiting the cancellations
+        (rather than just requesting them) is what guarantees none of them
+        is still mid-statement when the database closes.
+        """
+        current = asyncio.current_task()
+        pending = [t for t in self._background_tasks if t is not current and not t.done()]
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
 
     def _can_switch_accounts(self) -> bool:
         return self._current_campaign is None or not self._current_campaign.is_active
@@ -2304,6 +2315,8 @@ class MainWindow(QMainWindow):
             self._save_window_state()
             if self._current_campaign is not None and self._current_campaign.is_active:
                 await self._current_campaign.stop()
+            # Before the database and clients go away underneath them.
+            await self._cancel_background_tasks()
             await self._service.shutdown()
         finally:
             self._database.close()

@@ -22,6 +22,7 @@ class FakeClientManager:
         # implementation's best-effort/never-blocks-removal behavior.
         self.raise_on_log_out: Dict[str, BaseException] = {}
         self.log_out_failures: List[str] = []
+        self.disconnect_all_called = False
 
     async def connect(self, session_name: str) -> None:
         return None
@@ -41,6 +42,13 @@ class FakeClientManager:
 
     def remove(self, session_name: str) -> None:
         self.removed.append(session_name)
+
+    async def disconnect_all(self) -> None:
+        # Part of the real ClientManager's surface (TelegramService.shutdown
+        # calls it). Its absence here meant any test driving a real shutdown
+        # through this fake failed on an AttributeError instead of
+        # exercising the shutdown path.
+        self.disconnect_all_called = True
 
     def get_active_client(self, session_name: str):
         # This fake never models real TelegramClient instances (only

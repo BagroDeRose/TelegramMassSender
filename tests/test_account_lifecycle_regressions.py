@@ -421,3 +421,21 @@ async def test_a_genuine_authorization_failure_is_still_reported_as_needs_reauth
 
     assert status.needs_reauth is True
     assert status.connection_error is False
+
+
+# ---- application database contention ----------------------------------------
+
+
+def test_the_application_database_waits_for_a_competing_writer(tmp_path):
+    # Nothing stops a user launching a second copy of the app, and both
+    # would write this same file from separate connections. Without a
+    # busy timeout the second one fails immediately with
+    # "database is locked" instead of waiting out a brief overlap.
+    from app.database.database import BUSY_TIMEOUT_MS
+
+    database = Database(db_path=tmp_path / "app.db")
+    connection = database.connect()
+    configured = connection.execute("PRAGMA busy_timeout").fetchone()[0]
+    assert configured == BUSY_TIMEOUT_MS
+    assert BUSY_TIMEOUT_MS > 0
+    database.close()

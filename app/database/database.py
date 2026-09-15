@@ -14,6 +14,9 @@ from typing import Iterator, Optional
 
 from app.config.paths import get_database_path
 
+# How long a statement waits for a competing writer before giving up.
+BUSY_TIMEOUT_MS = 5000
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS accounts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -92,6 +95,15 @@ class Database:
             self._connection = sqlite3.connect(str(self._path), check_same_thread=False)
             self._connection.row_factory = sqlite3.Row
             self._connection.execute("PRAGMA foreign_keys = ON")
+            # One process normally holds a single connection here, so this
+            # is not about internal contention. Nothing stops the user
+            # launching a second copy of the app, though, and both would
+            # then write this same file from separate connections. A
+            # bounded wait (SQLite's own retry-with-backoff) lets a brief
+            # overlap resolve itself instead of surfacing as an immediate
+            # "database is locked"; it is a wait, not an infinite loop --
+            # a genuinely stuck lock still raises after this deadline.
+            self._connection.execute(f"PRAGMA busy_timeout = {BUSY_TIMEOUT_MS}")
             self._connection.executescript(SCHEMA)
             self._connection.commit()
             self._migrate()

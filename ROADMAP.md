@@ -162,21 +162,42 @@ Still deferred.
       given tile) landed the dragged item *after* that tile for a forward
       drag but *before* it for a backward drag -- confirmed and quantified
       by replaying every (source, target) pair over a 4-item list, all 12
-      of which showed this exact asymmetry. Fixed by re-locating the drop
-      target by stable path identity *after* the source is removed, so
-      "drop on tile X" now always means "insert immediately before X,"
-      regardless of drag direction; a drop past the last tile (an invalid
-      `indexAt()` hit) is a distinct "true append" case handled via its
-      own sentinel. Regression tests now exercise this through a real
-      `QDropEvent` dispatched into `_ReorderableListWidget.dropEvent()`
-      itself (not just the handler called directly), and assert the
-      direction-independence invariant explicitly
-      (`tests/test_attachments_widget.py`). Real OS-level mouse-drag
+      of which showed this exact asymmetry. That was changed to "drop on
+      tile X means insert immediately before X" and shipped in v2.0.0.
+      **Second correction (after v2.0.0, from further real use):** that
+      fix was itself wrong, and reordering was still unreliable. "Insert
+      immediately before the target" coincides with the slot the user
+      actually dropped on only for *backward* drags; every forward drag
+      landed exactly one slot short (re-measured on a 5-item list:
+      dropping row 0 onto slot 2 put the item at index 1, onto slot 4 at
+      index 3). The regression test above passed throughout because it
+      asserted the wrong invariant -- "ends up before the target" rather
+      than "ends up on the slot it was dropped on" -- which is the more
+      useful lesson here than the off-by-one itself. Ordering now goes
+      through one canonical `AttachmentsWidget.move_attachment(from, to)`
+      where `to` is the *final* index, making it direction-independent by
+      construction, and drag-and-drop, the Move earlier/later buttons and
+      Ctrl+Left/Right all route through it. Real OS-level mouse-drag
       injection still cannot be exercised by this project's automated/
-      sandboxed environments -- verified instead via real Qt rendering
-      (`QWidget.grab()`) of an actual drop event's before/after tile
-      layout, cross-checked against `get_attachments()`'s send order to
-      confirm the two never diverge.
+      sandboxed environments; the drop path is covered by a real
+      `QDropEvent` dispatched into `_ReorderableListWidget.dropEvent()`,
+      and the button/keyboard paths by real clicks and real `QKeyEvent`s.
+- [x] Reorder attachments without drag-and-drop — added after v2.0.0,
+      because a drag depends on landing the cursor precisely on the
+      intended tile and is a poor fit for the one thing the user most
+      needs to get exactly right. Selecting a tile and pressing Move
+      earlier / Move later (or Ctrl+Left / Ctrl+Right on a focused tile)
+      moves it one position at a time; the buttons disable at the
+      boundaries and unless exactly one tile is selected, and the moved
+      tile keeps selection and focus so repeated presses keep acting on
+      it. Plain arrow keys deliberately still only move focus.
+- [x] Keep reordering responsive — each reorder rebuilds the tile grid,
+      which re-decoded every image thumbnail from disk: measured at 12
+      disk decodes and ~208 ms of blocked UI for one reorder of 12
+      photos, which is what made dragging feel laggy and choppy (there is
+      no animation involved anywhere, and hovering repaints nothing).
+      Thumbnails and size/type metadata are now cached per path, taking
+      the same reorder to ~11.9 ms with zero disk decodes.
 - [x] Remove attachments individually
 - [x] Clear attachment queue
 - [x] Improve attachment preview — every tile (including images, which
@@ -745,7 +766,22 @@ previously-untested module).
       session still lets the account be removed from the app
 - [x] Remove local account/session — same action as "Log out" above (one
       user action, the account card's delete button); already implemented
-      before this stage, now paired with a real server-side logout too
+      before this stage, now paired with a real server-side logout too.
+      **Correction (after v2.0.0):** this failed in real use with
+      `PermissionError [WinError 32]` on the session file, reaching the
+      terminal only as an unobserved "Task exception was never
+      retrieved". Constructing a `TelegramClient` opens and locks its
+      `.session` file on Windows (reproduced directly: `unlink()` right
+      after construction raises, and succeeds after `session.close()`),
+      and `check_status` builds and connects a client for *every* account,
+      so an account refresh running partway through a delete reopened the
+      very file the delete was about to remove. Account operations
+      (refresh/switch/delete/demo transitions) now run one at a time under
+      a single lock, `ClientManager.remove()` closes the session rather
+      than just dropping the client, and a still-locked file gets a short
+      bounded retry before being reported as `AccountDeletionError` and
+      shown to the user -- never an unbounded loop, and never silently
+      ignored
 - [x] Confirm destructive actions — `confirm_delete_account` dialog before
       any delete, already implemented before this stage
 - [x] Never persist 2FA password — `login_dialog.py` discards the entered
@@ -894,6 +930,29 @@ previously-untested module).
       the entire app shell, with its own "Выйти из демо-режима"/"Exit
       Demo Mode" button; visually verified in both themes
       (`window.grab()`)
+- [x] Leave Demo Mode cleanly and get the real app back —
+      **added after v2.0.0, where this was broken.** As shipped,
+      `enter_demo_mode()` persisted the demo account "+10000000000" into
+      the *real* accounts table and `exit_demo_mode()` never removed it,
+      so the fake account survived into real mode and the next refresh
+      built a genuine Telethon client for it and tried to connect. Both
+      transitions also replaced `_client_manager` outright and rebuilt a
+      fresh one on exit, orphaning every live client: their session files
+      stayed open while the new manager opened a second sqlite connection
+      to the same file (the "database is locked" warnings), and with no
+      stored API credentials the rebuild produced no account manager at
+      all, leaving the account list empty and unswitchable. The real
+      managers are now set aside and restored as the *same objects*, the
+      demo row is removed on exit and purged at startup (covering rows
+      left behind by v2.0.0 or by a crash), and re-entering is
+      idempotent. Verified against unmodified v2.0.0 with an integration
+      harness driving the real window, where it fails with
+      `AttributeError: 'NoneType' object has no attribute
+      'switch_active_account'`
+- [x] Never contaminate real credentials or accounts — `enter_demo_mode()`
+      still never reads or writes `SecureStorage`, and tests assert the
+      stored credentials are byte-identical across a demo round trip and
+      that real account rows and their session names survive untouched
 
 ## Onboarding
 
@@ -1024,8 +1083,45 @@ Do NOT turn TelegramMassSender into:
 
 # Known Issues
 
-None currently open. One issue was flagged, investigated, and retracted
-during this stage after finding its actual cause:
+## Found in the shipped v2.0.0 build, fixed after release
+
+Real manual use of v2.0.0 surfaced four defects that the pre-release
+verification had missed. All are fixed and covered by regression tests;
+they are recorded here because *how* they got through matters more than
+the individual bugs.
+
+- **Attachment reordering was still direction-dependent.** v2.0.0's fix
+  replaced one wrong rule with another, and its test asserted the wrong
+  invariant, so the suite stayed green. See the Attachment UX section.
+- **Attachment interaction felt laggy.** Not an animation -- every
+  reorder re-decoded all thumbnails from disk (~208 ms for 12 photos).
+- **Demo Mode contaminated real state and broke account switching.** It
+  wrote a fake account into the real accounts table and never removed it,
+  and both transitions discarded the real client manager instead of
+  restoring it, orphaning live Telethon clients with their session files
+  still open. That is where the "database is locked" status-check
+  warnings came from; `check_status` then misreported them as
+  "needs re-authorization", making valid accounts look broken.
+- **Deleting an account could fail with WinError 32 and vanish into an
+  unobserved task.** Constructing a `TelegramClient` opens and locks its
+  `.session` file on Windows, so a status refresh running concurrently
+  reopened the file the delete was about to remove. Nothing observed the
+  resulting `PermissionError`, so it reached the terminal only as
+  "Task exception was never retrieved" -- all seventeen
+  `asyncio.ensure_future()` call sites were fire-and-forget.
+
+The common thread: the v2.0.0 verification leaned on unit tests that
+asserted the implementation's own behaviour rather than the user-visible
+outcome, and never ran the assembled application through a real
+scenario. The post-release pass added an integration harness that drives
+the real window through demo transitions, account switching and
+deletion, and it reproduces every one of these against unmodified
+v2.0.0.
+
+## Previously retracted
+
+One issue was flagged, investigated, and retracted during the v2.0.0
+stage after finding its actual cause:
 
 - **Retracted: Accounts page "+ Add account" button partial-text
   glitch.** Originally flagged as a possible real, pre-existing

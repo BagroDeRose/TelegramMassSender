@@ -26,7 +26,7 @@ It supports multiple Telegram accounts, rich text formatting, media/album attach
 - Rich text editor (bold/italic/underline/strikethrough/spoiler/monospace/code block/links/emoji) with a live Telegram-style message preview, including a personalization preview against an example name.
 - Named message presets (text, formatting, attachments, optionally the sending interval) and named local recipient groups — save and reload a recipient list or a message template by name.
 - An optional step-by-step Campaign Wizard (Recipients → Message → Attachments → Sending options → Preview → Confirmation) alongside the existing fast single-page workflow.
-- Photo, video, and document attachments, with automatic album batching, image thumbnails, and drag-to-reorder.
+- Photo, video, and document attachments, with automatic album batching, image thumbnails, and reordering by drag or by explicit Move earlier/Move later controls (also Ctrl+←/Ctrl+→).
 - Multiple Telegram accounts with persistent sessions and live switching.
 - Configurable randomized send interval with FloodWait-aware pausing (Telegram's own rate limits are respected, never bypassed), a pre-start duration estimate, and a live elapsed/remaining-time display while a campaign runs.
 - Retry failed recipients (selected or all) after a campaign finishes, without resending anyone who already succeeded.
@@ -48,6 +48,10 @@ It supports multiple Telegram accounts, rich text formatting, media/album attach
 | Results & Journal | Demo Mode |
 |---|---|
 | ![Results and Journal](docs/images/journal.png) | ![Demo Mode](docs/images/demo-mode.png) |
+
+Attachments are sent in the order shown, and that order can be changed by dragging a tile onto the slot it should occupy or with the explicit Move earlier / Move later controls (Ctrl+← / Ctrl+→ from the keyboard):
+
+![Attachment ordering](docs/images/attachment-ordering.png)
 
 *All screenshots use synthetic demo data — no real Telegram accounts, recipients, or personal information.*
 
@@ -104,7 +108,7 @@ A few parts of this project involved real engineering problems, not just wiring 
 10. **One start path, three entry points.** The fast single-page workflow, the optional step-by-step Campaign Wizard, and failed-recipient Retry all funnel into the exact same validation/start method rather than each reimplementing it — a wizard or a retry can only ever start a campaign the same way the main "Start" button already does, so a fix or a safety check applied once covers all three.
 11. **Content-based CSV column detection.** CSV recipient import has no header-parsing or manual column-mapping step: each cell is tried against the same recipient-format recognizer the plain paste box already uses, so the first cell that looks like a username/ID/phone becomes that row's recipient regardless of column order, and another non-matching cell becomes that row's `{name}` value.
 12. **Automated regression testing** against a hand-built mock Telegram client, including reproduce-first regression tests for the bugs above.
-13. **A direction-dependent drag-reorder bug.** Attachment reordering looked fine in isolated tests but felt unreliable in practice: the same gesture — dropping one tile directly onto another — landed the dragged item *after* the target for a forward drag but *before* it for a backward drag, because the drop handler reused a stale, pre-drop row index as a raw insertion index. Reproduced and quantified by replaying every (source, target) pair over a small list (all of them showed the asymmetry), then fixed by re-locating the target by stable identity after the source is removed, making "drop on tile X" mean the same thing regardless of drag direction.
+13. **A direction-dependent drag-reorder bug — and a fix that did not actually fix it.** Attachment reordering felt unreliable in practice. The first attempt changed the rule to "insert immediately before the target tile" and was shipped in v2.0.0 as fixed; real use afterwards showed it still was not. Replaying every (source, target) pair over a small list showed why: that rule coincides with the slot the user dropped on only for backward drags, so every forward drag landed exactly one slot short (dropping row 0 onto slot 2 put the item at index 1). The lesson was that the test asserted the wrong invariant — "ends up before the target" rather than "ends up on the slot it was dropped on" — so it passed while the bug was still there. Ordering now goes through a single `move_attachment(from, to)` that treats the target as the *final index*, which is direction-independent by construction, and the same operation backs drag-and-drop, the Move earlier/later buttons and the Ctrl+Arrow shortcuts.
 14. **Demo Mode as a genuine duck-typed backend, not a mocked UI state.** `DemoTelegramClient` implements the same surface a real Telethon client does (entity resolution, message/album sending) with realistic random outcomes and zero network access — the real, unmodified `CampaignManager` runs an actual campaign against it, so Demo Mode exercises the same send/retry/results pipeline production traffic does, not a separate hand-faked code path.
 
 Ordinary parts — not oversold: the settings page is a straightforward form bound to a dataclass, SQLite access is plain parameterized `sqlite3`, and the CSV export itself is a standard `csv.writer`. None of that is architecturally novel; the value is in the items above.
@@ -215,7 +219,7 @@ Latest release: **[v2.0.0](https://github.com/BagroDeRose/TelegramMassSender/rel
 - Форматирование текста (жирный, курсив, подчёркнутый, зачёркнутый, спойлер, моноширинный текст, блок кода, ссылки, emoji) в отдельном редакторе сообщений, с живым предпросмотром сообщения в стиле Telegram прямо на странице «Кампания», включая предпросмотр с примером имени для `{name}`.
 - Именные шаблоны сообщений (текст, форматирование, вложения и, при желании, интервал отправки) и именные группы получателей — можно сохранить и позже загрузить список получателей или текст сообщения по названию.
 - Необязательный пошаговый «Мастер кампании» (Получатели → Сообщение → Вложения → Параметры отправки → Предпросмотр → Подтверждение) как альтернатива обычной работе на одной странице — быстрый способ остаётся без изменений.
-- Фото, видео и документы вложением, с автоматической группировкой фото/видео в альбомы, миниатюрами изображений и изменением порядка вложений перетаскиванием.
+- Фото, видео и документы вложением, с автоматической группировкой фото/видео в альбомы, миниатюрами изображений и изменением порядка вложений — перетаскиванием либо кнопками «Раньше»/«Позже» (а также Ctrl+←/Ctrl+→).
 - Несколько подключённых Telegram-аккаунтов с быстрым переключением между ними.
 - Настраиваемый случайный интервал между отправками, корректная и безопасная обработка временных ограничений Telegram (FloodWait) без попыток их обойти, приблизительная оценка длительности рассылки до старта и живой счётчик прошедшего/оставшегося времени во время неё.
 - Повторная отправка неудачным получателям (выбранным или всем сразу) после завершения рассылки — без повторной отправки тем, кому сообщение уже доставлено.
@@ -532,6 +536,13 @@ https://t.me/user3
 Каждое добавленное изображение показывается в списке вложений маленькой миниатюрой (с сохранением пропорций) — видно, что именно прикреплено, до отправки. Файлы, для которых миниатюру показать нельзя (видео, документы), отображаются обычной иконкой файла с именем и размером.
 
 Если добавлено сразу несколько фото/видео подряд — Telegram сгруппирует их в единый альбом (до 10 файлов в одном альбоме; если файлов больше, программа сама разобьёт их на несколько альбомов). Обычные документы всегда отправляются отдельными сообщениями. Кнопки **«Удалить выбранное»** и **«Очистить»** убирают выбранные или сразу все вложения из списка.
+
+**Порядок вложений.** Файлы отправляются ровно в том порядке, в котором они показаны в карточке «Вложения» (об этом напоминает подпись под списком). Изменить порядок можно двумя способами:
+
+- **Кнопками.** Выделите одно вложение и нажимайте **«Раньше»** или **«Позже»** — вложение сдвигается на одну позицию за нажатие. Кнопки выключаются на краях списка (первое вложение нельзя сдвинуть раньше, последнее — позже) и когда не выделено ровно одно вложение. Это самый предсказуемый способ: он не зависит от точности попадания мышью.
+- **Перетаскиванием.** Перетащите плитку на ту позицию, которую она должна занять — вложение встанет именно на неё, независимо от того, тянули вы вправо или влево.
+
+С клавиатуры: перейдите на плитку клавишей Tab и нажимайте **Ctrl+←** или **Ctrl+→**. Обычные стрелки без Ctrl только перемещают фокус между плитками и порядок не меняют.
 
 **Пример подготовки сообщения:** в поле сообщения написан текст «Добрый день! Высылаю презентацию, ознакомьтесь, пожалуйста.», в карточке «Вложения» добавлен файл `presentation.pptx` — при отправке получатель увидит текст и файл вместе (если текст короткий) либо текст отдельным сообщением, а сразу за ним — файл (если текст слишком длинный для подписи к файлу — программа сама разделит их на два сообщения, но текст никогда не потеряется).
 
