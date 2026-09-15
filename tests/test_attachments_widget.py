@@ -360,29 +360,26 @@ def test_initial_order_matches_add_order_before_any_reorder(qapp, tmp_path):
 
 
 def test_moving_first_item_to_end(qapp, tmp_path):
-    # target_row == the pre-drop item count (here 3) is
-    # _ReorderableListWidget.dropEvent's sentinel for "dropped past every
-    # tile" -- move to the very end. target_row == 2 (the last tile's own
-    # *row*) means something different: "insert immediately before that
-    # tile" -- see test_moving_item_onto_the_last_tile_inserts_before_it.
+    # The reorder signal now always carries a real destination index, so
+    # "move to the very end" is simply the last slot. dropEvent resolves a
+    # drop in the grid's trailing empty space to that same last slot (see
+    # test_real_drop_event_past_the_last_tile_appends_at_the_end), rather
+    # than to a separate one-past-the-end sentinel.
     widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf"])
-    widget._on_tile_reorder_requested(0, 3)
+    widget._on_tile_reorder_requested(0, 2)
     assert [a.path for a in widget.get_attachments()] == [paths[1], paths[2], paths[0]]
 
 
-def test_moving_item_onto_the_last_tile_inserts_before_it(qapp, tmp_path):
-    # Regression test for the drag-and-drop reordering bug: dropping
-    # directly on a target tile must always mean "insert immediately
-    # before that tile," regardless of which direction the drag came
-    # from. Before the fix, target_row was reused as a raw list index
-    # straight from the pre-drop (source-still-present) list, so a
-    # forward drag (like this one) landed *after* the target while the
-    # identical drop gesture from the other direction landed *before* it
-    # -- the same physical action meaning two different things depending
-    # on drag direction, which is what made reordering feel unreliable.
+def test_dropping_on_a_tile_puts_the_dragged_item_in_that_tiles_slot(qapp, tmp_path):
+    # Post-v2.0.0 regression test. The previous rule was "insert
+    # immediately before the target tile", which agreed with the drop slot
+    # only for backward drags: dragging row 0 onto slot 2 landed the item
+    # at index 1, one short of where it was dropped, every time. Dropping
+    # on a tile now means "take that tile's slot" in both directions.
     widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf"])
     widget._on_tile_reorder_requested(0, 2)  # drop "a" directly on "c" (row 2)
-    assert [a.path for a in widget.get_attachments()] == [paths[1], paths[0], paths[2]]
+    assert [a.path for a in widget.get_attachments()] == [paths[1], paths[2], paths[0]]
+    assert [a.path for a in widget.get_attachments()].index(paths[0]) == 2
 
 
 def test_dropping_on_the_same_tile_from_either_direction_lands_in_the_same_place(qapp, tmp_path):
@@ -394,17 +391,21 @@ def test_dropping_on_the_same_tile_from_either_direction_lands_in_the_same_place
     # place the dragged item in the same relative position (immediately
     # before "c").
     forward_widget, forward_paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf", "d.pdf"])
-    forward_widget._on_tile_reorder_requested(0, 2)  # drag "a" (row 0) onto "c" (row 2)
+    forward_widget._on_tile_reorder_requested(0, 2)  # drag "a" (row 0) onto slot 2
     forward_result = [p.name for p in [a.path for a in forward_widget.get_attachments()]]
 
     backward_widget, backward_paths = _make_widget_with_files(tmp_path, ["x.pdf", "y.pdf", "c2.pdf", "z.pdf"])
-    backward_widget._on_tile_reorder_requested(3, 2)  # drag "z" (row 3) onto "c2" (row 2)
+    backward_widget._on_tile_reorder_requested(3, 2)  # drag "z" (row 3) onto slot 2
     backward_result = [p.name for p in [a.path for a in backward_widget.get_attachments()]]
 
-    # In both cases the dragged item must end up immediately before "c" --
-    # i.e. as the second-to-last of four items, directly preceding the
-    # target it was dropped on.
-    assert forward_result == ["b.pdf", "a.pdf", "c.pdf", "d.pdf"]
+    # Direction-independence, stated as the drop slot rather than as a
+    # position relative to the target: a tile dropped on slot 2 ends up at
+    # index 2 whichever way it travelled. Asserting "immediately before the
+    # target" instead is what hid the forward-drag off-by-one, because
+    # "before the target" and "the target's slot" coincide only backwards.
+    assert forward_result.index("a.pdf") == 2
+    assert backward_result.index("z.pdf") == 2
+    assert forward_result == ["b.pdf", "c.pdf", "a.pdf", "d.pdf"]
     assert backward_result == ["x.pdf", "y.pdf", "z.pdf", "c2.pdf"]
 
 
@@ -450,10 +451,10 @@ def test_real_drop_event_on_a_specific_tile_reorders_via_the_actual_event_path(q
     qapp.processEvents()
 
     assert event.isAccepted()
-    # "a" dropped directly on "c" -> lands immediately before "c", the
-    # same direction-independent rule proven by the handler-level tests
-    # above -- this time reached through the real event path.
-    assert [a.path for a in widget.get_attachments()] == [paths[1], paths[0], paths[2], paths[3]]
+    # "a" dropped on slot 2 takes slot 2 -- the same direction-independent
+    # rule proven by the handler-level tests above, this time reached
+    # through the real event path.
+    assert [a.path for a in widget.get_attachments()] == [paths[1], paths[2], paths[0], paths[3]]
 
 
 def test_real_drop_event_past_the_last_tile_appends_at_the_end(qapp, tmp_path):
@@ -500,17 +501,16 @@ def test_moving_last_item_to_beginning(qapp, tmp_path):
 
 
 def test_moving_item_to_the_middle(qapp, tmp_path):
-    # Drop "a" directly on "c" (row 2 of [a, b, c, d]) -> "a" lands
-    # immediately before "c": [b, a, c, d].
+    # Drop "a" on slot 2 of [a, b, c, d] -> "a" occupies slot 2: [b, c, a, d].
     widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf", "d.pdf"])
     widget._on_tile_reorder_requested(0, 2)
-    assert [a.path for a in widget.get_attachments()] == [paths[1], paths[0], paths[2], paths[3]]
+    assert [a.path for a in widget.get_attachments()] == [paths[1], paths[2], paths[0], paths[3]]
 
 
 def test_multiple_reorders_compose_to_the_correct_final_order(qapp, tmp_path):
     widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf", "d.pdf"])
     # a b c d
-    widget._on_tile_reorder_requested(0, 4)  # target_row 4 == count -> true append -> b c d a
+    widget._on_tile_reorder_requested(0, 3)  # last slot -> b c d a
     widget._on_tile_reorder_requested(1, 0)  # -> c b d a
     widget._on_tile_reorder_requested(3, 1)  # -> c a b d
     expected = [paths[2], paths[0], paths[1], paths[3]]
@@ -521,7 +521,7 @@ def test_reorder_via_actual_qt_signal_not_just_direct_handler_call(qapp, tmp_pat
     # Proves the wiring itself (connect() in __init__), not just that the
     # handler function works when called directly.
     widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf"])
-    widget._list.tile_reorder_requested.emit(0, 3)  # sentinel -> true append
+    widget._list.tile_reorder_requested.emit(0, 2)  # last slot
     assert [a.path for a in widget.get_attachments()] == [paths[1], paths[2], paths[0]]
 
 
@@ -551,7 +551,7 @@ def test_reorder_with_out_of_range_rows_is_ignored_not_corrupting_order(qapp, tm
 
 def test_remove_after_reorder_removes_the_correct_file(qapp, tmp_path):
     widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf"])
-    widget._on_tile_reorder_requested(0, 3)  # sentinel -> true append -> b c a
+    widget._on_tile_reorder_requested(0, 2)  # drop on the last slot -> b c a
     # Displayed order is now [b, c, a]; removing row 1 must remove c.
     item = widget._list.item(1)
     widget._remove_item(item)
@@ -560,7 +560,7 @@ def test_remove_after_reorder_removes_the_correct_file(qapp, tmp_path):
 
 def test_add_after_reorder_appends_without_corrupting_existing_order(qapp, tmp_path):
     widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf"])
-    widget._on_tile_reorder_requested(0, 3)  # sentinel -> true append -> b c a
+    widget._on_tile_reorder_requested(0, 2)  # drop on the last slot -> b c a
     new_path = tmp_path / "d.pdf"
     new_path.write_bytes(b"x")
     widget.add_file(new_path)
@@ -581,7 +581,7 @@ def test_clear_after_reorder_leaves_widget_empty(qapp, tmp_path):
 
 def test_missing_file_validation_after_reorder_reports_correct_paths(qapp, tmp_path):
     widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf"])
-    widget._on_tile_reorder_requested(0, 3)  # sentinel -> true append -> b c a
+    widget._on_tile_reorder_requested(0, 2)  # drop on the last slot -> b c a
     paths[0].unlink()  # "a.pdf" -- now at the end of the displayed order
 
     assert widget.missing_files() == [paths[0]]
@@ -589,7 +589,7 @@ def test_missing_file_validation_after_reorder_reports_correct_paths(qapp, tmp_p
 
 def test_theme_apply_after_reorder_does_not_raise_and_keeps_correct_icons(qapp, tmp_path):
     widget, paths = _make_widget_with_files(tmp_path, ["clip.mp4", "song.mp3", "c.pdf"])
-    widget._on_tile_reorder_requested(0, 3)  # sentinel -> true append -> song.mp3, c.pdf, clip.mp4
+    widget._on_tile_reorder_requested(0, 2)  # last slot -> song.mp3, c.pdf, clip.mp4
 
     widget.apply_theme()  # must not raise, and must re-tint the rebuilt tiles
 
@@ -611,7 +611,7 @@ def test_send_plan_consumes_attachments_in_the_reordered_display_order(qapp, tmp
     from app.telegram.media_sender import build_media_send_plan
 
     widget, paths = _make_widget_with_files(tmp_path, ["a.jpg", "b.pdf", "c.jpg"])
-    widget._on_tile_reorder_requested(0, 3)  # sentinel -> true append -> b.pdf, c.jpg, a.jpg
+    widget._on_tile_reorder_requested(0, 2)  # last slot -> b.pdf, c.jpg, a.jpg
 
     plan = build_media_send_plan(widget.get_attachments(), "caption", [])
 
@@ -856,7 +856,7 @@ def test_selection_survives_reorder(qapp, tmp_path):
     widget, paths = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf"])
     widget._list.item(0).setSelected(True)  # select "a.pdf"
 
-    widget._on_tile_reorder_requested(0, 3)  # sentinel -> true append -> b, c, a
+    widget._on_tile_reorder_requested(0, 2)  # last slot -> b, c, a
 
     # "a.pdf" is now the last tile (index 2) and must still be selected.
     new_order = [a.path for a in widget.get_attachments()]
@@ -1053,7 +1053,11 @@ def test_tile_has_a_real_focus_policy(qapp, tmp_path):
 def test_tile_has_an_accessible_name_and_description(qapp, tmp_path):
     widget, paths = _make_widget_with_files(tmp_path, ["report.pdf"])
     tile = _tile_widget(widget, 0)
-    assert tile.accessibleName() == "report.pdf"
+    # The name carries the send position as well as the filename, since
+    # ordering is a first-class feature and a screen-reader user has no
+    # other way to tell where in the order a tile sits.
+    assert "report.pdf" in tile.accessibleName()
+    assert "1" in tile.accessibleName()
     assert tile.accessibleDescription()  # non-empty; exact text covered by _meta_text tests
 
 
@@ -1125,3 +1129,360 @@ def test_theme_qss_defines_a_focus_ring_for_the_tile(qapp):
     for theme_name in (theme.THEME_DARK, theme.THEME_LIGHT):
         css = theme.stylesheet_for(theme_name)
         assert 'QWidget#attachmentTile[focused="true"]' in css
+
+
+# ---- explicit ordering controls (post-v2.0.0) -------------------------------
+#
+# Drag-and-drop still exists, but it requires landing the cursor precisely
+# on the intended tile. These cover the deterministic path: select a tile
+# and move it one position at a time, by button or by keyboard. Every test
+# here asserts the resulting *order*, and the button/keyboard ones go
+# through the real widget (a real .click(), a real QKeyEvent), not through
+# move_attachment() directly.
+
+
+def _names(widget):
+    return [a.path.name for a in widget.get_attachments()]
+
+
+def _select_row(widget, row):
+    widget._list.clearSelection()
+    widget._list.item(row).setSelected(True)
+
+
+def test_move_attachment_lands_on_the_requested_index_in_both_directions(qapp, tmp_path):
+    # The invariant the old "insert before the target" rule broke: a move
+    # to index N puts the item at index N no matter which way it came from.
+    for source, target in [(0, 2), (0, 4), (1, 3), (4, 2), (4, 0), (3, 1)]:
+        case_dir = tmp_path / f"case{source}{target}"
+        case_dir.mkdir()
+        widget, _ = _make_widget_with_files(case_dir, ["a.pdf", "b.pdf", "c.pdf", "d.pdf", "e.pdf"])
+        moved = _names(widget)[source]
+        widget.move_attachment(source, target)
+        assert _names(widget).index(moved) == target, f"{source}->{target}"
+
+
+def test_move_first_to_last_and_last_to_first(qapp, tmp_path):
+    widget, _ = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf", "d.pdf"])
+    widget.move_attachment(0, 3)
+    assert _names(widget) == ["b.pdf", "c.pdf", "d.pdf", "a.pdf"]
+    widget.move_attachment(3, 0)
+    assert _names(widget) == ["a.pdf", "b.pdf", "c.pdf", "d.pdf"]
+
+
+def test_move_middle_to_first_and_middle_to_last(qapp, tmp_path):
+    widget, _ = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf", "d.pdf"])
+    widget.move_attachment(2, 0)
+    assert _names(widget) == ["c.pdf", "a.pdf", "b.pdf", "d.pdf"]
+    widget.move_attachment(1, 3)
+    assert _names(widget) == ["c.pdf", "b.pdf", "d.pdf", "a.pdf"]
+
+
+def test_moving_adjacent_items_swaps_exactly_those_two(qapp, tmp_path):
+    widget, _ = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf", "d.pdf"])
+    widget.move_attachment(1, 2)
+    assert _names(widget) == ["a.pdf", "c.pdf", "b.pdf", "d.pdf"]
+
+
+def test_move_later_button_moves_the_selected_attachment_one_position(qapp, tmp_path):
+    widget, _ = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf"])
+    _select_row(widget, 0)
+    widget._move_later_button.click()  # a real click on the real button
+    assert _names(widget) == ["b.pdf", "a.pdf", "c.pdf"]
+
+
+def test_move_earlier_button_moves_the_selected_attachment_one_position(qapp, tmp_path):
+    widget, _ = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf"])
+    _select_row(widget, 2)
+    widget._move_earlier_button.click()
+    assert _names(widget) == ["a.pdf", "c.pdf", "b.pdf"]
+
+
+def test_repeated_button_clicks_keep_moving_the_same_attachment(qapp, tmp_path):
+    # The selection has to follow the moved tile, otherwise a second click
+    # would act on whatever item happened to land in the old slot.
+    widget, _ = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf", "d.pdf"])
+    _select_row(widget, 0)
+    widget._move_later_button.click()
+    widget._move_later_button.click()
+    widget._move_later_button.click()
+    assert _names(widget) == ["b.pdf", "c.pdf", "d.pdf", "a.pdf"]
+
+
+def test_move_buttons_disable_at_the_boundaries(qapp, tmp_path):
+    widget, _ = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf"])
+    _select_row(widget, 0)
+    assert widget._move_earlier_button.isEnabled() is False
+    assert widget._move_later_button.isEnabled() is True
+    _select_row(widget, 2)
+    assert widget._move_earlier_button.isEnabled() is True
+    assert widget._move_later_button.isEnabled() is False
+    _select_row(widget, 1)
+    assert widget._move_earlier_button.isEnabled() is True
+    assert widget._move_later_button.isEnabled() is True
+
+
+def test_move_buttons_disabled_without_exactly_one_selection(qapp, tmp_path):
+    widget, _ = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf"])
+    widget._list.clearSelection()
+    assert widget._move_earlier_button.isEnabled() is False
+    assert widget._move_later_button.isEnabled() is False
+    widget._list.item(0).setSelected(True)
+    widget._list.item(1).setSelected(True)
+    assert widget._move_earlier_button.isEnabled() is False
+    assert widget._move_later_button.isEnabled() is False
+
+
+def test_clicking_a_disabled_boundary_button_cannot_change_the_order(qapp, tmp_path):
+    widget, _ = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf"])
+    _select_row(widget, 0)
+    widget._move_earlier_button.click()  # disabled: must be a no-op
+    assert _names(widget) == ["a.pdf", "b.pdf"]
+
+
+def test_ctrl_right_on_a_focused_tile_moves_it_later(qapp, tmp_path):
+    from PySide6.QtCore import QEvent
+    from PySide6.QtGui import QKeyEvent
+
+    widget, _ = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf"])
+    tile = _tile_widget(widget, 0)
+    event = QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Right, Qt.KeyboardModifier.ControlModifier)
+    tile.keyPressEvent(event)
+    assert _names(widget) == ["b.pdf", "a.pdf", "c.pdf"]
+    assert event.isAccepted()
+
+
+def test_ctrl_left_on_a_focused_tile_moves_it_earlier(qapp, tmp_path):
+    from PySide6.QtCore import QEvent
+    from PySide6.QtGui import QKeyEvent
+
+    widget, _ = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf"])
+    tile = _tile_widget(widget, 2)
+    tile.keyPressEvent(
+        QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Left, Qt.KeyboardModifier.ControlModifier)
+    )
+    assert _names(widget) == ["a.pdf", "c.pdf", "b.pdf"]
+
+
+def test_plain_arrow_without_ctrl_does_not_reorder(qapp, tmp_path):
+    # Plain arrows belong to the list's focus navigation; reordering must
+    # always be an explicit modified gesture so a keyboard user walking the
+    # grid can never scramble the send order by accident.
+    from PySide6.QtCore import QEvent
+    from PySide6.QtGui import QKeyEvent
+
+    widget, _ = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf"])
+    tile = _tile_widget(widget, 0)
+    tile.keyPressEvent(
+        QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Right, Qt.KeyboardModifier.NoModifier)
+    )
+    assert _names(widget) == ["a.pdf", "b.pdf", "c.pdf"]
+
+
+def test_ctrl_arrow_at_the_boundary_is_a_harmless_no_op(qapp, tmp_path):
+    from PySide6.QtCore import QEvent
+    from PySide6.QtGui import QKeyEvent
+
+    widget, _ = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf"])
+    _tile_widget(widget, 0).keyPressEvent(
+        QKeyEvent(QEvent.Type.KeyPress, Qt.Key.Key_Left, Qt.KeyboardModifier.ControlModifier)
+    )
+    assert _names(widget) == ["a.pdf", "b.pdf"]
+
+
+def test_user_can_reach_an_arbitrary_target_order_with_the_buttons(qapp, tmp_path):
+    # The scenario from the bug report, driven entirely through the real
+    # controls: A B C D E must be reachable to E C A D B.
+    widget, _ = _make_widget_with_files(tmp_path, ["A.pdf", "B.pdf", "C.pdf", "D.pdf", "E.pdf"])
+
+    def move_to(name, target):
+        row = _names(widget).index(name)
+        _select_row(widget, row)
+        while row > target:
+            widget._move_earlier_button.click()
+            row -= 1
+        while row < target:
+            widget._move_later_button.click()
+            row += 1
+
+    move_to("E.pdf", 0)
+    move_to("C.pdf", 1)
+    move_to("A.pdf", 2)
+    move_to("D.pdf", 3)
+    assert _names(widget) == ["E.pdf", "C.pdf", "A.pdf", "D.pdf", "B.pdf"]
+
+
+def test_reordered_order_is_what_the_send_plan_consumes(qapp, tmp_path):
+    # Visual order == internal order == send order, after using the
+    # explicit controls rather than a drag.
+    from app.telegram.media_sender import build_media_send_plan
+
+    widget, _ = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf"])
+    _select_row(widget, 2)
+    widget._move_earlier_button.click()
+    widget._move_earlier_button.click()
+
+    displayed = [
+        widget._tiles[id(widget._list.item(i))].widget.accessibleName()
+        for i in range(widget._list.count())
+    ]
+    internal = _names(widget)
+    plan = build_media_send_plan(widget.get_attachments(), "caption", [])
+    sent = [a.path.name for group in plan.groups for a in group.attachments]
+
+    assert internal == ["c.pdf", "a.pdf", "b.pdf"]
+    assert sent == internal
+    for name, shown in zip(internal, displayed):
+        assert shown.startswith(name)
+
+
+def test_moving_an_attachment_does_not_re_decode_thumbnails_from_disk(qapp, tmp_path):
+    # Performance regression test for the choppy-drag complaint: every
+    # reorder used to rebuild all tiles and re-decode every image from
+    # disk (measured at ~208 ms and 12 disk decodes for 12 photos), which
+    # froze the UI on each drop. Thumbnails are cached per path now.
+    import app.ui.attachments_widget as module
+
+    paths = []
+    for i in range(4):
+        p = tmp_path / f"photo{i}.png"
+        _write_minimal_png(p)
+        paths.append(p)
+
+    widget = AttachmentsWidget()
+    for p in paths:
+        widget.add_file(p)
+
+    decodes = []
+    original = module.make_thumbnail
+
+    def counting(path, size):
+        decodes.append(path)
+        return original(path, size)
+
+    module.make_thumbnail = counting
+    try:
+        widget.move_attachment(0, 3)
+        widget.move_attachment(3, 1)
+        widget.move_attachment(2, 0)
+    finally:
+        module.make_thumbnail = original
+
+    assert decodes == []
+    assert len(widget.get_attachments()) == 4
+
+
+def test_tile_accessible_name_reports_its_position_and_updates_after_a_move(qapp, tmp_path):
+    widget, _ = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf"])
+    first = _tile_widget(widget, 0).accessibleName()
+    assert "a.pdf" in first and "1" in first and "3" in first
+
+    widget.move_attachment(0, 2)
+    moved_row = _names(widget).index("a.pdf")
+    assert moved_row == 2
+    assert "3" in _tile_widget(widget, moved_row).accessibleName()
+    assert "1" in _tile_widget(widget, 0).accessibleName()
+
+
+def test_removing_an_attachment_renumbers_the_remaining_positions(qapp, tmp_path):
+    widget, _ = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf"])
+    widget._remove_item(widget._list.item(0))
+    names = [_tile_widget(widget, i).accessibleName() for i in range(2)]
+    assert "b.pdf" in names[0] and "1" in names[0] and "2" in names[0]
+    assert "c.pdf" in names[1] and "2" in names[1]
+
+
+def test_order_hint_only_shows_when_there_is_an_order_to_change(qapp, tmp_path):
+    widget = AttachmentsWidget()
+    assert widget._order_hint.isHidden() is True
+    path_a = tmp_path / "a.pdf"
+    path_a.write_bytes(b"x")
+    widget.add_file(path_a)
+    assert widget._order_hint.isHidden() is True
+    path_b = tmp_path / "b.pdf"
+    path_b.write_bytes(b"x")
+    widget.add_file(path_b)
+    assert widget._order_hint.isHidden() is False
+
+
+def test_move_controls_are_translated_on_language_switch(qapp, tmp_path):
+    from app.i18n import get_language, set_language
+
+    widget, _ = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf"])
+    original = get_language()
+    try:
+        set_language("en")
+        widget.retranslate_ui()
+        assert widget._move_earlier_button.text() == "Move earlier"
+        assert widget._move_later_button.text() == "Move later"
+        set_language("ru")
+        widget.retranslate_ui()
+        assert widget._move_earlier_button.text() == "Раньше"
+    finally:
+        set_language(original)
+        widget.retranslate_ui()
+
+
+def test_order_survives_a_language_switch(qapp, tmp_path):
+    from app.i18n import get_language, set_language
+
+    widget, _ = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf"])
+    widget.move_attachment(0, 2)
+    original = get_language()
+    try:
+        set_language("en")
+        widget.retranslate_ui()
+        assert _names(widget) == ["b.pdf", "c.pdf", "a.pdf"]
+    finally:
+        set_language(original)
+        widget.retranslate_ui()
+
+
+def test_drag_carries_a_pixmap_so_the_user_can_see_what_is_moving(qapp, tmp_path):
+    # Without a drag pixmap the user drags an invisible nothing and has no
+    # way to tell a drag started or what it is carrying.
+    from PySide6.QtGui import QDrag
+
+    captured = {}
+    widget, _ = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf"])
+    widget.show()
+    qapp.processEvents()
+
+    original_exec = QDrag.exec
+
+    def fake_exec(self, *args, **kwargs):
+        captured["pixmap"] = self.pixmap()
+        return Qt.DropAction.IgnoreAction
+
+    QDrag.exec = fake_exec
+    try:
+        widget._list.start_tile_drag(widget._list.item(0))
+    finally:
+        QDrag.exec = original_exec
+
+    assert "pixmap" in captured
+    assert captured["pixmap"].isNull() is False
+
+
+def test_real_click_on_a_tile_enables_the_move_buttons(qapp, tmp_path):
+    # The genuine user path: a real press/release on the tile (which goes
+    # through _apply_click_selection's ClearAndSelect) must leave exactly
+    # one selection so the ordering controls become usable. Driving this
+    # with item.setSelected(True) instead would be additive and hide the
+    # difference -- showing the list already makes one item current.
+    widget, _ = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf", "d.pdf"])
+    widget.show()
+    qapp.processEvents()
+
+    tile = _tile_widget(widget, 2)
+    QTest.mousePress(tile, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, QPoint(20, 20))
+    QTest.mouseRelease(tile, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, QPoint(20, 20))
+    qapp.processEvents()
+
+    assert len(widget._list.selectedItems()) == 1
+    assert widget._selected_index() == 2
+    assert widget._move_earlier_button.isEnabled() is True
+    assert widget._move_later_button.isEnabled() is True
+
+    widget._move_later_button.click()
+    assert _names(widget) == ["a.pdf", "b.pdf", "d.pdf", "c.pdf"]

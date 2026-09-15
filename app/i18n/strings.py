@@ -508,6 +508,24 @@ STRINGS: Dict[str, Dict[str, str]] = {
     "attachments_widget.add_dialog_title": {"ru": "Выбрать файлы", "en": "Choose files"},
     "attachments_widget.remove_tile_button": {"ru": " Удалить", "en": " Remove"},
     "attachments_widget.remove_tile_tooltip": {"ru": "Удалить вложение", "en": "Remove attachment"},
+    "attachments_widget.move_earlier_button": {"ru": "Раньше", "en": "Move earlier"},
+    "attachments_widget.move_later_button": {"ru": "Позже", "en": "Move later"},
+    "attachments_widget.move_earlier_tooltip": {
+        "ru": "Переместить вложение на одну позицию раньше (Ctrl+←)",
+        "en": "Move the attachment one position earlier (Ctrl+←)",
+    },
+    "attachments_widget.move_later_tooltip": {
+        "ru": "Переместить вложение на одну позицию позже (Ctrl+→)",
+        "en": "Move the attachment one position later (Ctrl+→)",
+    },
+    "attachments_widget.order_hint": {
+        "ru": "Вложения отправляются в показанном порядке",
+        "en": "Attachments are sent in the order shown",
+    },
+    "attachments_widget.position_label": {
+        "ru": "Позиция {position} из {total}",
+        "en": "Position {position} of {total}",
+    },
 
     # ---- journal_widget -----------------------------------------------------
     "journal_widget.title": {"ru": "Журнал", "en": "Journal"},

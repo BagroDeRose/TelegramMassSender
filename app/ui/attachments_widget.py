@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from PySide6.QtCore import QItemSelection, QItemSelectionModel, QMimeData, QPoint, QSize, Qt, Signal
-from PySide6.QtGui import QDrag
+from PySide6.QtGui import QDrag, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QFileDialog,
@@ -38,6 +38,9 @@ from app.ui.thumbnails import format_file_size, is_image, make_thumbnail
 
 _TILE_SIZE = 108
 _THUMBNAIL_SIZE = 84
+# Inset between the tile's edge (where its selection background and focus
+# ring are painted) and its contents.
+_TILE_PADDING = 5
 _REMOVE_ICON_SIZE = 11
 _FILE_ICON_SIZE = 30
 
@@ -129,6 +132,7 @@ class _AttachmentTile(QWidget):
 
     drag_requested = Signal(object)  # emits the QListWidgetItem this tile represents
     remove_requested = Signal(object)  # emits the QListWidgetItem this tile represents (Delete/Backspace key)
+    move_requested = Signal(object, int)  # (QListWidgetItem, -1 earlier / +1 later) from Ctrl+Arrow
 
     def __init__(self, item: QListWidgetItem, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -232,6 +236,18 @@ class _AttachmentTile(QWidget):
 
     def keyPressEvent(self, event) -> None:  # noqa: N802 (Qt override)
         key = event.key()
+        # Ctrl+Arrow moves this tile one position in the send order. Plain
+        # arrows are deliberately left to the list view's own focus
+        # navigation, so moving is always an explicit, modified gesture --
+        # a keyboard user can never reorder by accident while just walking
+        # the grid.
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier and key in (
+            Qt.Key.Key_Left,
+            Qt.Key.Key_Right,
+        ):
+            self.move_requested.emit(self._item, -1 if key == Qt.Key.Key_Left else 1)
+            event.accept()
+            return
         if key == Qt.Key.Key_Space:
             # Toggle this tile's selection -- the same convention
             # QAbstractItemView itself uses for Space in extended-
@@ -297,6 +313,13 @@ class _ReorderableListWidget(QListWidget):
         mime = QMimeData()
         mime.setData(_REORDER_MIME_TYPE, str(row).encode("ascii"))
         drag.setMimeData(mime)
+        # Without a drag pixmap the user drags an invisible nothing and has
+        # no way to tell what is being moved or that a drag started at all.
+        tile = self.itemWidget(item)
+        if tile is not None:
+            pixmap = tile.grab()
+            drag.setPixmap(pixmap)
+            drag.setHotSpot(QPoint(pixmap.width() // 2, pixmap.height() // 2))
         drag.exec(Qt.DropAction.MoveAction)
 
     def dragEnterEvent(self, event) -> None:  # noqa: N802 (Qt override)
@@ -312,16 +335,14 @@ class _ReorderableListWidget(QListWidget):
         if mime.hasFormat(_REORDER_MIME_TYPE):
             source_row = int(bytes(mime.data(_REORDER_MIME_TYPE)).decode("ascii"))
             index = self.indexAt(event.position().toPoint())
-            # self.count() (one past the last valid item row) is a
-            # deliberate, distinct sentinel from "the last item's own
-            # row" -- it means "dropped past every tile" (the cursor
-            # wasn't over any item, e.g. in the trailing empty space of
-            # the wrapped grid), which AttachmentsWidget._on_tile_reorder_
-            # requested treats as "move to the very end," as opposed to
-            # dropping ON the last tile, which means "insert immediately
-            # before the last tile" -- see that method for why these must
-            # stay distinct.
-            target_row = index.row() if index.isValid() else self.count()
+            # The emitted target is the slot the dragged tile should end up
+            # occupying. Dropping ON a tile means "take that tile's slot";
+            # dropping past every tile (the cursor was in the wrapped
+            # grid's trailing empty space, so indexAt() is invalid) means
+            # "take the last slot". Both are expressed directly as a final
+            # index, so the drop is not direction-dependent -- see
+            # AttachmentsWidget.move_attachment.
+            target_row = index.row() if index.isValid() else self.count() - 1
             event.acceptProposedAction()
             if target_row != source_row:
                 self.tile_reorder_requested.emit(source_row, target_row)
@@ -340,6 +361,15 @@ class AttachmentsWidget(QWidget):
         self.setAcceptDrops(True)
         self._paths: List[Path] = []
         self._tiles: Dict[int, _Tile] = {}  # id(QListWidgetItem) -> its themed parts
+        # Per-path decoded thumbnail and metadata line, kept across tile
+        # rebuilds. Every reorder rebuilds all tiles (see _rebuild_tiles),
+        # and without this each rebuild re-decoded every image from disk:
+        # measured at 12 disk decodes and ~208 ms of blocked UI for a
+        # single reorder of 12 photos, which is what made dragging feel
+        # laggy and choppy. Entries are dropped in _remove_item/clear(),
+        # so the cache never outlives the attachment itself.
+        self._thumbnail_cache: Dict[Path, Optional[QPixmap]] = {}
+        self._meta_cache: Dict[Path, str] = {}
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -375,7 +405,33 @@ class AttachmentsWidget(QWidget):
         self._list.itemSelectionChanged.connect(self._on_selection_changed)
         layout.addWidget(self._list)
 
+        # Explicit ordering controls. Drag-and-drop still works, but it
+        # depends on landing the cursor precisely on the intended tile;
+        # these give a deterministic, one-position-at-a-time alternative
+        # that works by selection alone (and by keyboard via Ctrl+Arrow on
+        # a focused tile), which is what makes an exact target order
+        # reliably reachable.
+        self._order_hint = QLabel(tr("attachments_widget.order_hint"), self)
+        self._order_hint.setObjectName("thumbnailMeta")
+        self._order_hint.setVisible(False)
+        layout.addWidget(self._order_hint)
+
         buttons = QHBoxLayout()
+        self._move_earlier_button = QPushButton(tr("attachments_widget.move_earlier_button"), self)
+        self._move_earlier_button.setObjectName("ghostButton")
+        self._move_earlier_button.setToolTip(tr("attachments_widget.move_earlier_tooltip"))
+        self._move_earlier_button.setAccessibleName(tr("attachments_widget.move_earlier_tooltip"))
+        self._move_earlier_button.setEnabled(False)
+        self._move_earlier_button.clicked.connect(lambda: self._move_selected(-1))
+        self._move_later_button = QPushButton(tr("attachments_widget.move_later_button"), self)
+        self._move_later_button.setObjectName("ghostButton")
+        self._move_later_button.setToolTip(tr("attachments_widget.move_later_tooltip"))
+        self._move_later_button.setAccessibleName(tr("attachments_widget.move_later_tooltip"))
+        self._move_later_button.setEnabled(False)
+        self._move_later_button.clicked.connect(lambda: self._move_selected(1))
+        buttons.addWidget(self._move_earlier_button)
+        buttons.addWidget(self._move_later_button)
+
         self._add_button = QPushButton(tr("attachments_widget.add_button"), self)
         self._add_button.clicked.connect(self._on_add_clicked)
         self._remove_selected_button = QPushButton(tr("attachments_widget.remove_selected_button"), self)
@@ -409,25 +465,56 @@ class AttachmentsWidget(QWidget):
         self._list.clear()
         self._paths.clear()
         self._tiles.clear()
+        self._thumbnail_cache.clear()
+        self._meta_cache.clear()
         self._sync_empty_state()
+        self._update_move_buttons()
         self.attachments_changed.emit()
 
     def _remove_item(self, item: QListWidgetItem) -> None:
         row = self._list.row(item)
         if row < 0:
             return
+        removed = self._paths[row]
         self._tiles.pop(id(item), None)
         self._list.takeItem(row)
         del self._paths[row]
+        self._thumbnail_cache.pop(removed, None)
+        self._meta_cache.pop(removed, None)
+        # Positions shift for every tile after the removed one, and each
+        # tile announces its own position to a screen reader, so the
+        # remaining tiles have to be re-labelled.
+        self._relabel_tiles()
         self._sync_empty_state()
+        self._update_move_buttons()
         self.attachments_changed.emit()
+
+    def _relabel_tiles(self) -> None:
+        for row, path in enumerate(self._paths):
+            item = self._list.item(row)
+            if item is None:
+                continue
+            tile = self._list.itemWidget(item)
+            if tile is not None:
+                tile.setAccessibleName(self._accessible_name_for(path, row))
+
+    def _accessible_name_for(self, path: Path, row: int) -> str:
+        """Screen readers get the send position as well as the filename --
+        with ordering as a first-class feature, "which one is this and
+        where is it in the order" is the whole point of the tile."""
+        position = tr(
+            "attachments_widget.position_label", position=row + 1, total=len(self._paths)
+        )
+        return f"{path.name} — {position}"
 
     def add_file(self, path: Path) -> None:
         if path in self._paths:
             return
         self._paths.append(path)
         self._append_tile(path)
+        self._relabel_tiles()  # the new tile changes every tile's "of N" total
         self._sync_empty_state()
+        self._update_move_buttons()
         self.attachments_changed.emit()
 
     def _on_files_dropped_on_list(self, paths: List[str]) -> None:
@@ -438,46 +525,85 @@ class AttachmentsWidget(QWidget):
             self.add_file(Path(file_path))
 
     def _on_tile_reorder_requested(self, source_row: int, target_row: int) -> None:
-        # target_row == old_len (one past the last valid row) is
-        # _ReorderableListWidget.dropEvent's sentinel for "dropped past
-        # every tile" -- move to the very end. Anything in 0..old_len-1
-        # means "insert immediately before whichever tile is currently at
-        # that row."
-        old_len = len(self._paths)
-        if not (0 <= source_row < old_len) or not (0 <= target_row <= old_len):
-            return  # stale/out-of-range row -- ignore rather than corrupt order
-        # Captured by path (stable identity) rather than row, since every
-        # row shifts once self._paths is mutated below.
-        selected_paths = {self._paths[self._list.row(i)] for i in self._list.selectedItems()}
-        target_path = self._paths[target_row] if target_row < old_len else None
-        path = self._paths.pop(source_row)
-        if target_path is None:
-            insert_at = len(self._paths)  # dropped past the last tile -> truly append
-        else:
-            # Re-locate the target by identity rather than reusing
-            # target_row directly: popping source_row may have shifted
-            # every row after it left by one, and reusing the stale
-            # pre-pop index here is exactly what made a forward drag land
-            # *after* its target while the identical drop gesture in the
-            # opposite direction landed *before* it -- the same physical
-            # "drop on this tile" meaning two different things depending
-            # on which way the drag came from. Insert position is always
-            # "immediately before the target tile," regardless of
-            # direction, once the target is found by its stable identity.
-            insert_at = self._paths.index(target_path)
-        self._paths.insert(insert_at, path)
-        self._rebuild_tiles(selected_paths=selected_paths)
+        # Strict, unlike move_attachment's clamping: a genuine drop always
+        # produces an in-range target (dropEvent resolves it from either a
+        # valid index or the last row), so anything out of range here is a
+        # stale or corrupt signal and must be ignored rather than clamped
+        # into a reorder the user never asked for.
+        count = len(self._paths)
+        if not (0 <= source_row < count) or not (0 <= target_row < count):
+            return
+        self.move_attachment(source_row, target_row)
+
+    def move_attachment(self, from_index: int, to_index: int) -> bool:
+        """Move one attachment so that it ends up at exactly `to_index` in
+        the resulting order. Returns True if the order actually changed.
+
+        This is the single canonical ordering operation -- drag-and-drop,
+        the Move earlier/later buttons and the Ctrl+Arrow shortcuts all go
+        through it, so every path shares one semantic and one set of
+        tests.
+
+        `to_index` is the *final* index, not an insertion point relative to
+        some other item, which is what makes this direction-independent:
+        popping the source first and then inserting at `to_index` lands the
+        item on that slot whether it travelled forwards or backwards. The
+        previous "insert immediately before the target tile" rule only
+        agreed with that for backward moves and always landed one slot
+        short going forward (measured: dragging row 0 onto slot 2 put it at
+        index 1), which is why reordering felt unreliable.
+        """
+        count = len(self._paths)
+        if not (0 <= from_index < count):
+            return False  # stale/out-of-range row -- ignore rather than corrupt order
+        to_index = max(0, min(to_index, count - 1))
+        if to_index == from_index:
+            return False
+        path = self._paths.pop(from_index)
+        self._paths.insert(to_index, path)
+        # Keep the moved attachment selected and current so repeated moves
+        # (clicking Move later three times, or holding Ctrl+Right) keep
+        # acting on the same tile instead of losing it after one step.
+        self._rebuild_tiles(selected_paths={path}, focus_path=path)
+        return True
+
+    def _move_selected(self, delta: int) -> None:
+        index = self._selected_index()
+        if index is not None:
+            self.move_attachment(index, index + delta)
+
+    def _on_tile_move_requested(self, item: QListWidgetItem, delta: int) -> None:
+        row = self._list.row(item)
+        if row >= 0:
+            self.move_attachment(row, row + delta)
+
+    def _selected_index(self) -> Optional[int]:
+        """The row the ordering controls act on: exactly one selected tile.
+        With none or several selected there is no unambiguous "this one",
+        so the buttons disable instead of guessing."""
+        items = self._list.selectedItems()
+        if len(items) != 1:
+            return None
+        row = self._list.row(items[0])
+        return row if row >= 0 else None
+
+    def _update_move_buttons(self) -> None:
+        index = self._selected_index()
+        last = len(self._paths) - 1
+        self._move_earlier_button.setEnabled(index is not None and index > 0)
+        self._move_later_button.setEnabled(index is not None and 0 <= index < last)
 
     def _append_tile(self, path: Path) -> None:
         item = QListWidgetItem(self._list)
-        item.setSizeHint(QSize(_TILE_SIZE, _TILE_SIZE + 46))
+        item.setSizeHint(QSize(_TILE_SIZE, _TILE_SIZE + 46 + 2 * _TILE_PADDING))
         self._list.addItem(item)
         tile = self._build_tile(item, path)
         self._list.setItemWidget(item, tile)
         tile.drag_requested.connect(self._list.start_tile_drag)
         tile.remove_requested.connect(self._remove_item)
+        tile.move_requested.connect(self._on_tile_move_requested)
 
-    def _rebuild_tiles(self, *, selected_paths: Optional[set] = None) -> None:
+    def _rebuild_tiles(self, *, selected_paths: Optional[set] = None, focus_path: Optional[Path] = None) -> None:
         """Rebuild every tile from self._paths, in its current order. Used
         after a reorder rather than trying to move the existing
         QListWidgetItem/setItemWidget pair in place -- Qt's item-view
@@ -499,7 +625,15 @@ class AttachmentsWidget(QWidget):
             for i, path in enumerate(self._paths):
                 if path in selected_paths:
                     self._list.item(i).setSelected(True)
+        if focus_path is not None and focus_path in self._paths:
+            row = self._paths.index(focus_path)
+            item = self._list.item(row)
+            self._list.setCurrentItem(item)
+            tile = self._list.itemWidget(item)
+            if tile is not None:
+                tile.setFocus(Qt.FocusReason.OtherFocusReason)
         self._sync_empty_state()
+        self._update_move_buttons()
         self.attachments_changed.emit()
 
     def _on_selection_changed(self) -> None:
@@ -508,6 +642,7 @@ class AttachmentsWidget(QWidget):
         this list (see theme.py) because it draws behind the custom tile
         at the item's own rect rather than the tile's actual rounded
         shape."""
+        self._update_move_buttons()
         selected_ids = {id(i) for i in self._list.selectedItems()}
         for item_id, tile in self._tiles.items():
             is_selected = item_id in selected_ids
@@ -531,22 +666,30 @@ class AttachmentsWidget(QWidget):
         # WA_TransparentForMouseEvents decoration, not focusable in their
         # own right) -- accessibleName is what gets read when the tile
         # itself receives focus.
-        tile.setAccessibleName(path.name)
+        tile.setAccessibleName(self._accessible_name_for(path, self._list.row(item)))
         tile.setFixedWidth(_TILE_SIZE)
         column = QVBoxLayout(tile)
-        column.setContentsMargins(0, 0, 0, 0)
+        # Inset the contents by more than the 2px border so the tile's own
+        # [selected] background and [focused] ring stay visible. With zero
+        # margins the full-width children painted straight over both, and
+        # the ring survived only as four corner arcs -- selection was
+        # effectively invisible, which matters now that selecting a tile is
+        # how the ordering controls are aimed.
+        column.setContentsMargins(_TILE_PADDING, _TILE_PADDING, _TILE_PADDING, _TILE_PADDING)
         column.setSpacing(4)
 
         frame = QLabel(tile)
         frame.setObjectName("thumbnailTile")
-        frame.setFixedSize(_TILE_SIZE, _THUMBNAIL_SIZE)
+        frame.setFixedSize(_TILE_SIZE - 2 * _TILE_PADDING, _THUMBNAIL_SIZE)
         frame.setAlignment(Qt.AlignmentFlag.AlignCenter)
         # Purely decorative -- let a press/drag started here pass through to
         # the tile underneath instead of being swallowed by the label, so
         # dragging by the thumbnail (the most natural place to grab a
         # tile) actually reaches _AttachmentTile's own mouse handlers.
         frame.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        thumbnail = make_thumbnail(path, _THUMBNAIL_SIZE - 8) if is_image(path) else None
+        if path not in self._thumbnail_cache:
+            self._thumbnail_cache[path] = make_thumbnail(path, _THUMBNAIL_SIZE - 8) if is_image(path) else None
+        thumbnail = self._thumbnail_cache[path]
         image_is_thumbnail = thumbnail is not None
         icon_name = _icon_name_for(path)
         if thumbnail is not None:
@@ -562,7 +705,9 @@ class AttachmentsWidget(QWidget):
         name_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         column.addWidget(name_label)
 
-        meta_text = _meta_text(path)
+        if path not in self._meta_cache:
+            self._meta_cache[path] = _meta_text(path)
+        meta_text = self._meta_cache[path]
         if meta_text:
             meta_label = QLabel(meta_text, tile)
             meta_label.setObjectName("thumbnailMeta")
@@ -594,6 +739,8 @@ class AttachmentsWidget(QWidget):
         has_items = bool(self._paths)
         self._empty_label.setVisible(not has_items)
         self._list.setVisible(has_items)
+        # Only meaningful once there is actually an order to change.
+        self._order_hint.setVisible(len(self._paths) > 1)
 
     # ---- drag & drop ------------------------------------------------------
 
@@ -630,12 +777,24 @@ class AttachmentsWidget(QWidget):
         self._add_button.setText(tr("attachments_widget.add_button"))
         self._remove_selected_button.setText(tr("attachments_widget.remove_selected_button"))
         self._clear_button.setText(tr("attachments_widget.clear_button"))
+        self._order_hint.setText(tr("attachments_widget.order_hint"))
+        self._move_earlier_button.setText(tr("attachments_widget.move_earlier_button"))
+        self._move_earlier_button.setToolTip(tr("attachments_widget.move_earlier_tooltip"))
+        self._move_earlier_button.setAccessibleName(tr("attachments_widget.move_earlier_tooltip"))
+        self._move_later_button.setText(tr("attachments_widget.move_later_button"))
+        self._move_later_button.setToolTip(tr("attachments_widget.move_later_tooltip"))
+        self._move_later_button.setAccessibleName(tr("attachments_widget.move_later_tooltip"))
         # Rebuilds every tile from self._paths (preserving selection) --
         # the same mechanism a reorder already uses -- rather than looping
         # each tile's remove-button text/tooltip and the size/type meta
         # line separately, since a full rebuild already guarantees every
         # tile matches the current language with no second code path.
         selected_paths = {self._paths[self._list.row(i)] for i in self._list.selectedItems()}
+        # The size half of a tile's meta line is localized ("228 КБ" vs
+        # "228 KB"), so that cache is stale after a language switch. The
+        # thumbnail cache is language-independent and deliberately kept --
+        # it is the expensive one.
+        self._meta_cache.clear()
         self._rebuild_tiles(selected_paths=selected_paths)
 
     # ---- public API used by app.ui.main_window --------------------------------
