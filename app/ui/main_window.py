@@ -1467,6 +1467,18 @@ class MainWindow(QMainWindow):
         if not self._can_switch_accounts():
             show_error(self, tr("main_window.dialogs.unavailable_title"), tr("main_window.dialogs.add_account_unavailable"))
             return
+        if self._service.is_demo_mode:
+            # In demo mode the login dialog would run against the
+            # DemoClientManager, "authorizing" a fabricated account -- and
+            # it would still write the entered API credentials to
+            # SecureStorage and leave a real account row behind that
+            # outlives demo mode. Adding an account is a real-mode action.
+            show_error(
+                self,
+                tr("main_window.dialogs.unavailable_title"),
+                tr("main_window.dialogs.add_account_in_demo_mode"),
+            )
+            return
         dialog = LoginDialog(self._service, self)
         result_holder: dict = {}
         dialog.account_ready.connect(lambda acc: result_holder.__setitem__("account", acc))

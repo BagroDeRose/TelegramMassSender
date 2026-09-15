@@ -429,3 +429,32 @@ async def test_demo_mode_is_blocked_while_a_campaign_is_active(qapp, tmp_path):
 
     assert shown.called
     assert window._service.is_demo_mode is False
+
+
+@pytest.mark.asyncio
+async def test_adding_an_account_is_refused_while_in_demo_mode(qapp, tmp_path):
+    # Demo Mode swaps in a client manager that fabricates everything, so
+    # the login dialog would "authorize" an invented account -- while
+    # still writing the entered API credentials to SecureStorage and
+    # leaving a real account row behind that outlives demo mode.
+    window = _make_window(tmp_path)
+    await _drain(window)
+
+    window._enter_demo_mode()
+    await _drain(window)
+    before = [a.phone for a in window._service.account_repository.list_all()]
+
+    with patch("app.ui.main_window.LoginDialog") as dialog_cls:
+        with patch("app.ui.main_window.show_error") as shown:
+            window._on_add_account_requested()
+
+    assert shown.called
+    assert dialog_cls.called is False  # the dialog never even opened
+    assert [a.phone for a in window._service.account_repository.list_all()] == before
+
+    window._on_exit_demo_mode_clicked()
+    await _drain(window)
+    with patch("app.ui.main_window.LoginDialog") as dialog_cls:
+        dialog_cls.return_value.exec.return_value = 0
+        window._on_add_account_requested()
+    assert dialog_cls.called is True  # allowed again in real mode

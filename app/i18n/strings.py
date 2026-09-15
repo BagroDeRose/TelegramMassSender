@@ -296,6 +296,10 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "ru": "Добавление аккаунта недоступно во время рассылки.",
         "en": "You can't add an account while a campaign is running.",
     },
+    "main_window.dialogs.add_account_in_demo_mode": {
+        "ru": "Добавление аккаунта недоступно в демо-режиме.\nСначала выйдите из демо-режима.",
+        "en": "You can't add an account in Demo Mode.\nLeave Demo Mode first.",
+    },
     "main_window.dialogs.delete_account_unavailable": {
         "ru": "Удаление аккаунта недоступно во время рассылки.",
         "en": "You can't delete an account while a campaign is running.",
