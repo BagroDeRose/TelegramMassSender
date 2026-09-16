@@ -31,13 +31,21 @@ from unittest.mock import patch
 from PySide6.QtWidgets import QApplication
 
 from app.database.database import Database
+from app.security.secure_storage import SecureStorage
 from app.ui.main_window import MainWindow
 
 
 def _isolated_window(tmp_path: Path, close_event=None) -> MainWindow:
     # Never touch the real %APPDATA% database from the permanent test suite.
     database = Database(tmp_path / "app.db")
-    return MainWindow(close_event=close_event, database=database)
+    # Isolated SecureStorage as well as an isolated database: without it
+    # TelegramService falls back to the machine-wide DPAPI store, so on a
+    # developer machine that has genuinely used the app these tests read
+    # the real API credentials and build a real ClientManager (which then
+    # opens real Telethon connections). That also made the suite behave
+    # differently here than on CI, where no credentials exist.
+    storage = SecureStorage(tmp_path / "secrets.dat")
+    return MainWindow(close_event=close_event, database=database, secure_storage=storage)
 
 
 async def test_shutdown_sets_close_event_even_if_app_quit_is_a_noop(qapp, tmp_path):

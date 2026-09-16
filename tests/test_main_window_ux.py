@@ -16,13 +16,21 @@ from PySide6.QtWidgets import QDialog
 from app.campaign.campaign_manager import CampaignManager
 from app.campaign.rate_limiter import RateLimiter
 from app.database.database import Database
+from app.security.secure_storage import SecureStorage
 from app.recipients.parser import parse_recipient_line
 from app.telegram.account_manager import Account
 from app.ui.main_window import MainWindow
 
 
 def _make_window(tmp_path: Path) -> MainWindow:
-    return MainWindow(database=Database(tmp_path / "app.db"))
+    # Isolated SecureStorage as well as an isolated database: without it
+    # TelegramService falls back to the machine-wide DPAPI store, so on a
+    # developer machine that has genuinely used the app these tests read
+    # the real API credentials and build a real ClientManager (which then
+    # opens real Telethon connections). That also made the suite behave
+    # differently here than on CI, where no credentials exist.
+    storage = SecureStorage(tmp_path / "secrets.dat")
+    return MainWindow(database=Database(tmp_path / "app.db"), secure_storage=storage)
 
 
 async def test_start_disabled_by_default(qapp, tmp_path):
@@ -34,6 +42,12 @@ async def test_start_enabled_once_all_preconditions_met(qapp, tmp_path):
     window = _make_window(tmp_path)
 
     fake_account_manager = MagicMock()
+    # list_accounts_with_status is awaited by MainWindow's background
+    # refresh. Leaving it a plain MagicMock made that task raise
+    # TypeError, which surfaced as 'Task exception was never retrieved'
+    # noise in the suite output -- a defect in this double, not in the
+    # window.
+    fake_account_manager.list_accounts_with_status = AsyncMock(return_value=[])
     fake_account = Account(
         id=1, phone="+70001112233", telegram_user_id=1, username="u", display_name="U",
         local_alias=None, session_name="s", created_at="now", last_used_at=None,
@@ -439,6 +453,12 @@ async def test_double_click_start_does_not_launch_two_campaigns(qapp, tmp_path):
     # i.e. every recipient would receive the message twice.
     window = _make_window(tmp_path)
     fake_account_manager = MagicMock()
+    # list_accounts_with_status is awaited by MainWindow's background
+    # refresh. Leaving it a plain MagicMock made that task raise
+    # TypeError, which surfaced as 'Task exception was never retrieved'
+    # noise in the suite output -- a defect in this double, not in the
+    # window.
+    fake_account_manager.list_accounts_with_status = AsyncMock(return_value=[])
     fake_account = Account(
         id=1, phone="+70001112233", telegram_user_id=1, username="u", display_name="U",
         local_alias=None, session_name="s", created_at="now", last_used_at=None,
@@ -489,6 +509,12 @@ async def test_start_campaign_starts_the_elapsed_timer_and_wires_current_item(qa
     # dead code.
     window = _make_window(tmp_path)
     fake_account_manager = MagicMock()
+    # list_accounts_with_status is awaited by MainWindow's background
+    # refresh. Leaving it a plain MagicMock made that task raise
+    # TypeError, which surfaced as 'Task exception was never retrieved'
+    # noise in the suite output -- a defect in this double, not in the
+    # window.
+    fake_account_manager.list_accounts_with_status = AsyncMock(return_value=[])
     fake_account = Account(
         id=1, phone="+70001112233", telegram_user_id=1, username="u", display_name="U",
         local_alias=None, session_name="s", created_at="now", last_used_at=None,
@@ -534,6 +560,12 @@ async def test_start_blocked_by_an_unreadable_attachment(qapp, tmp_path):
     # _on_start_requested -- distinct failure mode, same guard shape.
     window = _make_window(tmp_path)
     fake_account_manager = MagicMock()
+    # list_accounts_with_status is awaited by MainWindow's background
+    # refresh. Leaving it a plain MagicMock made that task raise
+    # TypeError, which surfaced as 'Task exception was never retrieved'
+    # noise in the suite output -- a defect in this double, not in the
+    # window.
+    fake_account_manager.list_accounts_with_status = AsyncMock(return_value=[])
     fake_account = Account(
         id=1, phone="+70001112233", telegram_user_id=1, username="u", display_name="U",
         local_alias=None, session_name="s", created_at="now", last_used_at=None,
@@ -571,6 +603,12 @@ async def test_start_blocked_by_an_attachment_deleted_after_being_added(qapp, tm
     # guard shape, checked first in _on_start_requested).
     window = _make_window(tmp_path)
     fake_account_manager = MagicMock()
+    # list_accounts_with_status is awaited by MainWindow's background
+    # refresh. Leaving it a plain MagicMock made that task raise
+    # TypeError, which surfaced as 'Task exception was never retrieved'
+    # noise in the suite output -- a defect in this double, not in the
+    # window.
+    fake_account_manager.list_accounts_with_status = AsyncMock(return_value=[])
     fake_account = Account(
         id=1, phone="+70001112233", telegram_user_id=1, username="u", display_name="U",
         local_alias=None, session_name="s", created_at="now", last_used_at=None,

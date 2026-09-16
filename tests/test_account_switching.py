@@ -17,13 +17,21 @@ from pathlib import Path
 from unittest.mock import patch
 
 from app.database.database import Database
+from app.security.secure_storage import SecureStorage
 from app.telegram.account_manager import AccountManager
 from app.ui.main_window import MainWindow
 from tests.mocks.fake_client_manager import FakeClientManager
 
 
 async def _make_window(tmp_path: Path) -> MainWindow:
-    window = MainWindow(database=Database(tmp_path / "app.db"))
+    # Isolated SecureStorage as well as an isolated database: without it
+    # TelegramService falls back to the machine-wide DPAPI store, so on a
+    # developer machine that has genuinely used the app these tests read
+    # the real API credentials and build a real ClientManager (which then
+    # opens real Telethon connections). That also made the suite behave
+    # differently here than on CI, where no credentials exist.
+    storage = SecureStorage(tmp_path / "secrets.dat")
+    window = MainWindow(database=Database(tmp_path / "app.db"), secure_storage=storage)
     # MainWindow.__init__ fire-and-forgets asyncio.ensure_future(self.
     # _refresh_accounts()) (account_manager is None at construction time,
     # before any test installs a fake one). That task hasn't run yet --

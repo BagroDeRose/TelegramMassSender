@@ -18,11 +18,19 @@ from unittest.mock import patch
 from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 
 from app.database.database import Database
+from app.security.secure_storage import SecureStorage
 from app.ui.main_window import MainWindow
 
 
 async def _make_window(tmp_path: Path) -> MainWindow:
-    window = MainWindow(database=Database(tmp_path / "app.db"))
+    # Isolated SecureStorage as well as an isolated database: otherwise
+    # TelegramService falls back to the machine-wide DPAPI store and, on
+    # a machine that has genuinely used the app, builds a real
+    # ClientManager from the real credentials.
+    window = MainWindow(
+        database=Database(tmp_path / "app.db"),
+        secure_storage=SecureStorage(tmp_path / "secrets.dat"),
+    )
     # Drains MainWindow.__init__'s fire-and-forget _refresh_accounts()
     # task before it can race a test's own calls -- same pattern as
     # tests/test_account_switching.py's _make_window.
@@ -73,7 +81,11 @@ async def test_tray_exit_action_triggers_the_normal_close_path(qapp, tmp_path):
     # this instead lets the real close path run (same pattern as
     # tests/test_main_window_shutdown.py) and checks its actual effect.
     close_event = asyncio.Event()
-    window = MainWindow(close_event=close_event, database=Database(tmp_path / "app.db"))
+    window = MainWindow(
+        close_event=close_event,
+        database=Database(tmp_path / "app.db"),
+        secure_storage=SecureStorage(tmp_path / "secrets.dat"),
+    )
     await asyncio.sleep(0)
     window._current_campaign = None
 
