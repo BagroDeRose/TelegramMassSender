@@ -72,6 +72,15 @@ described below.
     photos; the metadata half of that cache is dropped on a language
     switch since file sizes are localized. Tile contents are inset past
     the tile border so its own selected/focus styling stays visible.
+    Cards have no hover effect at all (the theme neutralizes the hover
+    highlight on *their* remove button only -- the account cards use the
+    same `chipRemoveButton` and keep theirs). A plain click toggles
+    selection, which is why a tile uses `TabFocus` and takes mouse focus
+    itself in `mousePressEvent` *after* recording whether it was already
+    the sole selection: a click that moves focus onto an item widget makes
+    the list view select that item during the press, before the tile sees
+    the event. The focus ring is suppressed for click focus, since it
+    shares its color with the selection border.
   - `account_widget.py` — one card per account (avatar, username, phone,
     connection status). (v1.8) A card's title prefers the user's own
     local alias (`Account.local_alias`, set via the card's rename
@@ -199,7 +208,7 @@ described below.
   `MainWindow.retranslate_ui()` the same way theme switching already
   dispatches `apply_theme()`. Deliberately not gettext or Qt Linguist
   (.ts/.qm + lupdate/lrelease) — this app has no other use for either.
-- `tests/` — pytest + pytest-asyncio (`asyncio_mode = auto`), 747 tests,
+- `tests/` — pytest + pytest-asyncio (`asyncio_mode = auto`), 756 tests,
   using `tests/mocks/mock_telegram_client.py` and
   `tests/mocks/fake_client_manager.py` instead of a real Telegram
   connection. CI runs this suite on `windows-latest` with
@@ -229,7 +238,7 @@ reproduced with a failing test first, then fixed.
 
 **Tests.** After any code change, run the targeted test file, then the
 full suite (`pytest tests/ -v`). Don't delete or weaken existing tests just
-to make the suite pass. The current baseline is 747 passed, 0 failures —
+to make the suite pass. The current baseline is 756 passed, 0 failures —
 if that number changes, know exactly why before saying the change is done.
 
 **GUI.** Never block the Qt event loop or the asyncio event loop.

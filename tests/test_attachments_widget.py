@@ -1486,3 +1486,173 @@ def test_real_click_on_a_tile_enables_the_move_buttons(qapp, tmp_path):
 
     widget._move_later_button.click()
     assert _names(widget) == ["a.pdf", "b.pdf", "d.pdf", "c.pdf"]
+
+
+# ---- click-to-select / click-to-deselect, no hover effect -------------------
+
+
+def _click(tile, modifiers=Qt.KeyboardModifier.NoModifier):
+    QTest.mousePress(tile, Qt.MouseButton.LeftButton, modifiers, QPoint(10, 10))
+    QTest.mouseRelease(tile, Qt.MouseButton.LeftButton, modifiers, QPoint(10, 10))
+
+
+def test_clicking_a_tile_selects_it_and_clicking_it_again_deselects_it(qapp, tmp_path):
+    widget, _ = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf"])
+    tile = _tile_widget(widget, 1)
+
+    _click(tile)
+    assert widget._list.item(1).isSelected() is True
+    assert tile.property("selected") == "true"
+
+    _click(tile)
+    assert widget._list.item(1).isSelected() is False
+    assert tile.property("selected") == "false"
+    assert widget._list.selectedItems() == []
+
+    _click(tile)  # and a third click selects it again
+    assert widget._list.item(1).isSelected() is True
+
+
+def test_click_deselects_even_when_focus_selects_the_item_during_the_press(qapp, tmp_path):
+    # On the real Windows platform, moving focus onto an item widget makes
+    # the list view select that item *during* the press, before the tile's
+    # own handlers run. Deciding "was it already selected?" at release time
+    # then saw a tile the press itself had just selected, and deselected it:
+    # a single click on an unselected tile did nothing. Offscreen, an
+    # inactive window never receives that focus change, so this reproduces
+    # it by making the tile's focus call select the item exactly as the view
+    # does.
+    widget, _ = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf"])
+    tile = _tile_widget(widget, 1)
+    item = widget._list.item(1)
+    real_set_focus = tile.setFocus
+
+    def focus_that_selects_like_the_view(*args):
+        widget._list.setCurrentItem(item)  # ClearAndSelect, as the view does
+        return real_set_focus(*args)
+
+    tile.setFocus = focus_that_selects_like_the_view
+
+    _click(tile)
+    assert item.isSelected() is True, "one click on an unselected tile must select it"
+    _click(tile)
+    assert item.isSelected() is False, "clicking the selected tile again must deselect it"
+
+
+def test_clicking_the_selected_tile_again_disables_the_ordering_controls(qapp, tmp_path):
+    widget, _ = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf"])
+    tile = _tile_widget(widget, 1)
+    _click(tile)
+    assert widget._move_later_button.isEnabled() is True
+    _click(tile)
+    assert widget._move_earlier_button.isEnabled() is False
+    assert widget._move_later_button.isEnabled() is False
+
+
+def test_plain_click_on_one_of_several_selected_tiles_narrows_rather_than_deselects(qapp, tmp_path):
+    widget, _ = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf"])
+    widget._list.item(0).setSelected(True)
+    widget._list.item(1).setSelected(True)
+
+    _click(_tile_widget(widget, 1))
+
+    assert [widget._list.row(i) for i in widget._list.selectedItems()] == [1]
+
+
+def test_ordering_still_works_after_selecting_by_click(qapp, tmp_path):
+    widget, _ = _make_widget_with_files(tmp_path, ["a.pdf", "b.pdf", "c.pdf"])
+    _click(_tile_widget(widget, 0))
+    widget._move_later_button.click()
+    assert [a.path.name for a in widget.get_attachments()] == ["b.pdf", "a.pdf", "c.pdf"]
+    widget._on_tile_reorder_requested(1, 2)  # and a drop still reorders too
+    assert [a.path.name for a in widget.get_attachments()] == ["b.pdf", "c.pdf", "a.pdf"]
+
+
+def test_a_mouse_click_does_not_leave_a_focus_ring_that_looks_like_selection(qapp, tmp_path):
+    # The focus ring and the selection border share a color, so a ring left
+    # by a click would make a just-deselected tile still look selected.
+    from PySide6.QtGui import QFocusEvent
+    from PySide6.QtCore import QEvent
+
+    widget, _ = _make_widget_with_files(tmp_path, ["a.pdf"])
+    tile = _tile_widget(widget, 0)
+
+    # Focus arriving from a real click on the tile: no ring.
+    _click(tile)
+    tile.focusInEvent(QFocusEvent(QEvent.Type.FocusIn, Qt.FocusReason.MouseFocusReason))
+    assert tile.property("focused") == "false"
+
+    # Re-activating the window restores focus with ActiveWindowFocusReason;
+    # that must not suddenly draw a ring on a tile that was focused by click.
+    tile.focusOutEvent(QFocusEvent(QEvent.Type.FocusOut, Qt.FocusReason.ActiveWindowFocusReason))
+    tile.focusInEvent(QFocusEvent(QEvent.Type.FocusIn, Qt.FocusReason.ActiveWindowFocusReason))
+    assert tile.property("focused") == "false"
+
+    # Focus genuinely moving away and back by keyboard: the ring shows.
+    tile.focusOutEvent(QFocusEvent(QEvent.Type.FocusOut, Qt.FocusReason.TabFocusReason))
+    tile.focusInEvent(QFocusEvent(QEvent.Type.FocusIn, Qt.FocusReason.TabFocusReason))
+    assert tile.property("focused") == "true"
+
+
+def test_attachment_cards_have_no_hover_rules_left_in_the_theme(qapp):
+    from app.ui import theme
+
+    for name in (theme.THEME_DARK, theme.THEME_LIGHT):
+        css = theme.stylesheet_for(name)
+        assert "attachmentsList::item:hover" not in css
+        # The card's remove button is neutralized on hover, scoped to cards...
+        assert "QWidget#attachmentTile QToolButton#chipRemoveButton:hover" in css
+        # ...while the account cards, which use the same button, keep theirs.
+        assert "QToolButton#chipRemoveButton:hover {" in css
+
+
+def test_selected_card_has_a_static_border_not_just_a_faint_tint(qapp):
+    import re
+
+    from app.ui import theme
+
+    for name in (theme.THEME_DARK, theme.THEME_LIGHT):
+        css = theme.stylesheet_for(name)
+        block = re.search(r'QWidget#attachmentTile\[selected="true"\]\s*\{([^}]*)\}', css).group(1)
+        assert "border" in block
+
+
+def test_hovering_a_card_changes_nothing_on_screen(qapp, tmp_path):
+    # Rendered, not just inspected: hover the card and the remove button
+    # inside it under the real theme stylesheet and compare the pixels.
+    from PySide6.QtCore import QEvent, QPointF
+    from PySide6.QtGui import QHoverEvent
+    from PySide6.QtWidgets import QToolButton
+
+    from app.ui import theme
+
+    previous_sheet = qapp.styleSheet()
+    try:
+        for name in (theme.THEME_DARK, theme.THEME_LIGHT):
+            theme.set_active_theme(name)
+            qapp.setStyleSheet(theme.stylesheet_for(name))
+            theme_dir = tmp_path / name
+            theme_dir.mkdir()
+            widget, _ = _make_widget_with_files(theme_dir, ["a.pdf", "b.pdf"])
+            widget.resize(400, 240)
+            widget.show()
+            widget._list.clearSelection()
+            qapp.processEvents()
+
+            tile = _tile_widget(widget, 1)
+            button = tile.findChild(QToolButton, "chipRemoveButton")
+            before = widget.grab().toImage()
+            for target in (tile, button):
+                target.setAttribute(Qt.WidgetAttribute.WA_UnderMouse, True)
+                QApplication.sendEvent(target, QEvent(QEvent.Type.Enter))
+                QApplication.sendEvent(
+                    target,
+                    QHoverEvent(QEvent.Type.HoverEnter, QPointF(5, 5), QPointF(5, 5), QPointF(-1, -1)),
+                )
+            qapp.processEvents()
+            after = widget.grab().toImage()
+
+            assert before == after, f"hovering an attachment card changed the rendering ({name} theme)"
+            widget.close()
+    finally:
+        qapp.setStyleSheet(previous_sheet)
