@@ -38,7 +38,9 @@ def test_bold_and_link_rendering():
 def test_spoiler_and_code_rendering():
     entities = [MessageEntitySpoiler(offset=0, length=6), MessageEntityCode(offset=7, length=4)]
     html = entities_to_preview_html("secret code", entities)
-    assert "background:#54565c" in html
+    from app.ui import theme
+
+    assert f"background:{theme.spoiler_preview_color()}" in html
     assert "<code" in html
 
 
@@ -61,7 +63,6 @@ def test_emoji_including_astral_plane_renders_as_plain_text():
 def test_widget_update_preview(qapp):
     widget = MessagePreviewWidget()
     widget.update_preview("Hello", [MessageEntityBold(offset=0, length=5)], ["photo.jpg", "doc.pdf"])
-    assert "📎" in widget._attachments_label.text()
     assert "photo.jpg" in widget._attachments_label.text()
 
     widget.update_preview("", [], [])

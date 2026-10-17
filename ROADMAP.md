@@ -871,19 +871,12 @@ previously-untested module).
       token's real usage (4.5:1 normal text for primary/secondary body
       text and error/warning messages; 3:1 for large-scale text like
       `QLabel#statValue`'s 26px numbers and non-text UI components like
-      borders) -- all pass in both themes except one **known, tracked
-      gap**: the dark theme's primary-button text (white on `$accent`,
-      14px bold) measures 2.70:1, short of even the 3:1 large-text floor.
-      Investigated and deliberately not "fixed" by darkening `$accent`:
-      that token is also used as *text* color elsewhere against dark
-      backgrounds (links, checked nav state, card counts -- currently a
-      comfortable 5.7-6.6:1), and darkening it enough to fix the button
-      would drop every one of those to a new, worse near-3:1 shortfall --
-      trading one gap for several rather than fixing anything. A real fix
-      needs a second, purpose-built "button text" token, which is a
-      small design-system change outside this stage's scope; tracked by
-      a test that fails loudly if the ratio changes in either direction
-      without this note being updated, not silently ignored
+      borders) -- all pass in both themes. The one gap this stage had
+      tracked (dark theme's primary-button text, white on `$accent`,
+      2.70:1) was closed by the UI redesign: `$on_accent` is now its own
+      purpose-built token (dark text on the light-blue dark-theme accent,
+      6.2:1; white on the light-theme accent, 5.0:1), so `$accent` itself
+      didn't have to get darker for its other uses -- see docs/design.md
 - [x] Verify light/dark themes — `tests/test_color_contrast.py` checks
       both themes explicitly (not just dark); `tests/test_theme.py`
       already covered structural parity (every themed selector exists in

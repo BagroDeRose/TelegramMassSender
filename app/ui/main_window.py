@@ -328,13 +328,10 @@ class MainWindow(QMainWindow):
 
     def _apply_theme(self) -> None:
         settings = self._service.settings_repository.load_app_settings()
-        theme.set_active_theme(settings.theme)
-        app = QApplication.instance()
-        if app is None:
-            return
         try:
-            app.setStyleSheet(theme.stylesheet_for(settings.theme))
+            theme.apply_theme(QApplication.instance(), settings.theme)
         except Exception:  # noqa: BLE001 - never let a theming problem crash startup
+            theme.set_active_theme(settings.theme)
             self._logger.warning("Не удалось применить тему оформления: %s", settings.theme)
 
     def _on_theme_combo_changed(self, index: int) -> None:
@@ -346,10 +343,9 @@ class MainWindow(QMainWindow):
             return
         settings.theme = theme_name
         self._service.settings_repository.save_app_settings(settings)
-        theme.set_active_theme(theme_name)
-        app = QApplication.instance()
-        if app is not None:
-            app.setStyleSheet(theme.stylesheet_for(theme_name))
+        # Palette, stylesheet (once), title bars of every open window, and
+        # theme_changed for whatever paints colours itself.
+        theme.apply_theme(QApplication.instance(), theme_name)
         # QSS alone can't recolor baked icon pixmaps -- refresh those explicitly.
         self._sidebar.apply_theme()
         self._attachments_widget.apply_theme()
@@ -1184,7 +1180,8 @@ class MainWindow(QMainWindow):
             self._update_message_preview()
 
     def _update_message_preview(self) -> None:
-        attachment_names = [a.file_name for a in self._attachments_widget.get_attachments()]
+        attachments = self._attachments_widget.get_attachments()
+        attachment_names = [a.file_name for a in attachments]
         # Uses the same expand_name_placeholder() the real campaign send
         # path calls per-recipient (app.campaign.campaign_manager) --
         # never a second, preview-only formatting/substitution
@@ -1196,7 +1193,7 @@ class MainWindow(QMainWindow):
         preview_text, preview_entities = expand_name_placeholder(
             self._message_text, self._message_entities, self._preview_name_edit.text()
         )
-        self._message_preview.update_preview(preview_text, preview_entities, attachment_names)
+        self._message_preview.update_preview(preview_text, preview_entities, attachment_names, attachments)
         self._on_form_state_changed()
 
     # ---- message presets --------------------------------------------------

@@ -1,9 +1,10 @@
-"""Account selector: one card per connected account (spec items 7, 11, 37)
--- replaces the earlier combo-box selector, which made the active account
-hard to notice at a glance. Each card shows connection state clearly
-(never color-only) and carries its own "Use this account"/"Reconnect"/
-delete actions, since those are now per-account rather than tied to
-whatever happens to be selected in a shared combo.
+"""Accounts page content: one card per connected account (initials avatar,
+name, @username / phone, a status pill, and its actions), plus the page's
+single primary action, "Add account".
+
+Everything is styled through QSS object names and the `status`/`active`
+properties -- no colour is baked into a pixmap or inline HTML, so a theme
+switch needs no rebuild here.
 """
 from __future__ import annotations
 
@@ -14,48 +15,58 @@ from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QToolBut
 
 from app.i18n import tr
 from app.telegram.account_manager import AccountStatus
-from app.ui import icons, theme
+from app.ui import icons
 from app.ui.empty_state import build_empty_state, retranslate_empty_state
-from app.ui.theme import SPACE_MD, SPACE_SM, SPACE_XS
-
-_CARD_MAX_WIDTH = 420
-_AVATAR_SIZE = 40
-
-# Maps a status variant name to the Tokens field that carries its color --
-# "muted" has no same-named token (it's `text_muted`), so this is an
-# explicit table rather than a getattr(tokens, variant) guess.
-_VARIANT_TOKEN_FIELD = {
-    "success": "success",
-    "warning": "warning",
-    "error": "error",
-    "muted": "text_muted",
-}
+from app.ui.theme import ACCOUNT_CARD_MAX_WIDTH, ICON_SIZE, SPACE_LG, SPACE_MD, SPACE_SM, SPACE_XS, icon_qsize
 
 
-def _status_text_and_variant(status: AccountStatus) -> tuple[str, str]:
+def status_text_and_variant(status: AccountStatus) -> tuple[str, str]:
+    """(label, status property) for an account's connection state -- shared
+    with the sidebar's account block."""
     if status.is_authorized:
         return tr("account_widget.status.connected"), "success"
     if status.connection_error:
         return tr("account_widget.status.connection_problem"), "warning"
     if status.needs_reauth:
         return tr("account_widget.status.reauth_required"), "error"
-    return tr("account_widget.status.not_authorized"), "muted"
+    return tr("account_widget.status.not_authorized"), ""
+
+
+# Kept under its old name for callers/tests of the previous version.
+_status_text_and_variant = status_text_and_variant
+
+
+def account_initials(account) -> str:
+    """Up to two initials from the name shown on the card."""
+    for candidate in (account.local_alias, account.display_name, account.username):
+        if candidate:
+            words = [w for w in candidate.replace("_", " ").split() if w]
+            letters = "".join(w[0] for w in words[:2]) if words else candidate[:1]
+            return letters.upper()
+    digits = account.phone.lstrip("+")
+    return digits[-2:] if digits else "?"
 
 
 def _avatar_initial(account) -> str:
-    for candidate in (account.local_alias, account.display_name, account.username, account.phone.lstrip("+")):
-        if candidate:
-            return candidate[0]
-    return "?"
+    return account_initials(account)[:1]
 
 
-def _display_name(account) -> str:
-    """The name shown as the card's title -- a user-set local alias wins
-    over Telegram's own profile name, which wins over the phone number.
-    Distinct from account.display_name (Telegram's own first/last name,
-    refreshed from the server) -- this is what the *card* shows, not what
-    gets persisted."""
+def display_name(account) -> str:
+    """A user-set local alias wins over Telegram's own profile name, which
+    wins over the phone number."""
     return account.local_alias or account.display_name or account.phone
+
+
+_display_name = display_name
+
+
+def make_avatar(text: str, parent: QWidget, large: bool = False) -> QLabel:
+    avatar = QLabel(text, parent)
+    avatar.setObjectName("avatar")
+    avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    if large:
+        avatar.setProperty("size", "large")
+    return avatar
 
 
 class AccountWidget(QWidget):
@@ -79,22 +90,25 @@ class AccountWidget(QWidget):
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.setSpacing(SPACE_MD)
 
-        top_row = QHBoxLayout()
-        self._add_button = QPushButton(tr("account_widget.add_account_button"), self)
-        self._add_button.setObjectName("primaryButton")
-        self._add_button.clicked.connect(self.add_account_requested.emit)
-        top_row.addWidget(self._add_button)
-        self._try_demo_button = QPushButton(tr("account_widget.try_demo_button"), self)
-        self._try_demo_button.setObjectName("ghostButton")
-        self._try_demo_button.clicked.connect(self.try_demo_mode_requested.emit)
-        top_row.addWidget(self._try_demo_button)
-        top_row.addStretch(1)
-        self._layout.addLayout(top_row)
-
         self._empty_label = build_empty_state(
-            tr("account_widget.empty_title"), tr("account_widget.empty_body"), self
+            tr("account_widget.empty_title"), tr("account_widget.empty_body"), self, icon_name="accounts"
         )
         self._layout.addWidget(self._empty_label)
+
+        self._actions_widget = QWidget(self)
+        self._actions_row = QHBoxLayout(self._actions_widget)
+        self._actions_row.setContentsMargins(0, 0, 0, 0)
+        self._actions_row.setSpacing(SPACE_SM)
+        self._add_button = QPushButton(tr("account_widget.add_account_button"), self._actions_widget)
+        self._add_button.setProperty("variant", "primary")
+        self._add_button.setIcon(icons.themed("add_account", "on_accent"))
+        self._add_button.clicked.connect(self.add_account_requested.emit)
+        self._try_demo_button = QPushButton(tr("account_widget.try_demo_button"), self._actions_widget)
+        self._try_demo_button.setProperty("variant", "ghost")
+        self._try_demo_button.clicked.connect(self.try_demo_mode_requested.emit)
+        self._actions_row.addWidget(self._add_button)
+        self._actions_row.addWidget(self._try_demo_button)
+        self._layout.addWidget(self._actions_widget)
 
         self._cards_container = QVBoxLayout()
         self._cards_container.setSpacing(SPACE_SM)
@@ -102,17 +116,27 @@ class AccountWidget(QWidget):
         self._layout.addStretch(1)
 
         self._cards: List[QFrame] = []
+        self._sync_empty_layout()
 
     def set_accounts(self, statuses: List[AccountStatus], selected_id: Optional[int] = None) -> None:
         self._statuses = statuses
         self._active_account_id = selected_id
         self._clear_cards()
 
-        self._empty_label.setVisible(not statuses)
         for status in statuses:
             card = self._build_card(status, status.account.id == selected_id)
             self._cards_container.addWidget(card)
             self._cards.append(card)
+        self._sync_empty_layout()
+
+    def _sync_empty_layout(self) -> None:
+        empty = not self._statuses
+        self._empty_label.setVisible(empty)
+        # In the empty state the one action sits centred under the message;
+        # with accounts listed it's a plain toolbar row above the cards.
+        self._layout.setAlignment(
+            self._actions_widget, Qt.AlignmentFlag.AlignHCenter if empty else Qt.AlignmentFlag.AlignLeft
+        )
 
     def _clear_cards(self) -> None:
         for card in self._cards:
@@ -129,135 +153,113 @@ class AccountWidget(QWidget):
         card = QFrame(self)
         card.setObjectName("accountCard")
         card.setProperty("active", "true" if is_active else "false")
-        card.setMaximumWidth(_CARD_MAX_WIDTH)
+        card.setMaximumWidth(ACCOUNT_CARD_MAX_WIDTH)
 
-        outer = QVBoxLayout(card)
-        outer.setContentsMargins(SPACE_MD, SPACE_MD, SPACE_MD, SPACE_MD)
-        outer.setSpacing(SPACE_SM)
+        row = QHBoxLayout(card)
+        row.setContentsMargins(SPACE_LG, SPACE_MD, SPACE_MD, SPACE_MD)
+        row.setSpacing(SPACE_MD)
 
-        header = QHBoxLayout()
-        header.setSpacing(SPACE_MD)
-
-        tokens = theme.current_tokens()
-        avatar_label = QLabel(card)
-        avatar_label.setPixmap(
-            icons.avatar_pixmap(_avatar_initial(account), tokens.accent, tokens.on_accent, _AVATAR_SIZE)
-        )
-        avatar_label.setFixedSize(_AVATAR_SIZE, _AVATAR_SIZE)
-        header.addWidget(avatar_label, 0, Qt.AlignmentFlag.AlignTop)
+        row.addWidget(make_avatar(account_initials(account), card, large=True), 0, Qt.AlignmentFlag.AlignVCenter)
 
         text_col = QVBoxLayout()
-        text_col.setSpacing(2)
-        display_name = _display_name(account)
+        text_col.setSpacing(SPACE_XS)
+        name = display_name(account)
         name_row = QHBoxLayout()
-        name_row.setSpacing(4)
-        name_label = QLabel(display_name, card)
+        name_row.setSpacing(SPACE_XS)
+        name_label = QLabel(name, card)
         name_label.setObjectName("accountName")
         name_row.addWidget(name_label)
         rename_button = QToolButton(card)
-        rename_button.setObjectName("toolbarButton")
+        rename_button.setProperty("variant", "icon")
         rename_button.setProperty("accountId", account.id)
-        rename_button.setIcon(icons.icon("edit", tokens.text_muted, 12))
+        rename_button.setIcon(icons.themed("edit", "text_muted"))
+        rename_button.setIconSize(icon_qsize(ICON_SIZE))
         rename_button.setToolTip(tr("account_widget.rename_tooltip"))
-        # Icon-only button: a screen reader has nothing else to announce
-        # here (its tooltip text is a separate accessibility role, not
-        # automatically used as the name).
+        # Icon-only: give screen readers a name (a tooltip isn't one).
         rename_button.setAccessibleName(tr("account_widget.rename_tooltip"))
         rename_button.clicked.connect(lambda: self.rename_requested.emit(account.id))
         name_row.addWidget(rename_button)
         name_row.addStretch(1)
         self._rename_buttons.append(rename_button)
         text_col.addLayout(name_row)
+
+        meta_row = QHBoxLayout()
+        meta_row.setSpacing(SPACE_SM)
         if account.username:
             username_label = QLabel(f"@{account.username}", card)
             username_label.setObjectName("accountMeta")
-            text_col.addWidget(username_label)
-        # Always shown unless it would just repeat the title above (no
-        # alias/display_name set, so the phone is already the name).
-        if display_name != account.phone:
+            meta_row.addWidget(username_label)
+        # Shown unless it would just repeat the title (phone is the name).
+        if name != account.phone:
             phone_label = QLabel(account.phone, card)
             phone_label.setObjectName("accountMeta")
-            text_col.addWidget(phone_label)
+            meta_row.addWidget(phone_label)
+        meta_row.addStretch(1)
+        text_col.addLayout(meta_row)
+        row.addLayout(text_col, 1)
 
-        state_text, variant = _status_text_and_variant(status)
-        dot_color = getattr(tokens, _VARIANT_TOKEN_FIELD.get(variant, "text_muted"), tokens.text_muted)
-        status_label = QLabel(
-            f'<span style="color:{dot_color};">●</span>&nbsp;&nbsp;{state_text}', card
-        )
-        status_label.setObjectName("accountMeta")
-        text_col.addWidget(status_label)
+        state_text, state = status_text_and_variant(status)
+        status_pill = QLabel(state_text, card)
+        status_pill.setObjectName("pill")
+        status_pill.setProperty("status", state)
+        row.addWidget(status_pill, 0, Qt.AlignmentFlag.AlignVCenter)
 
-        header.addLayout(text_col, 1)
-        outer.addLayout(header)
-
-        actions = QHBoxLayout()
-        actions.addStretch(1)
         if status.connection_error:
             reconnect_button = QPushButton(tr("account_widget.reconnect_button"), card)
+            reconnect_button.setIcon(icons.themed("refresh"))
             reconnect_button.setProperty("accountId", account.id)
             reconnect_button.clicked.connect(lambda: self.reconnect_requested.emit(account.id))
-            actions.addWidget(reconnect_button)
+            row.addWidget(reconnect_button, 0, Qt.AlignmentFlag.AlignVCenter)
             self._reconnect_buttons.append(reconnect_button)
+
         use_button = QPushButton(
             tr("account_widget.use_button_active") if is_active else tr("account_widget.use_button_inactive"), card
         )
         use_button.setObjectName("accountUseButton")
+        # The active account's button is a state, not an action: quiet, with
+        # a check mark. Switching to another account is a normal action.
+        use_button.setProperty("variant", "ghost" if is_active else "secondary")
+        if is_active:
+            use_button.setIcon(icons.themed("check", "success"))
         use_button.setProperty("active", "true" if is_active else "false")
         use_button.setProperty("accountId", account.id)
         use_button.setEnabled(not is_active)
         use_button.clicked.connect(lambda: self.account_selected.emit(account.id))
-        actions.addWidget(use_button)
+        row.addWidget(use_button, 0, Qt.AlignmentFlag.AlignVCenter)
         self._use_buttons.append(use_button)
 
         delete_button = QToolButton(card)
-        delete_button.setObjectName("chipRemoveButton")
+        delete_button.setProperty("variant", "icon")
         delete_button.setProperty("accountId", account.id)
-        delete_button.setIcon(icons.icon("close", theme.current_tokens().text_muted, 12))
+        delete_button.setIcon(icons.themed("delete", "text_muted", active_role="error"))
+        delete_button.setIconSize(icon_qsize(ICON_SIZE))
         delete_button.setToolTip(tr("account_widget.delete_tooltip"))
         delete_button.setAccessibleName(tr("account_widget.delete_tooltip"))
         delete_button.clicked.connect(lambda: self.delete_account_requested.emit(account.id))
-        actions.addWidget(delete_button)
+        row.addWidget(delete_button, 0, Qt.AlignmentFlag.AlignVCenter)
         self._delete_buttons.append(delete_button)
-
-        outer.addLayout(actions)
         return card
 
     def current_account_id(self) -> Optional[int]:
         return self._active_account_id
 
     def apply_theme(self) -> None:
-        """Rebuild the cards after a theme switch -- the avatar pixmap and
-        the status-dot color are baked in Python at build time (QSS can't
-        reach a QPixmap or inline-HTML QLabel content), so unlike most of
-        this app's QSS-only widgets, this one needs an explicit refresh."""
-        self.set_accounts(self._statuses, self._active_account_id)
+        """Nothing is baked in any more (avatars, pills and icons all follow
+        the active theme by themselves); kept so callers can still ask."""
 
     def retranslate_ui(self) -> None:
         self._add_button.setText(tr("account_widget.add_account_button"))
         self._try_demo_button.setText(tr("account_widget.try_demo_button"))
         retranslate_empty_state(self._empty_label, tr("account_widget.empty_title"), tr("account_widget.empty_body"))
-        # Every card's text is fully rebuilt from tr() calls anyway -- same
-        # rebuild apply_theme() already relies on for its own baked-in
-        # (non-QSS) content, so no separate per-widget retranslation path
-        # is needed here.
         self.set_accounts(self._statuses, self._active_account_id)
 
     def refresh_active_state(self, account_id: Optional[int]) -> None:
-        """Rebuild the cards to reflect `account_id` as active (or no
-        account active, if None) -- the single place this widget's
-        displayed state gets resynced to whatever
-        app.telegram.account_manager considers active. Works even when
-        `account_id` isn't in the cached statuses (e.g. restoring "no
-        account was active" after a failed switch), unlike a lookup-first
-        variant would."""
+        """Rebuild the cards with `account_id` as active (or none)."""
         self.set_accounts(self._statuses, account_id)
 
     def begin_switch(self, account_id: int) -> None:
-        """Transitional state while an account switch is in flight:
-        disable all account interaction and label the target account's
-        button so a click gets immediate feedback instead of silence.
-        Cleared by the next refresh_active_state() call (success or
-        failure), which rebuilds every card from scratch."""
+        """While a switch is in flight: disable all account interaction and
+        label the target's button. Cleared by the next refresh_active_state()."""
         self.set_enabled_switching(False)
         for button in self._use_buttons:
             if button.property("accountId") == account_id:
@@ -274,3 +276,4 @@ class AccountWidget(QWidget):
             button.setEnabled(enabled)
         for button in self._rename_buttons:
             button.setEnabled(enabled)
+
