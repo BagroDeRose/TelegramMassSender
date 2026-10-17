@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import ctypes
 import sys
+import warnings
 from dataclasses import asdict
 from typing import Dict, List, Optional
 
@@ -388,16 +389,20 @@ notifier = ThemeNotifier()
 
 
 def on_theme_changed(receiver: QObject, callback) -> None:
-    """Connect `callback` to theme changes for as long as `receiver` lives.
-    Using a QObject receiver means Qt drops the connection automatically
-    when the widget is destroyed -- no dangling calls into deleted widgets."""
+    """Connect `callback` to theme changes for as long as `receiver` lives:
+    the connection is dropped when the receiver is destroyed, so a theme
+    switch never calls into a deleted widget."""
     notifier.theme_changed.connect(callback)
 
     def _disconnect(*_args, cb=callback) -> None:
-        try:
-            notifier.theme_changed.disconnect(cb)
-        except (RuntimeError, TypeError):
-            pass
+        # During application teardown Qt may already have dropped the
+        # connection; PySide reports that as a RuntimeWarning, not an error.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", RuntimeWarning)
+            try:
+                notifier.theme_changed.disconnect(cb)
+            except (RuntimeError, TypeError):
+                pass
 
     receiver.destroyed.connect(_disconnect)
 
