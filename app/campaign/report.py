@@ -28,6 +28,19 @@ _KIND_LABELS = {
     RecipientKind.USERNAME: "username",
     RecipientKind.USER_ID: "Telegram ID",
     RecipientKind.PHONE: "телефон",
+    RecipientKind.CHAT_ID: "ID чата",
+    RecipientKind.INVITE_LINK: "ссылка-приглашение",
+}
+
+# Once a target resolved to a group/supergroup/channel, "Тип" says which
+# (app.telegram.chat_targets.TargetType values). A forum is a supergroup
+# with topics, and is reported as one. Users keep the identifier-kind
+# label they always had.
+_CHAT_TYPE_LABELS = {
+    "group": "группа",
+    "supergroup": "супергруппа",
+    "forum": "супергруппа",
+    "channel": "канал",
 }
 
 _HEADER = [
@@ -47,6 +60,11 @@ def _kind_label(kind) -> str:
     if kind is None:
         return "неизвестно"
     return _KIND_LABELS.get(kind, str(getattr(kind, "value", kind)))
+
+
+def _type_label(item: SendItem) -> str:
+    chat_label = _CHAT_TYPE_LABELS.get(item.target_type or "")
+    return chat_label or _kind_label(item.recipient.kind)
 
 
 _FORMULA_TRIGGER_CHARS = ("=", "+", "-", "@", "\t", "\r")
@@ -72,8 +90,10 @@ def build_report_rows(items: List[SendItem]) -> List[List[str]]:
         rows.append(
             [
                 _sanitize_csv_cell(item.recipient.raw.strip()),
-                _kind_label(item.recipient.kind),
-                str(item.resolved_id) if item.resolved_id is not None else "",
+                _type_label(item),
+                # A chat's marked id is negative; sanitizing also keeps a
+                # spreadsheet from turning it into -1.0E+12.
+                _sanitize_csv_cell(str(item.resolved_id)) if item.resolved_id is not None else "",
                 _sanitize_csv_cell(item.resolved_username or ""),
                 _STATUS_LABELS.get(item.status, str(item.status)),
                 _sanitize_csv_cell(item.error or ""),
