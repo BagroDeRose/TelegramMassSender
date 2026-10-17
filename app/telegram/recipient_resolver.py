@@ -1,7 +1,15 @@
-"""Resolve parsed recipient identifiers into Telegram user entities.
+"""Resolve parsed recipient identifiers into Telegram entities.
 
-Only private users may be targeted (spec items 1, 14): groups, channels
-and any other non-user entity are rejected here and never sent to.
+A target is either a user, or a group/supergroup/channel the account is
+already a member of (app.telegram.chat_targets). @username / t.me/username
+can name either -- the resolved entity decides. Marked chat ids
+(-100.../-...) carry no access_hash, so the account's own dialogs are
+fetched once per resolver (lazily, the first time such an id comes up) to
+find them; a chat id that isn't among them means the account isn't in that
+chat. Invite links are only *checked* (CheckChatInviteRequest), never
+joined: unless Telegram answers ChatInviteAlready, the target fails with
+"not a member". Any other entity type is still rejected (NOT_A_USER).
+
 Results are cached per resolver instance (bounded to one campaign's
 recipient list) to avoid redundant get_entity calls against the same
 identifier (spec item 47) -- the cache is not persisted or shared beyond
@@ -10,23 +18,34 @@ that.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 from telethon import TelegramClient
 from telethon.errors import (
     FloodWaitError,
+    InviteHashEmptyError,
+    InviteHashExpiredError,
+    InviteHashInvalidError,
     PeerIdInvalidError,
     PhoneNotOccupiedError,
     PhoneNumberInvalidError,
+    RPCError,
     UsernameInvalidError,
     UsernameNotOccupiedError,
 )
 from telethon.tl.functions.contacts import ResolvePhoneRequest
-from telethon.tl.types import User
+from telethon.tl.functions.messages import CheckChatInviteRequest
+from telethon.tl.types import ChatInviteAlready, User
 
 from app.i18n import tr
 from app.logging.logger import get_logger
 from app.recipients.parser import ParsedRecipient, RecipientKind
+from app.telegram.chat_targets import (
+    TargetType,
+    chat_error_reason_key,
+    chat_peer_id,
+    target_type_of,
+)
 
 logger = get_logger()
 
@@ -39,6 +58,10 @@ class ResolveStatus:
     NOT_A_USER = "not_a_user"
     UNAVAILABLE = "unavailable"
     PHONE_NOT_FOUND = "phone_not_found"
+    # Group/channel targets.
+    NOT_MEMBER = "not_member"
+    NO_ACCESS = "no_access"
+    INVITE_INVALID = "invite_invalid"
 
 
 _STATUS_LABEL_KEYS: Dict[str, str] = {
@@ -49,6 +72,9 @@ _STATUS_LABEL_KEYS: Dict[str, str] = {
     ResolveStatus.NOT_A_USER: "recipient_resolver.status.cannot_message",
     ResolveStatus.UNAVAILABLE: "recipient_resolver.status.cannot_message",
     ResolveStatus.PHONE_NOT_FOUND: "recipient_resolver.status.phone_not_found",
+    ResolveStatus.NOT_MEMBER: "chat_targets.reason.not_member",
+    ResolveStatus.NO_ACCESS: "chat_targets.reason.no_access",
+    ResolveStatus.INVITE_INVALID: "chat_targets.reason.invite_invalid",
 }
 
 
@@ -76,18 +102,63 @@ STATUS_LABELS = _StatusLabels()
 class ResolvedRecipient:
     parsed: ParsedRecipient
     status: str
-    entity: Optional[User] = None
+    entity: Optional[Any] = None  # User, or Chat/Channel for a chat target
     error: Optional[str] = None
+    target_type: Optional[TargetType] = None
 
     @property
     def is_ready(self) -> bool:
         return self.status == ResolveStatus.READY
+
+    @property
+    def is_chat(self) -> bool:
+        return self.target_type is not None and self.target_type.is_chat
 
 
 class RecipientResolver:
     def __init__(self, client: TelegramClient) -> None:
         self._client = client
         self._cache: Dict[str, ResolvedRecipient] = {}
+        # Marked id -> chat entity, from the account's own dialogs; None
+        # until fetched (see ensure_dialogs_loaded).
+        self._dialog_chats: Optional[Dict[int, Any]] = None
+
+    @property
+    def dialogs_loaded(self) -> bool:
+        return self._dialog_chats is not None
+
+    async def ensure_dialogs_loaded(self) -> None:
+        """Fetch the account's dialogs once, which is also what gives
+        Telethon the access_hash it needs for a bare marked chat id.
+        FloodWaitError propagates (the campaign pauses on it exactly like
+        on a send); nothing is cached on failure, so the next call retries
+        the fetch from scratch."""
+        if self._dialog_chats is not None:
+            return
+        chats: Dict[int, Any] = {}
+        async for dialog in self._client.iter_dialogs():
+            entity = dialog.entity
+            target_type = target_type_of(entity)
+            if target_type is not None and target_type.is_chat:
+                chats[chat_peer_id(entity)] = entity
+        self._dialog_chats = chats
+        logger.info("Загружены диалоги аккаунта: чатов %d", len(chats))
+
+    def _from_entity(self, parsed: ParsedRecipient, entity: Any) -> ResolvedRecipient:
+        target_type = target_type_of(entity)
+        if target_type is TargetType.USER:
+            return ResolvedRecipient(parsed=parsed, status=ResolveStatus.READY, entity=entity, target_type=target_type)
+        if target_type is not None:
+            return ResolvedRecipient(parsed=parsed, status=ResolveStatus.READY, entity=entity, target_type=target_type)
+        return ResolvedRecipient(
+            parsed=parsed,
+            status=ResolveStatus.NOT_A_USER,
+            error=tr("recipient_resolver.error.not_a_user"),
+        )
+
+    @staticmethod
+    def _failed(parsed: ParsedRecipient, status: str, error_key: Optional[str] = None) -> ResolvedRecipient:
+        return ResolvedRecipient(parsed=parsed, status=status, error=tr(error_key) if error_key else STATUS_LABELS[status])
 
     async def resolve(self, parsed: ParsedRecipient) -> ResolvedRecipient:
         if not parsed.is_valid:
@@ -105,7 +176,20 @@ class RecipientResolver:
             self._cache[cache_key] = result
             return result
 
-        identifier = int(parsed.value) if parsed.kind == RecipientKind.USER_ID else parsed.value
+        if parsed.kind == RecipientKind.INVITE_LINK:
+            result = await self._resolve_invite(parsed)
+            self._cache[cache_key] = result
+            return result
+
+        if parsed.kind == RecipientKind.CHAT_ID:
+            await self.ensure_dialogs_loaded()  # FloodWaitError propagates
+            entity = self._dialog_chats.get(int(parsed.value))
+            if entity is not None:
+                result = self._from_entity(parsed, entity)
+                self._cache[cache_key] = result
+                return result
+
+        identifier = int(parsed.value) if parsed.kind in (RecipientKind.USER_ID, RecipientKind.CHAT_ID) else parsed.value
 
         try:
             entity = await self._client.get_entity(identifier)
@@ -120,25 +204,41 @@ class RecipientResolver:
                 parsed=parsed, status=ResolveStatus.NOT_FOUND, error=STATUS_LABELS[ResolveStatus.NOT_FOUND]
             )
         except PeerIdInvalidError:
-            result = ResolvedRecipient(
-                parsed=parsed, status=ResolveStatus.INVALID_ID, error=STATUS_LABELS[ResolveStatus.INVALID_ID]
-            )
+            if parsed.kind == RecipientKind.CHAT_ID:
+                result = self._failed(parsed, ResolveStatus.NOT_MEMBER)
+            else:
+                result = ResolvedRecipient(
+                    parsed=parsed, status=ResolveStatus.INVALID_ID, error=STATUS_LABELS[ResolveStatus.INVALID_ID]
+                )
         except ValueError:
-            result = ResolvedRecipient(
-                parsed=parsed, status=ResolveStatus.NOT_FOUND, error=STATUS_LABELS[ResolveStatus.NOT_FOUND]
-            )
+            if parsed.kind == RecipientKind.CHAT_ID:
+                # Not among the account's dialogs and unknown to the
+                # session: the account isn't in this chat.
+                result = self._failed(parsed, ResolveStatus.NOT_MEMBER)
+            else:
+                result = ResolvedRecipient(
+                    parsed=parsed, status=ResolveStatus.NOT_FOUND, error=STATUS_LABELS[ResolveStatus.NOT_FOUND]
+                )
+        except RPCError as exc:
+            reason_key = chat_error_reason_key(exc)
+            if reason_key is not None:
+                result = self._failed(parsed, ResolveStatus.NO_ACCESS, reason_key)
+            else:
+                logger.warning("Ошибка resolve получателя %s: %s", parsed.raw, exc)
+                result = ResolvedRecipient(parsed=parsed, status=ResolveStatus.UNAVAILABLE, error=str(exc))
         except Exception as exc:  # noqa: BLE001 - network/unexpected, surfaced per-recipient
             logger.warning("Ошибка resolve получателя %s: %s", parsed.raw, exc)
             result = ResolvedRecipient(parsed=parsed, status=ResolveStatus.UNAVAILABLE, error=str(exc))
         else:
-            if isinstance(entity, User):
-                result = ResolvedRecipient(parsed=parsed, status=ResolveStatus.READY, entity=entity)
-            else:
+            if parsed.kind == RecipientKind.USER_ID and not isinstance(entity, User):
+                # A positive id always meant a user; keep it that way.
                 result = ResolvedRecipient(
                     parsed=parsed,
                     status=ResolveStatus.NOT_A_USER,
                     error=tr("recipient_resolver.error.not_a_user"),
                 )
+            else:
+                result = self._from_entity(parsed, entity)
 
         self._cache[cache_key] = result
         return result
@@ -175,7 +275,31 @@ class RecipientResolver:
                 status=ResolveStatus.NOT_A_USER,
                 error=tr("recipient_resolver.error.not_a_user"),
             )
-        return ResolvedRecipient(parsed=parsed, status=ResolveStatus.READY, entity=entity)
+        return ResolvedRecipient(parsed=parsed, status=ResolveStatus.READY, entity=entity, target_type=TargetType.USER)
+
+    async def _resolve_invite(self, parsed: ParsedRecipient) -> ResolvedRecipient:
+        """Check an invite link without ever joining: only ChatInviteAlready
+        (the account is already in that chat) yields a usable target."""
+        try:
+            response = await self._client(CheckChatInviteRequest(hash=parsed.value))
+        except FloodWaitError:
+            raise
+        except (InviteHashExpiredError, InviteHashInvalidError, InviteHashEmptyError):
+            return self._failed(parsed, ResolveStatus.INVITE_INVALID)
+        except RPCError as exc:
+            reason_key = chat_error_reason_key(exc)
+            if reason_key is not None:
+                return self._failed(parsed, ResolveStatus.NO_ACCESS, reason_key)
+            logger.warning("Ошибка проверки ссылки-приглашения: %s", exc)
+            return ResolvedRecipient(parsed=parsed, status=ResolveStatus.UNAVAILABLE, error=str(exc))
+        except Exception as exc:  # noqa: BLE001 - network/unexpected, surfaced per-recipient
+            logger.warning("Ошибка проверки ссылки-приглашения: %s", exc)
+            return ResolvedRecipient(parsed=parsed, status=ResolveStatus.UNAVAILABLE, error=str(exc))
+
+        if isinstance(response, ChatInviteAlready):
+            return self._from_entity(parsed, response.chat)
+        # ChatInvite / ChatInvitePeek: the account is not a participant.
+        return self._failed(parsed, ResolveStatus.NOT_MEMBER)
 
     def clear_cache(self) -> None:
         self._cache.clear()

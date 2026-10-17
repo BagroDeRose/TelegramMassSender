@@ -786,6 +786,97 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "en": "The recipient must be a user, not a group or channel",
     },
 
+    # ---- app/telegram/chat_targets.py: group/channel targets --------------
+    "chat_targets.type.user": {"ru": "пользователь", "en": "user"},
+    "chat_targets.type.group": {"ru": "группа", "en": "group"},
+    "chat_targets.type.supergroup": {"ru": "супергруппа", "en": "supergroup"},
+    "chat_targets.type.forum": {"ru": "форум", "en": "forum"},
+    "chat_targets.type.channel": {"ru": "канал", "en": "channel"},
+    "chat_targets.reason.not_member": {
+        "ru": "аккаунт не состоит в этом чате",
+        "en": "the account is not a member of this chat",
+    },
+    "chat_targets.reason.no_access": {
+        "ru": "нет доступа к чату (аккаунт удалён из него или чат закрыт)",
+        "en": "no access to this chat (the account was removed or the chat is closed)",
+    },
+    "chat_targets.reason.private": {
+        "ru": "чат или канал приватный, либо аккаунт был из него удалён",
+        "en": "the chat or channel is private, or the account was removed from it",
+    },
+    "chat_targets.reason.invalid": {
+        "ru": "чат не найден или недоступен",
+        "en": "chat not found or unavailable",
+    },
+    "chat_targets.reason.invite_invalid": {
+        "ru": "ссылка-приглашение недействительна или истекла",
+        "en": "the invite link is invalid or has expired",
+    },
+    "chat_targets.reason.channel_admin_required": {
+        "ru": "нужны права администратора с правом публикации",
+        "en": "admin rights with permission to post are required",
+    },
+    "chat_targets.reason.write_forbidden": {
+        "ru": "в этом чате участникам запрещено писать",
+        "en": "members are not allowed to write in this chat",
+    },
+    "chat_targets.reason.write_forbidden_personal": {
+        "ru": "аккаунту запрещено писать в этом чате",
+        "en": "this account is not allowed to write in this chat",
+    },
+    "chat_targets.reason.banned": {
+        "ru": "аккаунт заблокирован в этом чате",
+        "en": "this account is banned in this chat",
+    },
+    "chat_targets.reason.plain_forbidden": {
+        "ru": "в этом чате запрещены текстовые сообщения",
+        "en": "text messages are not allowed in this chat",
+    },
+    "chat_targets.reason.media_forbidden": {
+        "ru": "в этом чате запрещено отправлять медиа или файлы такого типа",
+        "en": "sending media or files of this type is not allowed in this chat",
+    },
+    "chat_targets.reason.restricted": {
+        "ru": "Telegram ограничил этот чат",
+        "en": "Telegram has restricted this chat",
+    },
+    "chat_targets.reason.account_restricted": {
+        "ru": "Telegram ограничил аккаунту отправку сообщений в группы и каналы",
+        "en": "Telegram has restricted this account from posting in groups and channels",
+    },
+    "chat_targets.reason.slowmode_multi": {
+        "ru": "медленный режим: в этот чат нельзя отправить сообщение из нескольких частей",
+        "en": "slow mode: a multi-part message can't be posted to this chat",
+    },
+    "chat_targets.reason.slowmode_wait": {
+        "ru": "медленный режим, подождите {seconds} сек.",
+        "en": "slow mode, wait {seconds} sec.",
+    },
+    "chat_targets.reason.forum_general_closed": {
+        "ru": "форум: тема «General» закрыта для сообщений",
+        "en": "forum: the “General” topic is closed",
+    },
+    "chat_targets.reason.forum_general_unavailable": {
+        "ru": "форум: не удалось отправить в тему «General»",
+        "en": "forum: couldn't post to the “General” topic",
+    },
+    "chat_targets.reason.migrated": {
+        "ru": "группа преобразована в супергруппу — используйте её новый ID",
+        "en": "the group was upgraded to a supergroup — use its new ID",
+    },
+    "chat_targets.reason.deactivated": {
+        "ru": "группа деактивирована",
+        "en": "the group has been deactivated",
+    },
+    "chat_targets.reason.paid_messages": {
+        "ru": "чат принимает только платные сообщения — не поддерживается",
+        "en": "this chat only accepts paid messages — not supported",
+    },
+    "chat_targets.reason.duplicate_chat": {
+        "ru": "уже доставлено в этот чат",
+        "en": "already delivered to this chat",
+    },
+
     # ---- app/campaign/campaign_manager.py: Journal messages -----------------
     "campaign_manager.journal.started": {"ru": "▶ Рассылка запущена: получателей {count}", "en": "▶ Campaign started: {count} recipients"},
     "campaign_manager.journal.paused": {"ru": "⏸ Рассылка поставлена на паузу", "en": "⏸ Campaign paused"},
