@@ -22,6 +22,7 @@ from typing import List
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
+from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtWidgets import QApplication
 from telethon.client.telegrambaseclient import TelegramBaseClient
 
@@ -46,6 +47,32 @@ def _is_loopback(address) -> bool:
 def qapp():
     app = QApplication.instance() or QApplication([])
     yield app
+
+
+@pytest.fixture(autouse=True)
+def _dispose_top_level_widgets():
+    """Destroy every top-level widget a test left behind.
+
+    Tests build MainWindows, dialogs and parentless widgets and never close
+    them. They used to live for the rest of the session, and every later
+    QApplication.setStyleSheet() (each MainWindow applies its theme on
+    construction) re-polished all of them -- so each test got slower than
+    the one before, and the full suite in one process took hours.
+
+    Widgets are hidden and deleteLater()'d rather than close()'d:
+    MainWindow.closeEvent starts the app's async shutdown sequence, which
+    is not what a test teardown wants. The DeferredDelete events are then
+    flushed so the deletion happens now, not at some later processEvents.
+    """
+    yield
+    app = QApplication.instance()
+    if app is None:
+        return
+    for widget in app.topLevelWidgets():
+        widget.hide()
+        widget.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    app.processEvents()
 
 
 @pytest.fixture(autouse=True)
