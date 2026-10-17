@@ -80,12 +80,15 @@ WINDOW_DEFAULT_HEIGHT = 840
 COMBO_MIN_WIDTH = 180
 BORDER_WIDTH = 1
 SEGMENT_PADDING = 2
+PILL_TINT_ALPHA = 0.12
 HEADER_GAP = 2
 RESULTS_ROW_HEIGHT = 40
 RESULTS_COL_CHECK = 32
 RESULTS_COL_STATUS = 120
 RESULTS_COL_TYPE = 140
 RESULTS_COL_ID = 150
+RESULTS_COL_FLEX_MIN = 140
+RESULTS_FIXED_MIN_SCALE = 0.7
 RESULTS_LIST_MIN_HEIGHT = 240
 STAT_CARD_MIN_HEIGHT = 84
 ATTACHMENT_TILE = 108
@@ -168,6 +171,12 @@ class Tokens:
     error_soft: str
     info: str
     info_soft: str
+    # Status colour for small text *on its own tint* (pills): the plain
+    # status colour falls just under 4.5:1 there in the light theme.
+    success_ink: str
+    warning_ink: str
+    error_ink: str
+    info_ink: str
     # Controls.
     input_bg: str
     hover: str
@@ -249,6 +258,10 @@ def _make(
         error_soft=alpha(error, 0.12),
         info=accent,
         info_soft=alpha(accent, 0.12),
+        success_ink=success if is_dark else mix(success, "#000000", 0.18),
+        warning_ink=warning if is_dark else mix(warning, "#000000", 0.18),
+        error_ink=error if is_dark else mix(error, "#000000", 0.18),
+        info_ink=accent if is_dark else mix(accent, "#000000", 0.18),
         input_bg=input_bg,
         hover=hover,
         pressed=pressed,

@@ -302,10 +302,10 @@ QLabel#pill {
     font-weight: 500;
 }
 
-QLabel#pill[status="success"] { background-color: $success_soft; color: $success; }
-QLabel#pill[status="warning"] { background-color: $warning_soft; color: $warning; }
-QLabel#pill[status="error"] { background-color: $error_soft; color: $error; }
-QLabel#pill[status="info"] { background-color: $info_soft; color: $accent; }
+QLabel#pill[status="success"] { background-color: $success_soft; color: $success_ink; }
+QLabel#pill[status="warning"] { background-color: $warning_soft; color: $warning_ink; }
+QLabel#pill[status="error"] { background-color: $error_soft; color: $error_ink; }
+QLabel#pill[status="info"] { background-color: $info_soft; color: $info_ink; }
 
 QLabel#statusDot {
     min-width: ${status_dot}px;

@@ -612,6 +612,10 @@ STRINGS: Dict[str, Dict[str, str]] = {
     },
 
     # ---- journal_widget -----------------------------------------------------
+    "journal_widget.empty": {
+        "ru": "Событий пока нет. Они появятся здесь во время рассылки.",
+        "en": "No events yet. They appear here while a campaign runs.",
+    },
     "journal_widget.title": {"ru": "Журнал", "en": "Journal"},
     "journal_widget.hide_tooltip": {"ru": "Скрыть журнал", "en": "Hide journal"},
 

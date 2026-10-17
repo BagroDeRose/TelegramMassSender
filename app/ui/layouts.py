@@ -40,10 +40,18 @@ class ResponsiveColumns(QWidget):
         self.scroll.setWidget(self.main)
         row.addWidget(self.scroll, 1)
 
-        self._side_slot = QWidget(self)
-        self._side_slot_layout = QVBoxLayout(self._side_slot)
-        self._side_slot_layout.setContentsMargins(0, 0, SPACE_XL, SPACE_XL)
+        # The pinned column scrolls on its own when the window is too short
+        # for it (small screens, 150 % scaling), instead of squeezing.
+        self._side_slot = QScrollArea(self)
+        self._side_slot.setWidgetResizable(True)
+        self._side_slot.setFrameShape(QFrame.Shape.NoFrame)
+        self._side_slot.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._side_slot.setFixedWidth(side_width + SPACE_XL)
+        side_holder = QWidget()
+        side_holder.setObjectName("page")
+        self._side_slot_layout = QVBoxLayout(side_holder)
+        self._side_slot_layout.setContentsMargins(0, 0, SPACE_XL, SPACE_XL)
+        self._side_slot.setWidget(side_holder)
         row.addWidget(self._side_slot)
 
         self.side = QWidget()

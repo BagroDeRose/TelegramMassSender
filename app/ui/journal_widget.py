@@ -160,12 +160,23 @@ class JournalWidget(QFrame):
         header.addWidget(self._collapse_button)
         layout.addLayout(header)
 
+        self._empty_label = QLabel(tr("journal_widget.empty"), self)
+        self._empty_label.setObjectName("emptyStateBody")
+        self._empty_label.setWordWrap(True)
+        layout.addWidget(self._empty_label)
+
         self._list = QListWidget(self)
         self._list.setObjectName("journalList")
         self._list.setItemDelegate(JournalRowDelegate(self._list))
         self._list.setWordWrap(True)
         self._list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         layout.addWidget(self._list)
+        self._sync_empty()
+
+    def _sync_empty(self) -> None:
+        empty = self._list.count() == 0
+        self._empty_label.setVisible(empty)
+        self._list.setVisible(not empty)
 
     def append(self, message: str) -> None:
         timestamp = datetime.now().strftime("%H:%M:%S")
@@ -181,12 +192,15 @@ class JournalWidget(QFrame):
         self._list.scrollToBottom()
         while self._list.count() > _MAX_VISIBLE_LINES:
             self._list.takeItem(0)
+        self._sync_empty()
 
     def clear(self) -> None:
         self._list.clear()
+        self._sync_empty()
 
     def retranslate_ui(self) -> None:
         self._title.setText(tr("journal_widget.title"))
+        self._empty_label.setText(tr("journal_widget.empty"))
         self._collapse_button.setToolTip(tr("journal_widget.hide_tooltip"))
         self._collapse_button.setAccessibleName(tr("journal_widget.hide_tooltip"))
 

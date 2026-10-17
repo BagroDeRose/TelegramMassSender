@@ -347,7 +347,59 @@ class MainWindow(QMainWindow):
         self.statusBar().showMessage(tr("main_window.status.ready"))
         self._setup_system_tray()
 
+        self._apply_tab_order()
         self._spawn(self._refresh_accounts(), "обновление списка аккаунтов")
+
+    def campaign_tab_chain(self) -> list:
+        """The keyboard order of the shell and the Campaign page: navigation
+        first (left), then the page top to bottom, left column before the
+        right one, ending on the primary action."""
+        recipients = self._recipient_widget
+        attachments = self._attachments_widget
+        controls = self._campaign_controls
+        return [
+            self._sidebar._toggle,
+            *self._sidebar._buttons,
+            self._sidebar._account_block,
+            self._open_wizard_button,
+            recipients._text_edit,
+            recipients._import_button,
+            recipients._import_csv_button,
+            recipients._pick_chats_button,
+            recipients._clear_button,
+            recipients._review_invalid_button,
+            self._groups_combo,
+            self._load_group_button,
+            self._save_group_button,
+            self._delete_group_button,
+            self._open_editor_button,
+            self._presets_combo,
+            self._load_preset_button,
+            self._save_preset_button,
+            self._delete_preset_button,
+            attachments._list,
+            attachments._move_earlier_button,
+            attachments._move_later_button,
+            attachments._add_button,
+            attachments._remove_selected_button,
+            attachments._clear_button,
+            self._preview_name_edit,
+            controls._change_interval_button,
+            controls._start_button,
+            controls._pause_button,
+            controls._stop_button,
+            controls._flood_continue_button,
+            controls._export_report_button,
+        ]
+
+    def _apply_tab_order(self) -> None:
+        chain = self.campaign_tab_chain()
+        for first, second in zip(chain, chain[1:]):
+            QWidget.setTabOrder(first, second)
+        # Containers and the read-only preview aren't stops on the way.
+        for scroll in self.findChildren(QScrollArea):
+            scroll.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._message_preview._browser.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
 
     # ---- theme -----------------------------------------------------------------
 
@@ -869,16 +921,20 @@ class MainWindow(QMainWindow):
         self._retry_all_button.setProperty("variant", "primary")
         self._retry_all_button.setIcon(icons.themed("retry", "on_accent"))
         self._retry_all_button.clicked.connect(self._on_retry_all_failures_clicked)
+        actions_row.setContentsMargins(0, 0, 0, 0)
         actions_row.addWidget(self._retry_all_button)
         actions_row.addWidget(self._retry_selected_button)
+        actions_row.addStretch(1)
         self._retry_row_widget = QWidget(page)
         self._retry_row_widget.setLayout(actions_row)
         self._retry_row_widget.setVisible(False)
 
+        # Two short rows rather than one long one: retry (acting on the
+        # failures) and keeping the results (save / export) are different
+        # jobs, and five buttons in a row overflow a minimum-size window.
+        layout.addWidget(self._retry_row_widget)
         export_row = QHBoxLayout()
         export_row.setSpacing(SPACE_SM)
-        export_row.addWidget(self._retry_row_widget)
-        export_row.addStretch(1)
         self._results_export_button = QPushButton(tr("main_window.results_page.export_csv_button"), page)
         self._results_export_button.setIcon(icons.themed("export"))
         self._results_export_button.setEnabled(False)
@@ -891,9 +947,10 @@ class MainWindow(QMainWindow):
         self._save_report_button.setIcon(icons.themed("save"))
         self._save_report_button.setEnabled(False)
         self._save_report_button.clicked.connect(self._on_save_report_clicked)
-        export_row.addWidget(self._export_failures_button)
-        export_row.addWidget(self._results_export_button)
         export_row.addWidget(self._save_report_button)
+        export_row.addWidget(self._results_export_button)
+        export_row.addWidget(self._export_failures_button)
+        export_row.addStretch(1)
         layout.addLayout(export_row)
 
         self._saved_reports_section_title = _section_title(tr("main_window.results_page.saved_reports_section"))

@@ -415,7 +415,7 @@ class AttachmentsWidget(QWidget):
         layout.setSpacing(SPACE_SM)
 
         self._empty_label = build_empty_state(
-            tr("attachments_widget.empty_title"), tr("attachments_widget.empty_body"), self
+            tr("attachments_widget.empty_title"), tr("attachments_widget.empty_body"), self, icon_name="attachment"
         )
         layout.addWidget(self._empty_label)
 

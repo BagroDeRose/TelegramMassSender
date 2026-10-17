@@ -136,7 +136,7 @@ class CampaignControlsWidget(QFrame):
         self._interval_summary_label = _label("—", "summaryValue", page)
         interval_cell.addWidget(self._interval_summary_label)
         self._change_interval_button = QPushButton(tr("campaign_controls.edit_in_settings_button"), page)
-        self._change_interval_button.setObjectName("toolbarButton")
+        self._change_interval_button.setProperty("variant", "ghost")
         self._change_interval_button.clicked.connect(self.open_settings_requested.emit)
         interval_cell.addWidget(self._change_interval_button)
         interval_cell.addStretch(1)

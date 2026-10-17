@@ -34,11 +34,14 @@ from app.ui.theme import (
     FONT_SIZE_HELPER,
     ICON_SIZE_SM,
     RESULTS_COL_CHECK,
+    RESULTS_COL_FLEX_MIN,
+    RESULTS_FIXED_MIN_SCALE,
     RESULTS_COL_ID,
     RESULTS_COL_STATUS,
     RESULTS_COL_TYPE,
     RESULTS_ROW_HEIGHT,
     BORDER_WIDTH,
+    PILL_TINT_ALPHA,
     SEGMENT_PADDING,
     SPACE_SM,
     SPACE_XS,
@@ -134,18 +137,26 @@ def _target_type(item) -> Optional[TargetType]:
 
 
 def column_rects(row: QRect) -> dict:
-    """Column geometry shared by the header and the rows."""
+    """Column geometry shared by the header and the rows. The fixed columns
+    give way (down to RESULTS_FIXED_MIN_SCALE) before the two text columns
+    get narrower than RESULTS_COL_FLEX_MIN each."""
+    fixed = RESULTS_COL_STATUS + RESULTS_COL_TYPE + RESULTS_COL_ID
+    room = row.width() - RESULTS_COL_CHECK - 2 * RESULTS_COL_FLEX_MIN
+    scale = max(RESULTS_FIXED_MIN_SCALE, min(1.0, room / fixed))
+    status_w = int(RESULTS_COL_STATUS * scale)
+    type_w = int(RESULTS_COL_TYPE * scale)
+    id_w = int(RESULTS_COL_ID * scale)
     x = row.left() + RESULTS_COL_CHECK
-    status = QRect(x, row.top(), RESULTS_COL_STATUS, row.height())
-    x += RESULTS_COL_STATUS
-    flexible = max(0, row.right() - x - RESULTS_COL_TYPE - RESULTS_COL_ID)
+    status = QRect(x, row.top(), status_w, row.height())
+    x += status_w
+    flexible = max(0, row.right() - x - type_w - id_w)
     recipient_width = flexible * 2 // 5
     recipient = QRect(x, row.top(), recipient_width, row.height())
     x += recipient_width
-    type_rect = QRect(x, row.top(), RESULTS_COL_TYPE, row.height())
-    x += RESULTS_COL_TYPE
-    id_rect = QRect(x, row.top(), RESULTS_COL_ID, row.height())
-    x += RESULTS_COL_ID
+    type_rect = QRect(x, row.top(), type_w, row.height())
+    x += type_w
+    id_rect = QRect(x, row.top(), id_w, row.height())
+    x += id_w
     reason = QRect(x, row.top(), max(0, row.right() - x), row.height())
     return {"status": status, "recipient": recipient, "type": type_rect, "id": id_rect, "reason": reason}
 
@@ -217,9 +228,10 @@ class ResultsRowDelegate(QStyledItemDelegate):
         pill_w = metrics.horizontalAdvance(label) + 2 * SPACE_SM
         pill_h = metrics.height() + SPACE_XS
         pill = QRectF(rects["status"].left() + SPACE_SM, rects["status"].center().y() - pill_h / 2, pill_w, pill_h)
-        fg = {"success": tokens.success, "error": tokens.error}.get(status, tokens.text_secondary)
-        bg = QColor(fg)
-        bg.setAlphaF(0.12)
+        tint = {"success": tokens.success, "error": tokens.error}.get(status, tokens.text_secondary)
+        fg = {"success": tokens.success_ink, "error": tokens.error_ink}.get(status, tokens.text_secondary)
+        bg = QColor(tint)
+        bg.setAlphaF(PILL_TINT_ALPHA)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(bg)
         painter.drawRoundedRect(pill, pill_h / 2, pill_h / 2)

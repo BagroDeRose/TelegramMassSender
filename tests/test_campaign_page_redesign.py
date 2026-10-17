@@ -27,13 +27,14 @@ async def test_columns_fold_when_the_page_is_narrow_and_unfold_when_wide(qapp, t
     QApplication.processEvents()
     assert columns.width() > CAMPAIGN_FOLD_WIDTH
     assert columns.is_folded is False
-    assert columns.side.parent() is columns._side_slot
+    assert columns._side_slot.isAncestorOf(columns.side)
+    assert not columns.main.isAncestorOf(columns.side)
 
     window.resize(WINDOW_MIN_WIDTH, 800)
     QApplication.processEvents()
     assert columns.width() < CAMPAIGN_FOLD_WIDTH
     assert columns.is_folded is True
-    assert columns.side.parent() is columns.main
+    assert columns.main.isAncestorOf(columns.side)
     assert window._campaign_controls.isVisibleTo(window)
 
 
