@@ -405,6 +405,10 @@ STRINGS: Dict[str, Dict[str, str]] = {
     "sidebar.nav.results": {"ru": "Результаты", "en": "Results"},
     "sidebar.nav.settings": {"ru": "Настройки", "en": "Settings"},
     "sidebar.brand_subtitle": {"ru": "для Telegram", "en": "for Telegram"},
+    "sidebar.collapse_tooltip": {"ru": "Свернуть меню", "en": "Collapse menu"},
+    "sidebar.expand_tooltip": {"ru": "Развернуть меню", "en": "Expand menu"},
+    "sidebar.no_account": {"ru": "Нет аккаунта", "en": "No account"},
+    "sidebar.no_account_hint": {"ru": "Добавьте в «Аккаунтах»", "en": "Add one in Accounts"},
 
     # ---- campaign_controls ---------------------------------------------------
     "campaign_controls.edit_in_settings_button": {"ru": "Изменить в настройках", "en": "Edit in Settings"},
@@ -447,7 +451,7 @@ STRINGS: Dict[str, Dict[str, str]] = {
     "account_widget.status.not_authorized": {"ru": "Не авторизован", "en": "Not authorized"},
     "account_widget.empty_title": {"ru": "Нет Telegram-аккаунтов", "en": "No Telegram accounts"},
     "account_widget.empty_body": {"ru": "Добавьте аккаунт, чтобы начать.", "en": "Add an account to get started."},
-    "account_widget.add_account_button": {"ru": "+ Добавить аккаунт", "en": "+ Add account"},
+    "account_widget.add_account_button": {"ru": "Добавить аккаунт", "en": "Add account"},
     "account_widget.reconnect_button": {"ru": "Переподключить", "en": "Reconnect"},
     "account_widget.use_button_active": {"ru": "Активен", "en": "Active"},
     "account_widget.use_button_inactive": {"ru": "Использовать", "en": "Use"},

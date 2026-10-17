@@ -75,6 +75,7 @@ from app.ui.theme.tokens import (  # noqa: F401 - re-exported public API
     RADIUS_SM,
     SIDEBAR_ACTIVE_BAR,
     SIDEBAR_COLLAPSED_WIDTH,
+    SIDEBAR_LOGO,
     SIDEBAR_WIDTH,
     SPACE_LG,
     SPACE_MD,

@@ -73,8 +73,8 @@ from app.telegram.exceptions import AccountDeletionError, AccountSwitchBlockedEr
 from app.security.secure_storage import SecureStorage
 from app.telegram.service import TelegramService
 from app.telegram.template import expand_name_placeholder
-from app.ui import theme
-from app.ui.account_widget import AccountWidget
+from app.ui import icons, theme
+from app.ui.account_widget import AccountWidget, account_initials, display_name, status_text_and_variant
 from app.ui.attachments_widget import AttachmentsWidget
 from app.ui.campaign_controls import CampaignControlsWidget, format_duration
 from app.ui.campaign_wizard import CampaignWizardDialog
@@ -91,6 +91,7 @@ from app.ui.dialogs import (
 )
 from app.ui.empty_state import build_empty_state, retranslate_empty_state
 from app.ui.journal_widget import JournalWidget
+from app.ui.motion import ToastHost, fade_in
 from app.ui.login_dialog import LoginDialog
 from app.ui.onboarding_dialog import (
     ACTION_GET_STARTED as ONBOARDING_ACTION_GET_STARTED,
@@ -304,6 +305,7 @@ class MainWindow(QMainWindow):
         self._load_settings_into_page(settings)
 
         self._journal.setVisible(settings.journal_visible)
+        self._sidebar.set_collapsed(settings.sidebar_collapsed)
         self._journal_toggle_button.setChecked(settings.journal_visible)
         page_index = settings.last_page_index if settings.remember_last_page else 0
         if not (0 <= page_index <= 3):
@@ -546,28 +548,39 @@ class MainWindow(QMainWindow):
 
         self._sidebar = Sidebar(self)
         root.addWidget(self._sidebar)
-        root.addWidget(self._journal)
 
         self._stack = QStackedWidget(self)
+        self._stack.setObjectName("pageStack")
         self._stack.addWidget(_scrollable_page(self._build_campaign_page()))
         self._stack.addWidget(_scrollable_page(self._build_accounts_page()))
         self._stack.addWidget(_scrollable_page(self._build_results_page()))
         self._stack.addWidget(_scrollable_page(self._build_settings_page()))
         root.addWidget(self._stack, 1)
+        # The journal is a side panel on the right, next to the page it
+        # describes -- not wedged between the navigation and the page.
+        root.addWidget(self._journal)
         outer.addWidget(row, 1)
 
         self.setCentralWidget(central)
+        self._toasts = ToastHost(central)
 
+        status_bar = self.statusBar()
+        status_bar.setSizeGripEnabled(False)
+        self._connection_dot = QLabel(self)
+        self._connection_dot.setObjectName("statusDot")
+        status_bar.addPermanentWidget(self._connection_dot)
         self._connection_status_label = QLabel(tr("main_window.status.no_account"), self)
         self._connection_status_label.setObjectName("connectionStatusLabel")
-        self.statusBar().addPermanentWidget(self._connection_status_label)
+        status_bar.addPermanentWidget(self._connection_status_label)
 
         self._journal_toggle_button = QToolButton(self)
         self._journal_toggle_button.setObjectName("toolbarButton")
         self._journal_toggle_button.setText(tr("main_window.journal_toggle.text"))
+        self._journal_toggle_button.setIcon(icons.themed("journal", "text_secondary", checked_role="accent"))
+        self._journal_toggle_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self._journal_toggle_button.setCheckable(True)
         self._journal_toggle_button.setToolTip(tr("main_window.journal_toggle.tooltip"))
-        self.statusBar().addPermanentWidget(self._journal_toggle_button)
+        status_bar.addPermanentWidget(self._journal_toggle_button)
 
     def _build_campaign_page(self) -> QWidget:
         page = QWidget()
@@ -1019,7 +1032,7 @@ class MainWindow(QMainWindow):
     def _on_copy_diagnostics_clicked(self) -> None:
         self._refresh_diagnostics()
         QApplication.clipboard().setText(self._last_diagnostics_text)
-        show_info(self, tr("main_window.settings.diagnostics_card"), tr("main_window.dialogs.diagnostics_copied_message"))
+        self._toast(tr("main_window.dialogs.diagnostics_copied_message"))
 
     def _on_export_diagnostic_bundle_clicked(self) -> None:
         default_name = f"TelegramMassSender_diagnostics_{datetime.now():%Y-%m-%d_%H-%M}.zip"
@@ -1054,6 +1067,8 @@ class MainWindow(QMainWindow):
 
     def _wire_signals(self) -> None:
         self._sidebar.page_selected.connect(self._on_sidebar_page_selected)
+        self._sidebar.account_clicked.connect(lambda: self._navigate_to_page(_PAGE_ACCOUNTS))
+        self._sidebar.collapsed_changed.connect(lambda collapsed: self._save_setting_field("sidebar_collapsed", collapsed))
         self._journal_toggle_button.clicked.connect(self._on_toggle_journal)
         self._journal.toggle_requested.connect(self._on_toggle_journal)
 
@@ -1080,11 +1095,18 @@ class MainWindow(QMainWindow):
         self._language_combo.currentIndexChanged.connect(self._on_language_combo_changed)
 
     def _navigate_to_page(self, index: int) -> None:
-        self._stack.setCurrentIndex(index)
+        self._show_page(index)
         self._sidebar.set_current_index(index)
 
     def _on_sidebar_page_selected(self, index: int) -> None:
+        self._show_page(index)
+
+    def _show_page(self, index: int) -> None:
+        if self._stack.currentIndex() == index:
+            return
         self._stack.setCurrentIndex(index)
+        if self.isVisible():
+            fade_in(self._stack.currentWidget())
 
     def _on_toggle_journal(self) -> None:
         visible = not self._journal.isVisible()
@@ -1163,7 +1185,7 @@ class MainWindow(QMainWindow):
         self._service.settings_repository.save_app_settings(defaults)
         self._load_settings_into_page(defaults)
         self._campaign_controls.set_interval_summary(defaults.min_delay_seconds, defaults.max_delay_seconds)
-        show_info(self, tr("main_window.dialogs.settings_title"), tr("main_window.dialogs.settings_reset_message"))
+        self._toast(tr("main_window.dialogs.settings_reset_message"), "info")
 
     def _reports_directory(self) -> Path:
         settings = self._service.settings_repository.load_app_settings()
@@ -1235,7 +1257,7 @@ class MainWindow(QMainWindow):
         index = self._presets_combo.findData(saved.id)
         if index >= 0:
             self._presets_combo.setCurrentIndex(index)
-        show_info(self, tr("main_window.dialogs.save_preset_title"), tr("main_window.dialogs.preset_saved_message", name=saved.name))
+        self._toast(tr("main_window.dialogs.preset_saved_message", name=saved.name))
 
     def _on_load_preset_clicked(self) -> None:
         preset = self._selected_preset()
@@ -1316,7 +1338,7 @@ class MainWindow(QMainWindow):
         index = self._groups_combo.findData(saved.id)
         if index >= 0:
             self._groups_combo.setCurrentIndex(index)
-        show_info(self, tr("main_window.dialogs.save_group_title"), tr("main_window.dialogs.group_saved_message", name=saved.name))
+        self._toast(tr("main_window.dialogs.group_saved_message", name=saved.name))
 
     def _on_load_group_clicked(self) -> None:
         group = self._selected_group()
@@ -1475,17 +1497,28 @@ class MainWindow(QMainWindow):
             pass
 
     def _update_connection_status(self) -> None:
-        # The colored dot is a secondary cue only -- the text itself always
-        # spells out "Connected"/"No account" so state is never color-only.
-        tokens = theme.current_tokens()
-        if self._active_account() is None:
-            dot_color, text = tokens.text_muted, tr("main_window.status.no_account")
+        # The dot is a secondary cue only -- the text always spells out
+        # "Connected"/"No account", so state is never colour-only.
+        account = self._active_account()
+        if account is None:
+            dot_status, text = "", tr("main_window.status.no_account")
+            self._sidebar.set_account(None)
         else:
-            account = self._active_account()
             label = f"@{account.username}" if account.username else account.phone
-            dot_color, text = tokens.success, tr("main_window.status.connected", label=label)
-        self._connection_status_label.setText(f'<span style="color:{dot_color};">●</span>&nbsp;&nbsp;{text}')
+            dot_status, text = "success", tr("main_window.status.connected", label=label)
+            status = self._account_statuses.get(account.id)
+            if status is not None:
+                status_text, dot_status = status_text_and_variant(status)
+            else:
+                status_text = tr("account_widget.status.connected")
+            self._sidebar.set_account((account_initials(account), display_name(account), status_text, dot_status))
+        theme.set_status(self._connection_dot, dot_status)
+        self._connection_status_label.setText(text)
         self._refresh_diagnostics()
+
+    def _toast(self, text: str, status: str = "success") -> None:
+        """Non-blocking confirmation for a successful, non-critical action."""
+        self._toasts.show_toast(text, status)
 
     def _on_add_account_requested(self) -> None:
         if not self._can_switch_accounts():
@@ -1663,9 +1696,7 @@ class MainWindow(QMainWindow):
             self._refresh_accounts(),
             "вход в демо-режим" if enter else "выход из демо-режима",
         )
-        self.statusBar().showMessage(
-            tr("main_window.demo_banner.text") if enter else tr("main_window.status.ready")
-        )
+        self.statusBar().showMessage(tr("main_window.status.ready"))
 
     def maybe_show_onboarding(self) -> None:
         """Shown once, the first time the app has no persisted
@@ -1769,7 +1800,7 @@ class MainWindow(QMainWindow):
         if dialog.exec() != ChatPickerDialog.DialogCode.Accepted:
             return
         added = self._recipient_widget.append_lines([chat.recipient_line for chat in dialog.selected_targets()])
-        self.statusBar().showMessage(tr("chat_picker.added_status", count=added), 5000)
+        self._toast(tr("chat_picker.added_status", count=added))
 
     # ---- campaign lifecycle ---------------------------------------------------
 
@@ -2203,7 +2234,7 @@ class MainWindow(QMainWindow):
             show_error(self, tr("main_window.dialogs.save_report_error_title"), tr("main_window.dialogs.save_report_error_message", error=exc))
             return
         self._refresh_saved_reports()
-        show_info(self, tr("main_window.dialogs.report_saved_title"), tr("main_window.dialogs.report_saved_message", name=name))
+        self._toast(tr("main_window.dialogs.report_saved_message", name=name))
 
     def _refresh_saved_reports(self) -> None:
         for card in self._saved_report_cards:

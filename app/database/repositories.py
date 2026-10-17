@@ -158,6 +158,9 @@ class SettingsRepository:
             ),
             last_page_index=_int(settings_module.SETTINGS_KEY_LAST_PAGE_INDEX, settings_module.DEFAULT_LAST_PAGE_INDEX),
             journal_visible=_bool(settings_module.SETTINGS_KEY_JOURNAL_VISIBLE, settings_module.DEFAULT_JOURNAL_VISIBLE),
+            sidebar_collapsed=_bool(
+                settings_module.SETTINGS_KEY_SIDEBAR_COLLAPSED, settings_module.DEFAULT_SIDEBAR_COLLAPSED
+            ),
             reports_directory=_str(
                 settings_module.SETTINGS_KEY_REPORTS_DIRECTORY, settings_module.DEFAULT_REPORTS_DIRECTORY
             ),
@@ -190,6 +193,7 @@ class SettingsRepository:
         self.set(settings_module.SETTINGS_KEY_REMEMBER_LAST_PAGE, "1" if settings.remember_last_page else "0")
         self.set(settings_module.SETTINGS_KEY_LAST_PAGE_INDEX, str(settings.last_page_index))
         self.set(settings_module.SETTINGS_KEY_JOURNAL_VISIBLE, "1" if settings.journal_visible else "0")
+        self.set(settings_module.SETTINGS_KEY_SIDEBAR_COLLAPSED, "1" if settings.sidebar_collapsed else "0")
         self.set(settings_module.SETTINGS_KEY_REPORTS_DIRECTORY, settings.reports_directory)
         self.set(settings_module.SETTINGS_KEY_AUTO_SAVE_REPORTS, "1" if settings.auto_save_reports else "0")
         self.set(settings_module.SETTINGS_KEY_DEBUG_LOGGING, "1" if settings.debug_logging else "0")
