@@ -1047,7 +1047,9 @@ an error.
       SlowModeMultiMsgsDisabled, TOPIC_CLOSED, CHAT_SEND_*_FORBIDDEN,
       ALLOW_PAYMENT_REQUIRED, …); `SlowModeWaitError` fails just that
       target ("slow mode, wait N sec") and the campaign continues —
-      `tests/test_campaign_chat_targets.py`
+      `tests/test_campaign_chat_targets.py`; the Results failure breakdown
+      counts every slow-mode wait as one "slow mode" reason
+      (`SendItem.error_category`) while each target keeps its exact wait
 - [x] `{name}` → chat title for chats; a CSV name still wins
 - [x] Forum supergroups — plain send, i.e. the "General" topic; a clear
       reason if that fails

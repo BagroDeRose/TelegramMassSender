@@ -253,10 +253,19 @@ described below.
   `MainWindow.retranslate_ui()` the same way theme switching already
   dispatches `apply_theme()`. Deliberately not gettext or Qt Linguist
   (.ts/.qm + lupdate/lrelease) — this app has no other use for either.
-- `tests/` — pytest + pytest-asyncio (`asyncio_mode = auto`), 876 tests,
+- `tests/` — pytest + pytest-asyncio (`asyncio_mode = auto`), 883 tests,
   using `tests/mocks/mock_telegram_client.py` and
   `tests/mocks/fake_client_manager.py` instead of a real Telegram
-  connection. CI runs this suite on `windows-latest` with
+  connection. `tests/conftest.py` has two autouse fixtures: an
+  autouse `_block_network` fixture refuses every non-loopback connection
+  (socket.connect, asyncio `create_connection` -- the Windows proactor
+  loop bypasses socket.connect -- and Telethon's own
+  `TelegramBaseClient.connect`) and fails the test at teardown even if
+  the code swallowed the error; an autouse `_dispose_top_level_widgets`
+  hides and deletes every top-level widget a test leaves behind. Without
+  the latter, every later `QApplication.setStyleSheet()` (each MainWindow
+  applies its theme) re-polished all leaked windows and the single-process
+  suite took hours; with it, ~1 minute. CI runs this suite on `windows-latest` with
   `QT_QPA_PLATFORM=offscreen` (`.github/workflows/tests.yml`).
 
 Packaging: `telegram_mass_sender.spec` (PyInstaller, portable onedir build,
@@ -283,7 +292,7 @@ reproduced with a failing test first, then fixed.
 
 **Tests.** After any code change, run the targeted test file, then the
 full suite (`pytest tests/ -v`). Don't delete or weaken existing tests just
-to make the suite pass. The current baseline is 876 passed, 0 failures —
+to make the suite pass. The current baseline is 883 passed, 0 failures —
 if that number changes, know exactly why before saying the change is done.
 
 **GUI.** Never block the Qt event loop or the asyncio event loop.
