@@ -507,6 +507,11 @@ STRINGS: Dict[str, Dict[str, str]] = {
     "recipients.parser.error.invalid_tme_link": {"ru": "Некорректная ссылка t.me", "en": "Invalid t.me link"},
     "recipients.parser.error.invalid_username": {"ru": "Некорректный username", "en": "Invalid username"},
     "recipients.parser.error.unknown_format": {"ru": "Неизвестный формат получателя", "en": "Unrecognized recipient format"},
+    "recipients.parser.error.invalid_chat_id": {"ru": "Некорректный ID чата", "en": "Invalid chat ID"},
+    "recipients.parser.error.invalid_invite_link": {
+        "ru": "Некорректная ссылка-приглашение t.me",
+        "en": "Invalid t.me invite link",
+    },
 
     # ---- app/recipients/csv_importer.py -------------------------------------
     "csv_importer.error.no_identifier_in_row": {
