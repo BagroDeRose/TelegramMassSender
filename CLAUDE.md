@@ -1,9 +1,12 @@
 # TelegramMassSender — project context for Claude Code
 
 Windows desktop app: Python 3.13 + PySide6 6.8 + qasync + Telethon 1.36,
-packaged as a onedir EXE via PyInstaller. Sends personal Telegram messages
-one-by-one, from the user's own account, only to individual recipients the
-user has the right to message (see `README.md`) — never to groups/channels.
+packaged as a onedir EXE via PyInstaller. Sends Telegram messages
+one-by-one, from the user's own account, to individual recipients the user
+has the right to message, and to groups/supergroups/channels the account is
+*already a member of and allowed to post in* (see `README.md`) — it never
+joins a chat (invite links are only checked) and never works around a
+chat's permissions, slow mode or FloodWait.
 
 This file documents the **current implementation** and the **development
 rules** that apply when working on it. Planned/future work lives in
@@ -97,7 +100,18 @@ described below.
   - `message_editor.py` / `message_editor_dialog.py` / `message_preview.py`
     — rich-text message editor and its preview.
   - `login_dialog.py`, `dialogs.py` — account connection and confirmation
-    dialogs.
+    dialogs. The optional start confirmation splits the count into users,
+    groups/channels (by format) and `@username`/`t.me` names whose type
+    is only known after resolving — nothing is resolved before confirming.
+  - `chat_picker_dialog.py` — the "From my chats…" picker (type filter,
+    title search, checkboxes). Presentational only: `MainWindow` loads the
+    list through `chat_targets.list_writable_chats` under
+    `_account_lock` and writes picked chats back via
+    `RecipientWidget.append_lines()` (as `@username`, else the marked ID).
+    The button exists only on the Campaign page's `RecipientWidget`
+    (`show_chat_picker=True`), not in the wizard's, and is enabled only for
+    a connected, authorized active account with no campaign starting or
+    running.
   - `campaign_wizard.py` — optional step-by-step Campaign Wizard (a modal
     dialog reusing `RecipientWidget`/`MessageEditorDialog`/
     `AttachmentsWidget`/`MessagePreviewWidget` instances, one per step, so
@@ -146,6 +160,23 @@ described below.
   - `recipient_resolver.py` — resolves `@username` / numeric ID / phone
     (E.164) to a Telegram entity; phone resolution uses
     `contacts.ResolvePhoneRequest` (does not mutate the contact list).
+    Chat targets: a `@username` is typed by whatever it resolves to; a
+    marked chat ID (`-100…`/`-…`) is looked up in the account's dialogs,
+    fetched once per resolver (lazily, before the first chat ID —
+    Telethon has no access_hash for a bare ID otherwise; FloodWait there
+    propagates like any other); an invite link only goes through
+    `CheckChatInviteRequest`, and anything but `ChatInviteAlready` is
+    NOT_MEMBER. A positive numeric ID that resolves to a chat is still
+    rejected (it has always meant a user).
+  - `chat_targets.py` — `TargetType` (user/group/supergroup/forum/
+    channel), the pure permission preflight `check_send_rights()`
+    (channel: creator or `post_messages` admin; group: left/banned/
+    `banned_rights`/`default_banned_rights` incl. `send_plain`,
+    `send_media` and the granular media flags, expired restrictions
+    ignored, multi-part messages refused in slow mode), the send-error →
+    reason mapping (by Telethon error class, and by RPC message code for
+    errors newer than Telethon 1.36's list), and `list_writable_chats()`
+    behind the "From my chats…" picker.
   - `template.py` — `{name}` placeholder expansion; works in UTF-16
     surrogate-pair space so formatting-entity offsets stay correct.
   - `service.py`, `qt_bridge.py` — glue between the Telethon client and the
@@ -158,12 +189,23 @@ described below.
     again at startup, since v2.0.0 persisted it into the real accounts
     table and never cleaned it up.
   - `demo_client.py` — the simulated backend Demo Mode runs against
-    (see ROADMAP v2.0).
+    (see ROADMAP v2.0), including a fixed set of simulated chats (real
+    Telethon `Chat`/`Channel` objects) set up for each realistic outcome:
+    posted, no admin rights, members can't write, no media, forum, and a
+    slow-mode chat that starts "just posted to".
   - `exceptions.py` — Telegram-error taxonomy used by the campaign layer.
 - `app/campaign/` — send orchestration:
   - `campaign_manager.py`, `send_queue.py`, `campaign_state.py` — the send
     queue, per-item status/retry (`next_step`-based resume), FloodWait
-    pause/resume, and the duplicate-campaign-start guard.
+    pause/resume, and the duplicate-campaign-start guard. Chat targets go
+    through the same loop: preflight after resolving, chat-specific
+    reasons for send errors, `SlowModeWaitError` fails only that target
+    (no pause — it is *not* FloodWait), `{name}` = chat title unless a
+    CSV name exists, and a chat already delivered to in this run (or in
+    the run a Retry comes from: `delivered_chat_ids`) is SKIPPED, so
+    `@name` and `-100…` for the same chat never both get it. Retry also
+    passes `resume_steps` (normalized_key → delivered steps) so a partly
+    delivered message continues instead of starting over.
   - `rate_limiter.py` — randomized interval between sends.
   - `report.py`, `report_library.py` — CSV report generation (with
     formula-injection sanitization) and the saved-reports library.
@@ -174,8 +216,11 @@ described below.
     formatting entities through `.to_dict()`/a name→class map (Telethon has
     no built-in `from_dict()`), and re-checks attachment paths against the
     filesystem on load since a saved file may have moved or been deleted.
-- `app/recipients/` — `parser.py` (format detection: username/ID/link/phone;
-  also owns `dedupe_recipients`, shared by every import path), `validator.py`,
+- `app/recipients/` — `parser.py` (format detection: username/ID/link/phone,
+  plus chat targets — `RecipientKind.CHAT_ID` for `-100…`/`-…`/`t.me/c/…`
+  and `INVITE_LINK` for `t.me/+…`/`t.me/joinchat/…`; `is_chat_target` is
+  only true for those two, since a username may be either; also owns
+  `dedupe_recipients`, shared by every import path), `validator.py`,
   `importer.py` (TXT import), `csv_importer.py` (CSV import with
   content-based column detection — no header parsing or manual column
   mapping: the first cell in a row that parses as a recipient identifier
@@ -208,7 +253,7 @@ described below.
   `MainWindow.retranslate_ui()` the same way theme switching already
   dispatches `apply_theme()`. Deliberately not gettext or Qt Linguist
   (.ts/.qm + lupdate/lrelease) — this app has no other use for either.
-- `tests/` — pytest + pytest-asyncio (`asyncio_mode = auto`), 756 tests,
+- `tests/` — pytest + pytest-asyncio (`asyncio_mode = auto`), 876 tests,
   using `tests/mocks/mock_telegram_client.py` and
   `tests/mocks/fake_client_manager.py` instead of a real Telegram
   connection. CI runs this suite on `windows-latest` with
@@ -238,7 +283,7 @@ reproduced with a failing test first, then fixed.
 
 **Tests.** After any code change, run the targeted test file, then the
 full suite (`pytest tests/ -v`). Don't delete or weaken existing tests just
-to make the suite pass. The current baseline is 756 passed, 0 failures —
+to make the suite pass. The current baseline is 876 passed, 0 failures —
 if that number changes, know exactly why before saying the change is done.
 
 **GUI.** Never block the Qt event loop or the asyncio event loop.
