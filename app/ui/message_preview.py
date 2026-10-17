@@ -131,6 +131,18 @@ def entities_to_preview_html(text: str, entities: List[TypeMessageEntity]) -> st
     return "".join(parts) or _placeholder_html()
 
 
+def _cover(pixmap: QPixmap, size: QSize, scale: float) -> QPixmap:
+    """`pixmap` scaled to fill `size` (logical px) and centre-cropped, at the
+    screen's device pixel ratio."""
+    target = size * scale
+    scaled = pixmap.scaled(target, Qt.AspectRatioMode.KeepAspectRatioByExpanding, Qt.TransformationMode.SmoothTransformation)
+    x = (scaled.width() - target.width()) // 2
+    y = (scaled.height() - target.height()) // 2
+    cropped = scaled.copy(x, y, target.width(), target.height())
+    cropped.setDevicePixelRatio(scale)
+    return cropped
+
+
 class _AlbumGrid(QWidget):
     """Photos/videos as Telegram lays out an album: two columns, the first
     item spanning the full width when the count is odd."""
@@ -153,15 +165,17 @@ class _AlbumGrid(QWidget):
         cells: List[QRectF] = []
         y = 0.0
         index = 0
+        # Kept compact: the preview is about the message, so the album
+        # leaves room for the text below it.
         if count % 2 == 1:
-            cells.append(QRectF(0, 0, width, width * 0.56))
-            y = width * 0.56 + gap
+            cells.append(QRectF(0, 0, width, width * 0.45))
+            y = width * 0.45 + gap
             index = 1
         while index < count:
-            cells.append(QRectF(0, y, half, half * 0.8))
+            cells.append(QRectF(0, y, half, half * 0.62))
             if index + 1 < count:
-                cells.append(QRectF(half + gap, y, half, half * 0.8))
-            y += half * 0.8 + gap
+                cells.append(QRectF(half + gap, y, half, half * 0.62))
+            y += half * 0.62 + gap
             index += 2
         return cells
 
@@ -187,23 +201,11 @@ class _AlbumGrid(QWidget):
             painter.setClipPath(path)
             painter.fillRect(rect, QColor(tokens.thumbnail_bg))
             if pixmap is not None and not pixmap.isNull():
-                scaled = pixmap.scaled(
-                    rect.size().toSize() * self.devicePixelRatioF(),
-                    Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-                    Qt.TransformationMode.SmoothTransformation,
-                )
-                scaled.setDevicePixelRatio(self.devicePixelRatioF())
-                source = QRectF(
-                    (scaled.width() / scaled.devicePixelRatio() - rect.width()) / 2,
-                    (scaled.height() / scaled.devicePixelRatio() - rect.height()) / 2,
-                    rect.width(),
-                    rect.height(),
-                )
-                painter.drawPixmap(rect, scaled, QRectF(source.x() * scaled.devicePixelRatio(), source.y() * scaled.devicePixelRatio(), source.width() * scaled.devicePixelRatio(), source.height() * scaled.devicePixelRatio()))
+                painter.drawPixmap(rect.toRect(), _cover(pixmap, rect.size().toSize(), self.devicePixelRatioF()))
             else:
-                icons.themed("image", "text_muted").paint(
-                    painter, rect.center().toPoint().x() - ICON_SIZE // 2, rect.center().toPoint().y() - ICON_SIZE // 2, ICON_SIZE, ICON_SIZE
-                )
+                icon_rect = QRectF(0, 0, ICON_SIZE, ICON_SIZE)
+                icon_rect.moveCenter(rect.center())
+                icons.themed("image", "text_muted").paint(painter, icon_rect.toRect())
             painter.restore()
         painter.end()
 

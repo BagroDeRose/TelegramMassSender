@@ -91,6 +91,7 @@ from app.ui.dialogs import (
 )
 from app.ui.empty_state import build_empty_state, retranslate_empty_state
 from app.ui.journal_widget import JournalWidget
+from app.ui.layouts import ResponsiveColumns
 from app.ui.motion import ToastHost, fade_in
 from app.ui.login_dialog import LoginDialog
 from app.ui.onboarding_dialog import (
@@ -103,10 +104,25 @@ from app.ui.message_preview import MessagePreviewWidget
 from app.ui.recipient_widget import RecipientWidget
 from app.ui.sidebar import Sidebar
 from app.ui.stat_card import StatCard
-from app.ui.theme import SPACE_LG, SPACE_MD, SPACE_SM, SPACE_XS, SPACE_XXL
+from app.ui.theme import (
+    COMBO_MIN_WIDTH,
+    LAUNCH_PANEL_WIDTH,
+    PREVIEW_NAME_WIDTH,
+    SPACE_LG,
+    SPACE_MD,
+    SPACE_SM,
+    SPACE_XL,
+    SPACE_XS,
+    SPACE_XXL,
+    CAMPAIGN_FOLD_WIDTH,
+    WINDOW_DEFAULT_HEIGHT,
+    WINDOW_DEFAULT_WIDTH,
+    WINDOW_MIN_HEIGHT,
+    WINDOW_MIN_WIDTH,
+)
 
 WINDOW_TITLE = "Telegram Mass Sender"
-_MIN_WINDOW_SIZE = (1040, 760)
+_MIN_WINDOW_SIZE = (WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT)
 
 _PAGE_CAMPAIGN, _PAGE_ACCOUNTS, _PAGE_RESULTS, _PAGE_SETTINGS = range(4)
 
@@ -286,7 +302,7 @@ class MainWindow(QMainWindow):
         if settings.remember_window_size and settings.window_width >= _MIN_WINDOW_SIZE[0]:
             self.resize(settings.window_width, settings.window_height)
         else:
-            self.resize(1180, 860)
+            self.resize(WINDOW_DEFAULT_WIDTH, WINDOW_DEFAULT_HEIGHT)
         self.setMinimumSize(*_MIN_WINDOW_SIZE)
         set_language(settings.language)
         self._apply_theme()
@@ -404,7 +420,9 @@ class MainWindow(QMainWindow):
         self._refresh_presets_combo()  # re-set the placeholder item's text
         _retranslate_card_title(self._message_card, tr("main_window.campaign_page.message_card"))
         _retranslate_card_title(self._attachments_card, tr("main_window.campaign_page.attachments_card"))
-        _retranslate_card_title(self._campaign_card, tr("main_window.campaign_page.campaign_card"))
+        _retranslate_card_title(self._preview_card, tr("main_window.campaign_page.preview_card"))
+        self._groups_label.setText(tr("main_window.groups.label"))
+        self._presets_label.setText(tr("main_window.presets.label"))
 
         _retranslate_page_header(
             self._accounts_page_header, tr("main_window.accounts_page.title"), tr("main_window.accounts_page.subtitle")
@@ -551,7 +569,7 @@ class MainWindow(QMainWindow):
 
         self._stack = QStackedWidget(self)
         self._stack.setObjectName("pageStack")
-        self._stack.addWidget(_scrollable_page(self._build_campaign_page()))
+        self._stack.addWidget(self._build_campaign_page())
         self._stack.addWidget(_scrollable_page(self._build_accounts_page()))
         self._stack.addWidget(_scrollable_page(self._build_results_page()))
         self._stack.addWidget(_scrollable_page(self._build_settings_page()))
@@ -583,25 +601,36 @@ class MainWindow(QMainWindow):
         status_bar.addPermanentWidget(self._journal_toggle_button)
 
     def _build_campaign_page(self) -> QWidget:
+        """Two columns: Recipients -> Message -> Attachments scroll on the
+        left; the chat-like preview and the launch/progress panel stay
+        pinned on the right. Below TWO_COLUMN_MIN_WIDTH they fold into one
+        column (ResponsiveColumns)."""
         page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(SPACE_XXL, SPACE_XXL, SPACE_XXL, SPACE_XXL)
-        layout.setSpacing(SPACE_LG)
+        page.setObjectName("page")
+        outer = QVBoxLayout(page)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
 
+        header_row = QHBoxLayout()
+        header_row.setContentsMargins(SPACE_XL, SPACE_XL, SPACE_XL, SPACE_LG)
         self._campaign_page_header = _page_header(
             tr("main_window.campaign_page.title"), tr("main_window.campaign_page.subtitle")
         )
-        header_row = QHBoxLayout()
         header_row.addWidget(self._campaign_page_header, 1)
-        # Optional entry point into the step-by-step wizard -- the cards
-        # below (Recipients/Message/Attachments/Campaign) are the existing
-        # fast, single-page workflow and are completely untouched by this.
+        # Optional guided path; the cards below are the fast workflow.
         self._open_wizard_button = QPushButton(tr("main_window.campaign_page.open_wizard_button"), page)
-        self._open_wizard_button.setObjectName("ghostButton")
+        self._open_wizard_button.setProperty("variant", "ghost")
+        self._open_wizard_button.setIcon(icons.themed("wizard"))
         self._open_wizard_button.clicked.connect(self._on_open_campaign_wizard_clicked)
         header_row.addWidget(self._open_wizard_button, 0, Qt.AlignmentFlag.AlignTop)
-        layout.addLayout(header_row)
+        outer.addLayout(header_row)
 
+        self._campaign_columns = ResponsiveColumns(LAUNCH_PANEL_WIDTH, CAMPAIGN_FOLD_WIDTH, page)
+        outer.addWidget(self._campaign_columns, 1)
+        left = self._campaign_columns.main_layout
+        right = self._campaign_columns.side_layout
+
+        # ---- Recipients ----
         recipients_section = QWidget()
         recipients_layout = QVBoxLayout(recipients_section)
         recipients_layout.setContentsMargins(0, 0, 0, 0)
@@ -609,15 +638,20 @@ class MainWindow(QMainWindow):
         recipients_layout.addWidget(self._recipient_widget)
 
         groups_row = QHBoxLayout()
+        groups_row.setSpacing(SPACE_XS)
+        self._groups_label = QLabel(tr("main_window.groups.label"), recipients_section)
+        self._groups_label.setObjectName("helperText")
+        groups_row.addWidget(self._groups_label)
         self._groups_combo = QComboBox(recipients_section)
-        self._groups_combo.setMinimumWidth(180)
+        self._groups_combo.setMinimumWidth(COMBO_MIN_WIDTH)
         self._load_group_button = QPushButton(tr("main_window.groups.load_button"), recipients_section)
+        self._load_group_button.setProperty("variant", "ghost")
         self._load_group_button.clicked.connect(self._on_load_group_clicked)
         self._save_group_button = QPushButton(tr("main_window.groups.save_button"), recipients_section)
-        self._save_group_button.setObjectName("ghostButton")
+        self._save_group_button.setProperty("variant", "ghost")
         self._save_group_button.clicked.connect(self._on_save_group_clicked)
         self._delete_group_button = QPushButton(tr("main_window.groups.delete_button"), recipients_section)
-        self._delete_group_button.setObjectName("ghostButton")
+        self._delete_group_button.setProperty("variant", "ghost")
         self._delete_group_button.clicked.connect(self._on_delete_group_clicked)
         groups_row.addWidget(self._groups_combo, 1)
         groups_row.addWidget(self._load_group_button)
@@ -630,49 +664,46 @@ class MainWindow(QMainWindow):
         self._recipients_card = _card(
             tr("main_window.campaign_page.recipients_card"), recipients_section, self._recipient_count_label
         )
-        layout.addWidget(self._recipients_card)
+        left.addWidget(self._recipients_card)
 
+        # ---- Message ----
         message_section = QWidget()
         message_layout = QVBoxLayout(message_section)
         message_layout.setContentsMargins(0, 0, 0, 0)
         message_layout.setSpacing(SPACE_SM)
-        message_layout.addWidget(self._message_preview)
 
         message_buttons = QHBoxLayout()
+        message_buttons.setSpacing(SPACE_SM)
         self._open_editor_button = QPushButton(tr("main_window.campaign_page.open_editor_button"), message_section)
+        self._open_editor_button.setIcon(icons.themed("editor"))
         self._open_editor_button.setToolTip(tr("main_window.campaign_page.open_editor_tooltip"))
         self._open_editor_button.clicked.connect(self._on_open_editor_clicked)
         message_buttons.addWidget(self._open_editor_button)
-        message_buttons.addStretch(1)
+        self._message_summary_label = QLabel("", message_section)
+        self._message_summary_label.setObjectName("helperText")
+        message_buttons.addWidget(self._message_summary_label, 1)
         message_layout.addLayout(message_buttons)
 
         self._name_hint_label = QLabel(tr("main_window.campaign_page.name_placeholder_hint"), message_section)
         self._name_hint_label.setObjectName("helperText")
+        self._name_hint_label.setWordWrap(True)
         message_layout.addWidget(self._name_hint_label)
 
-        preview_name_row = QHBoxLayout()
-        self._preview_name_label = QLabel(tr("main_window.campaign_page.preview_name_label"), message_section)
-        self._preview_name_label.setObjectName("helperText")
-        self._preview_name_edit = QLineEdit(message_section)
-        self._preview_name_edit.setText(tr("main_window.campaign_page.preview_name_default"))
-        self._preview_name_edit.setToolTip(tr("main_window.campaign_page.preview_name_tooltip"))
-        self._preview_name_edit.setMaximumWidth(160)
-        self._preview_name_edit.textChanged.connect(self._update_message_preview)
-        preview_name_row.addWidget(self._preview_name_label)
-        preview_name_row.addWidget(self._preview_name_edit)
-        preview_name_row.addStretch(1)
-        message_layout.addLayout(preview_name_row)
-
         presets_row = QHBoxLayout()
+        presets_row.setSpacing(SPACE_XS)
+        self._presets_label = QLabel(tr("main_window.presets.label"), message_section)
+        self._presets_label.setObjectName("helperText")
+        presets_row.addWidget(self._presets_label)
         self._presets_combo = QComboBox(message_section)
-        self._presets_combo.setMinimumWidth(180)
+        self._presets_combo.setMinimumWidth(COMBO_MIN_WIDTH)
         self._load_preset_button = QPushButton(tr("main_window.presets.load_button"), message_section)
+        self._load_preset_button.setProperty("variant", "ghost")
         self._load_preset_button.clicked.connect(self._on_load_preset_clicked)
         self._save_preset_button = QPushButton(tr("main_window.presets.save_button"), message_section)
-        self._save_preset_button.setObjectName("ghostButton")
+        self._save_preset_button.setProperty("variant", "ghost")
         self._save_preset_button.clicked.connect(self._on_save_preset_clicked)
         self._delete_preset_button = QPushButton(tr("main_window.presets.delete_button"), message_section)
-        self._delete_preset_button.setObjectName("ghostButton")
+        self._delete_preset_button.setProperty("variant", "ghost")
         self._delete_preset_button.clicked.connect(self._on_delete_preset_clicked)
         presets_row.addWidget(self._presets_combo, 1)
         presets_row.addWidget(self._load_preset_button)
@@ -681,12 +712,36 @@ class MainWindow(QMainWindow):
         message_layout.addLayout(presets_row)
 
         self._message_card = _card(tr("main_window.campaign_page.message_card"), message_section)
-        layout.addWidget(self._message_card)
+        left.addWidget(self._message_card)
         self._attachments_card = _card(tr("main_window.campaign_page.attachments_card"), self._attachments_widget)
-        layout.addWidget(self._attachments_card)
-        self._campaign_card = _card(tr("main_window.campaign_page.campaign_card"), self._campaign_controls)
-        layout.addWidget(self._campaign_card)
-        layout.addStretch(1)
+        left.addWidget(self._attachments_card)
+
+        # ---- right column: preview + launch ----
+        preview_section = QWidget()
+        preview_layout = QVBoxLayout(preview_section)
+        preview_layout.setContentsMargins(0, 0, 0, 0)
+        preview_layout.setSpacing(SPACE_SM)
+        preview_layout.addWidget(self._message_preview, 1)
+        preview_name_row = QHBoxLayout()
+        preview_name_row.setSpacing(SPACE_SM)
+        self._preview_name_label = QLabel(tr("main_window.campaign_page.preview_name_label"), preview_section)
+        self._preview_name_label.setObjectName("helperText")
+        self._preview_name_edit = QLineEdit(preview_section)
+        self._preview_name_edit.setText(tr("main_window.campaign_page.preview_name_default"))
+        self._preview_name_edit.setToolTip(tr("main_window.campaign_page.preview_name_tooltip"))
+        self._preview_name_edit.setMaximumWidth(PREVIEW_NAME_WIDTH)
+        self._preview_name_edit.textChanged.connect(self._update_message_preview)
+        preview_name_row.addWidget(self._preview_name_label)
+        preview_name_row.addWidget(self._preview_name_edit)
+        preview_name_row.addStretch(1)
+        preview_layout.addLayout(preview_name_row)
+        self._preview_card = _card(tr("main_window.campaign_page.preview_card"), preview_section)
+        right.addWidget(self._preview_card, 1)
+
+        self._campaign_card = self._campaign_controls
+        right.addWidget(self._campaign_controls)
+
+        self._campaign_columns.finish()
         return page
 
     def _build_accounts_page(self) -> QWidget:
@@ -1216,7 +1271,16 @@ class MainWindow(QMainWindow):
             self._message_text, self._message_entities, self._preview_name_edit.text()
         )
         self._message_preview.update_preview(preview_text, preview_entities, attachment_names, attachments)
+        self._update_message_summary(attachments)
         self._on_form_state_changed()
+
+    def _update_message_summary(self, attachments) -> None:
+        if self._message_text.strip():
+            text = tr("main_window.campaign_page.message_summary", chars=len(self._message_text))
+        else:
+            text = tr("main_window.campaign_page.message_empty")
+        self._message_summary_label.setText(text)
+        self._campaign_controls.set_attachment_count(len(attachments))
 
     # ---- message presets --------------------------------------------------
 
@@ -1388,6 +1452,7 @@ class MainWindow(QMainWindow):
 
     def _on_recipients_changed(self, summary) -> None:
         self._recipient_count_label.setText(str(len(summary.valid_recipients)))
+        self._campaign_controls.set_recipient_breakdown(sum(1 for r in summary.valid_recipients if r.is_chat_target))
         self._campaign_controls.set_recipient_count(len(summary.valid_recipients))
 
     # ---- account management -------------------------------------------------
@@ -1945,6 +2010,9 @@ class MainWindow(QMainWindow):
         campaign.finished.connect(self._on_campaign_finished)
 
         campaign.start()
+        if self._campaign_columns.is_folded:
+            # One-column layout: bring the progress panel into view.
+            self._campaign_columns.scroll.ensureWidgetVisible(self._campaign_controls)
         self._campaign_controls.start_elapsed_timer()
         self._campaign_controls.set_running_state(True, paused=False)
         self._results_status_label.setText(tr("main_window.results.running"))
@@ -1955,6 +2023,7 @@ class MainWindow(QMainWindow):
         status = CampaignStatus(status_value)
         if status == CampaignStatus.RUNNING:
             self._campaign_controls.set_running_state(True, paused=False)
+            self._campaign_controls.set_flood_wait(None)
             self._campaign_controls.set_status_text("")
             self.statusBar().showMessage(tr("main_window.status.campaign_running"))
         elif status == CampaignStatus.PAUSED:
@@ -1965,14 +2034,10 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(tr("main_window.status.campaign_waiting_flood"))
 
     def _on_flood_wait_started(self, seconds: int) -> None:
-        self._campaign_controls.set_status_text(
-            tr("main_window.flood_wait.started", duration=_format_duration(seconds))
-        )
+        self._campaign_controls.set_flood_wait(seconds)
 
     def _on_flood_wait_tick(self, remaining: int) -> None:
-        self._campaign_controls.set_status_text(
-            tr("main_window.flood_wait.tick", duration=_format_duration(remaining))
-        )
+        self._campaign_controls.set_flood_wait(remaining)
 
     def _on_campaign_finished(self, status_value: str) -> None:
         self._campaign_controls.stop_elapsed_timer()
