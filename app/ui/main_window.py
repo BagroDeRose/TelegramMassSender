@@ -107,10 +107,12 @@ from app.ui.recipient_widget import RecipientWidget
 from app.ui.sidebar import Sidebar
 from app.ui.stat_card import StatCard
 from app.ui.theme import (
+    CAMPAIGN_FOLD_WIDTH,
     COMBO_MIN_WIDTH,
-    LAUNCH_PANEL_WIDTH,
     CONTROL_WIDTH,
     DIAGNOSTICS_MAX_HEIGHT,
+    HEADER_GAP,
+    LAUNCH_PANEL_WIDTH,
     PREVIEW_NAME_WIDTH,
     RESULTS_LIST_MIN_HEIGHT,
     SETTINGS_LABEL_WIDTH,
@@ -120,7 +122,6 @@ from app.ui.theme import (
     SPACE_XL,
     SPACE_XS,
     SPACE_XXL,
-    CAMPAIGN_FOLD_WIDTH,
     WINDOW_DEFAULT_HEIGHT,
     WINDOW_DEFAULT_WIDTH,
     WINDOW_MIN_HEIGHT,
@@ -194,7 +195,7 @@ def _page_header(title: str, subtitle: str) -> QWidget:
     header = QWidget()
     layout = QVBoxLayout(header)
     layout.setContentsMargins(0, 0, 0, 0)
-    layout.setSpacing(2)
+    layout.setSpacing(HEADER_GAP)
     title_label = QLabel(title, header)
     title_label.setObjectName("pageTitle")
     layout.addWidget(title_label)

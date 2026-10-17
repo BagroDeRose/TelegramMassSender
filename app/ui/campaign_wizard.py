@@ -28,6 +28,7 @@ from typing import List, Optional
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -48,7 +49,9 @@ from app.ui.dialogs import show_error
 from app.ui.message_editor_dialog import MessageEditorDialog
 from app.ui.message_preview import MessagePreviewWidget
 from app.ui.recipient_widget import RecipientWidget
-from app.ui.theme import SPACE_MD, SPACE_SM
+from app.ui import icons, theme
+from app.ui.dialog_frame import build_dialog_frame
+from app.ui.theme import SPACE_MD, SPACE_SM, SPACE_XS, WIZARD_HEIGHT, WIZARD_WIDTH
 
 _STEP_TITLE_KEYS = [
     "campaign_wizard.step.recipients",
@@ -85,13 +88,33 @@ class CampaignWizardDialog(QDialog):
         self._message_entities: List[TypeMessageEntity] = []
 
         self.setWindowTitle(tr("campaign_wizard.title"))
-        self.resize(640, 560)
+        self.resize(WIZARD_WIDTH, WIZARD_HEIGHT)
 
-        root = QVBoxLayout(self)
-        root.setSpacing(SPACE_MD)
+        frame = build_dialog_frame(self)
+        root = frame.content
+
+        # Step indicator: one bar + caption per step; done and current
+        # steps carry the accent, the current caption is emphasised.
+        steps_row = QHBoxLayout()
+        steps_row.setSpacing(SPACE_SM)
+        self._step_bars: List[QFrame] = []
+        self._step_captions: List[QLabel] = []
+        for key in _STEP_TITLE_KEYS:
+            cell = QVBoxLayout()
+            cell.setSpacing(SPACE_XS)
+            bar = QFrame(self)
+            bar.setObjectName("stepBar")
+            caption = QLabel(tr(key), self)
+            caption.setObjectName("stepIndicator")
+            cell.addWidget(bar)
+            cell.addWidget(caption)
+            steps_row.addLayout(cell, 1)
+            self._step_bars.append(bar)
+            self._step_captions.append(caption)
+        root.addLayout(steps_row)
 
         self._step_label = QLabel(self)
-        self._step_label.setObjectName("cardTitle")
+        self._step_label.setObjectName("dialogTitle")
         root.addWidget(self._step_label)
 
         self._recipient_widget = RecipientWidget(self)
@@ -108,21 +131,15 @@ class CampaignWizardDialog(QDialog):
         self._stack.addWidget(self._build_confirmation_page())
         root.addWidget(self._stack, 1)
 
-        nav = QHBoxLayout()
-        nav.setSpacing(SPACE_SM)
-        self._back_button = QPushButton(tr("campaign_wizard.back_button"), self)
-        self._back_button.clicked.connect(self._on_back_clicked)
         self._cancel_button = QPushButton(tr("campaign_wizard.cancel_button"), self)
-        self._cancel_button.setObjectName("ghostButton")
+        self._cancel_button.setProperty("variant", "ghost")
         self._cancel_button.clicked.connect(self.reject)
-        self._next_button = QPushButton(tr("campaign_wizard.next_button"), self)
-        self._next_button.setObjectName("primaryButton")
+        frame.footer_left.addWidget(self._cancel_button)
+        self._back_button = frame.add_button(QPushButton(tr("campaign_wizard.back_button"), self))
+        self._back_button.setIcon(icons.themed("back"))
+        self._back_button.clicked.connect(self._on_back_clicked)
+        self._next_button = frame.add_button(QPushButton(tr("campaign_wizard.next_button"), self), "primary")
         self._next_button.clicked.connect(self._on_next_clicked)
-        nav.addWidget(self._back_button)
-        nav.addWidget(self._cancel_button)
-        nav.addStretch(1)
-        nav.addWidget(self._next_button)
-        root.addLayout(nav)
 
         self._goto_step(_STEP_RECIPIENTS)
 
@@ -227,6 +244,9 @@ class CampaignWizardDialog(QDialog):
 
     def _goto_step(self, index: int) -> None:
         self._stack.setCurrentIndex(index)
+        for step, (bar, caption) in enumerate(zip(self._step_bars, self._step_captions)):
+            theme.set_status(bar, "info" if step <= index else "")
+            theme.set_status(caption, "info" if step == index else "")
         self._step_label.setText(
             tr("campaign_wizard.step_label", current=index + 1, total=_STEP_COUNT, title=tr(_STEP_TITLE_KEYS[index]))
         )

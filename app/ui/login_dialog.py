@@ -34,6 +34,8 @@ from telethon.errors import (
 
 from app.database.models import Account
 from app.i18n import tr
+from app.ui.dialog_frame import build_dialog_frame
+from app.ui.theme import DIALOG_WIDTH
 from app.logging.logger import get_logger
 from app.telegram.authentication import AuthenticatedUser, AuthenticationFlow
 from app.telegram.service import TelegramService
@@ -53,11 +55,12 @@ class LoginDialog(QDialog):
         self._account: Optional[Account] = None
 
         self.setWindowTitle(tr("login_dialog.title"))
-        self.setMinimumWidth(420)
+        self.setMinimumWidth(DIALOG_WIDTH)
 
+        frame = build_dialog_frame(self, tr("login_dialog.title"))
+        frame.footer.setVisible(False)  # each step carries its own action
         self._stack = QStackedWidget(self)
-        root = QVBoxLayout(self)
-        root.addWidget(self._stack)
+        frame.content.addWidget(self._stack)
 
         self._build_connect_page()
         self._build_code_page()
@@ -98,6 +101,7 @@ class LoginDialog(QDialog):
         layout.addRow(self._connect_error)
 
         self._connect_button = QPushButton(tr("login_dialog.connect_button"), page)
+        self._connect_button.setProperty("variant", "primary")
         self._connect_button.clicked.connect(self._on_connect_clicked)
         layout.addRow(self._connect_button)
 
@@ -166,6 +170,7 @@ class LoginDialog(QDialog):
         layout.addWidget(self._code_error)
 
         self._code_button = QPushButton(tr("login_dialog.confirm_button"), page)
+        self._code_button.setProperty("variant", "primary")
         self._code_button.clicked.connect(self._on_code_clicked)
         layout.addWidget(self._code_button)
 
@@ -224,6 +229,7 @@ class LoginDialog(QDialog):
         layout.addWidget(self._password_error)
 
         self._password_button = QPushButton(tr("login_dialog.confirm_button"), page)
+        self._password_button.setProperty("variant", "primary")
         self._password_button.clicked.connect(self._on_password_clicked)
         layout.addWidget(self._password_button)
 
@@ -265,7 +271,10 @@ class LoginDialog(QDialog):
         page = QWidget(self)
         layout = QVBoxLayout(page)
 
-        layout.addWidget(QLabel(tr("login_dialog.success_title"), page))
+        success_title = QLabel(tr("login_dialog.success_title"), page)
+        success_title.setObjectName("dialogTitle")
+        success_title.setProperty("status", "success")
+        layout.addWidget(success_title)
 
         self._success_phone = QLabel(page)
         self._success_name = QLabel(page)
@@ -275,6 +284,7 @@ class LoginDialog(QDialog):
         layout.addWidget(self._success_username)
 
         done_button = QPushButton(tr("login_dialog.done_button"), page)
+        done_button.setProperty("variant", "primary")
         done_button.clicked.connect(self.accept)
         row = QHBoxLayout()
         row.addStretch(1)

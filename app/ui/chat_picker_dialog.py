@@ -27,7 +27,9 @@ from PySide6.QtWidgets import (
 
 from app.i18n import tr, trn
 from app.telegram.chat_targets import ChatTarget, TargetType, target_type_label
-from app.ui.theme import SPACE_SM
+from app.ui import icons
+from app.ui.dialog_frame import build_dialog_frame
+from app.ui.theme import DIALOG_HEIGHT, DIALOG_WIDTH
 
 _FILTER_ALL = "all"
 _FILTER_OPTIONS = [
@@ -43,11 +45,11 @@ class ChatPickerDialog(QDialog):
     def __init__(self, chats: List[ChatTarget], parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setWindowTitle(tr("chat_picker.title"))
-        self.resize(520, 520)
+        self.resize(DIALOG_WIDTH, DIALOG_HEIGHT)
         self._chats = list(chats)
 
-        layout = QVBoxLayout(self)
-        layout.setSpacing(SPACE_SM)
+        frame = build_dialog_frame(self, tr("chat_picker.title"))
+        layout = frame.content
 
         hint = QLabel(tr("chat_picker.hint"), self)
         hint.setObjectName("helperText")
@@ -56,6 +58,7 @@ class ChatPickerDialog(QDialog):
 
         filter_row = QHBoxLayout()
         self._search_edit = QLineEdit(self)
+        self._search_edit.addAction(icons.themed("search", "text_muted"), QLineEdit.ActionPosition.LeadingPosition)
         self._search_edit.setPlaceholderText(tr("chat_picker.search_placeholder"))
         self._search_edit.setClearButtonEnabled(True)
         self._search_edit.textChanged.connect(self._apply_filter)
@@ -79,10 +82,10 @@ class ChatPickerDialog(QDialog):
 
         selection_row = QHBoxLayout()
         self._select_all_button = QPushButton(tr("chat_picker.select_visible"), self)
-        self._select_all_button.setObjectName("ghostButton")
+        self._select_all_button.setProperty("variant", "ghost")
         self._select_all_button.clicked.connect(lambda: self._set_visible_checked(True))
         self._select_none_button = QPushButton(tr("chat_picker.select_none"), self)
-        self._select_none_button.setObjectName("ghostButton")
+        self._select_none_button.setProperty("variant", "ghost")
         self._select_none_button.clicked.connect(lambda: self._set_visible_checked(False))
         self._selection_label = QLabel(self)
         self._selection_label.setObjectName("helperText")
@@ -97,17 +100,10 @@ class ChatPickerDialog(QDialog):
         self._empty_label.setVisible(False)
         layout.addWidget(self._empty_label)
 
-        buttons = QHBoxLayout()
-        buttons.addStretch(1)
-        cancel = QPushButton(tr("dialogs.cancel"), self)
+        cancel = frame.add_button(QPushButton(tr("dialogs.cancel"), self))
         cancel.clicked.connect(self.reject)
-        self._add_button = QPushButton(tr("chat_picker.add_button"), self)
-        self._add_button.setObjectName("primaryButton")
-        self._add_button.setDefault(True)
+        self._add_button = frame.add_button(QPushButton(tr("chat_picker.add_button"), self), "primary")
         self._add_button.clicked.connect(self.accept)
-        buttons.addWidget(cancel)
-        buttons.addWidget(self._add_button)
-        layout.addLayout(buttons)
 
         self._update_selection_label()
 

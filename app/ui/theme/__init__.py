@@ -27,7 +27,7 @@ from typing import Dict, List, Optional
 
 from PySide6.QtCore import QEvent, QObject, QSize, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QFontDatabase, QGuiApplication, QPalette
-from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtWidgets import QApplication, QDialogButtonBox, QProxyStyle, QStyle, QWidget
 
 from app.config.paths import get_resource_path, get_theme_assets_dir
 from app.config.settings import DEFAULT_THEME
@@ -98,6 +98,7 @@ from app.ui.theme.tokens import (  # noqa: F401 - re-exported public API
     COMBO_MIN_WIDTH,
     BORDER_WIDTH,
     SEGMENT_PADDING,
+    HEADER_GAP,
     RESULTS_ROW_HEIGHT,
     RESULTS_COL_CHECK,
     RESULTS_COL_STATUS,
@@ -105,8 +106,22 @@ from app.ui.theme.tokens import (  # noqa: F401 - re-exported public API
     RESULTS_COL_ID,
     RESULTS_LIST_MIN_HEIGHT,
     STAT_CARD_MIN_HEIGHT,
+    ATTACHMENT_TILE,
+    ATTACHMENT_THUMBNAIL,
+    ATTACHMENT_THUMBNAIL_INSET,
+    ATTACHMENT_TILE_PADDING,
+    ATTACHMENT_REMOVE_ICON,
+    ATTACHMENT_FILE_ICON,
     SETTINGS_LABEL_WIDTH,
     DIAGNOSTICS_MAX_HEIGHT,
+    DIALOG_WIDTH,
+    DIALOG_HEIGHT_SM,
+    DIALOG_HEIGHT,
+    EDITOR_DIALOG_WIDTH,
+    EDITOR_DIALOG_HEIGHT,
+    WIZARD_WIDTH,
+    WIZARD_HEIGHT,
+    EDITOR_COMPACT_HEIGHT,
     PREVIEW_NAME_WIDTH,
     VALID_THEMES,
     Tokens,
@@ -446,9 +461,42 @@ class _AppEventFilter(QObject):
 
 _app_filter: Optional[_AppEventFilter] = None
 
+_STANDARD_ICONS = {
+    QStyle.StandardPixmap.SP_MessageBoxInformation: ("info", "accent"),
+    QStyle.StandardPixmap.SP_MessageBoxQuestion: ("info", "accent"),
+    QStyle.StandardPixmap.SP_MessageBoxWarning: ("warning", "warning"),
+    QStyle.StandardPixmap.SP_MessageBoxCritical: ("error_circle", "error"),
+}
+
+
+class _ThemedStyle(QProxyStyle):
+    """The platform style, except (1) message-box icons: themed Lucide line
+    icons instead of the native ones (drawn for a light background), for
+    every QMessageBox including static QMessageBox.warning() calls; and
+    (2) dialog button order: primary action on the right."""
+
+    def standardIcon(self, standard_icon, option=None, widget=None):  # noqa: N802 - Qt override
+        mapped = _STANDARD_ICONS.get(standard_icon)
+        if mapped is not None:
+            return icons.themed(mapped[0], mapped[1], active_role=None)
+        return super().standardIcon(standard_icon, option, widget)
+
+    def styleHint(self, hint, option=None, widget=None, return_data=None):  # noqa: N802 - Qt override
+        # Every dialog in the app puts its primary action last (rightmost);
+        # make message boxes / button boxes agree instead of Windows' order.
+        if hint == QStyle.StyleHint.SH_DialogButtonLayout:
+            return QDialogButtonBox.ButtonLayout.GnomeLayout.value
+        return super().styleHint(hint, option, widget, return_data)
+
+
+_themed_style: Optional[_ThemedStyle] = None
+
 
 def _install_app_filter(app: QApplication) -> None:
-    global _app_filter
+    global _app_filter, _themed_style
+    if _themed_style is None:
+        _themed_style = _ThemedStyle(app.style().name())
+        app.setStyle(_themed_style)
     if _app_filter is None:
         _app_filter = _AppEventFilter(app)
         app.installEventFilter(_app_filter)
