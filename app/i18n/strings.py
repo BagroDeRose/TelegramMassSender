@@ -898,6 +898,7 @@ STRINGS: Dict[str, Dict[str, str]] = {
     },
     "campaign_manager.journal.item_failed": {"ru": "✗ {recipient} — {error}", "en": "✗ {recipient} — {error}"},
     "campaign_manager.journal.item_sent": {"ru": "✓ {recipient} — отправлено", "en": "✓ {recipient} — sent"},
+    "campaign_manager.journal.item_skipped": {"ru": "↷ {recipient} — пропущено: {reason}", "en": "↷ {recipient} — skipped: {reason}"},
     "campaign_manager.journal.critical_error": {"ru": "✗ Критическая ошибка аккаунта: {error}", "en": "✗ Critical account error: {error}"},
     "campaign_manager.journal.retrying": {
         "ru": "… повтор {attempt}/{max_attempts} для {recipient} через {backoff} сек.",
