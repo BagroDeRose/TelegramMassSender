@@ -217,6 +217,8 @@ async def test_slow_mode_fails_the_target_without_pausing(qapp):
     item = by_label(manager)["@slow_chat"]
     assert item.status == SendItemStatus.FAILED
     assert item.error == tr("chat_targets.reason.slowmode_wait", seconds=37)
+    assert item.error_category == "slowmode"
+    assert by_label(manager)["@alice_one"].error_category is None
     assert by_label(manager)["@alice_one"].status == SendItemStatus.SENT
 
 

@@ -900,6 +900,7 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "ru": "медленный режим: в этот чат нельзя отправить сообщение из нескольких частей",
         "en": "slow mode: a multi-part message can't be posted to this chat",
     },
+    "chat_targets.reason.slowmode": {"ru": "медленный режим", "en": "slow mode"},
     "chat_targets.reason.slowmode_wait": {
         "ru": "медленный режим, подождите {seconds} сек.",
         "en": "slow mode, wait {seconds} sec.",

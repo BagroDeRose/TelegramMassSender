@@ -41,7 +41,7 @@ from PySide6.QtWidgets import (
 from telethon.errors import FloodWaitError
 from telethon.tl.types import TypeMessageEntity
 
-from app.campaign.campaign_manager import CampaignManager, ProgressSnapshot
+from app.campaign.campaign_manager import ERROR_CATEGORY_SLOWMODE, CampaignManager, ProgressSnapshot
 from app.campaign.campaign_state import CampaignStatus
 from app.campaign.rate_limiter import RateLimiter
 from app.campaign.report import suggest_report_filename, write_csv_report
@@ -121,6 +121,11 @@ _RESULTS_FILTER_STATUS = {
     _RESULTS_FILTER_FAILED: SendItemStatus.FAILED,
     _RESULTS_FILTER_SKIPPED: SendItemStatus.SKIPPED,
 }
+
+
+# SendItem.error_category -> the single label the failure breakdown shows
+# for every error text in that category (each item keeps its own text).
+_ERROR_CATEGORY_LABEL_KEYS = {ERROR_CATEGORY_SLOWMODE: "chat_targets.reason.slowmode"}
 
 
 def _chat_type_of(item) -> Optional[TargetType]:
@@ -2088,7 +2093,8 @@ class MainWindow(QMainWindow):
             return
         counts: Dict[str, int] = {}
         for item in failed_items:
-            reason = item.error or tr("main_window.results_page.unknown_error")
+            category_key = _ERROR_CATEGORY_LABEL_KEYS.get(item.error_category)
+            reason = tr(category_key) if category_key else item.error or tr("main_window.results_page.unknown_error")
             counts[reason] = counts.get(reason, 0) + 1
         parts = [f"{reason}: {count}" for reason, count in sorted(counts.items(), key=lambda kv: -kv[1])]
         self._failure_categories_label.setText(

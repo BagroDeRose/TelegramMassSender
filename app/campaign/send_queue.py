@@ -42,6 +42,11 @@ class SendItem:
     # app.telegram.chat_targets.TargetType value ("user", "group",
     # "supergroup", "forum", "channel") once resolved; None before that.
     target_type: Optional[str] = None
+    # Set when several distinct `error` texts are really one reason -- e.g.
+    # "slow mode, wait 12 sec" / "... 47 sec" are both "slowmode" -- so the
+    # Results page's failure breakdown can count them together while each
+    # item keeps its exact error text.
+    error_category: Optional[str] = None
     # ISO-8601 timestamp stamped when this item reaches a terminal status
     # (SENT/FAILED/SKIPPED); left None for an item never attempted.
     sent_at: Optional[str] = None

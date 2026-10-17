@@ -88,6 +88,9 @@ _TRANSIENT_ERROR_TYPES = (ConnectionError, OSError, asyncio.TimeoutError, Timeou
 
 _MAX_BACKOFF_SECONDS = 30
 
+# SendItem.error_category values (see app.campaign.send_queue.SendItem).
+ERROR_CATEGORY_SLOWMODE = "slowmode"
+
 
 def _now_iso() -> str:
     return datetime.now().isoformat(timespec="seconds")
@@ -448,6 +451,7 @@ class CampaignManager(QObject):
                 # Not a FloodWait: Telegram only says *this chat* won't take
                 # another message for a while. The target fails with that
                 # reason and the campaign moves on -- nothing waits it out.
+                item.error_category = ERROR_CATEGORY_SLOWMODE
                 return self._fail(item, tr("chat_targets.reason.slowmode_wait", seconds=int(exc.seconds)))
             except _CRITICAL_ERROR_TYPES as exc:
                 item.status = SendItemStatus.FAILED

@@ -308,3 +308,35 @@ def test_picker_and_button_render_in_both_languages(qapp):
             assert tr("chat_targets.type.channel") in dialog._list.item(0).text()
     finally:
         set_language(original_language)
+
+
+async def test_failure_breakdown_groups_slow_mode_regardless_of_seconds(qapp, tmp_path):
+    window = _make_window(tmp_path)
+    source = MagicMock()
+    source.items = [
+        SendItem(
+            recipient=parse_recipient_line(f"@slow_{n}"),
+            status=SendItemStatus.FAILED,
+            target_type="supergroup",
+            error=tr("chat_targets.reason.slowmode_wait", seconds=n),
+            error_category="slowmode",
+        )
+        for n in (12, 29, 47)
+    ] + [
+        SendItem(
+            recipient=parse_recipient_line("@locked_group"),
+            status=SendItemStatus.FAILED,
+            target_type="supergroup",
+            error=tr("chat_targets.reason.write_forbidden"),
+        )
+    ]
+    window._report_source = source
+    window._refresh_failed_items()
+
+    breakdown = window._failure_categories_label.text()
+    assert f"{tr('chat_targets.reason.slowmode')}: 3" in breakdown
+    assert f"{tr('chat_targets.reason.write_forbidden')}: 1" in breakdown
+    assert "29" not in breakdown and "12" not in breakdown
+    # Each recipient's own reason keeps its exact wait.
+    texts = [window._failed_items_list.item(i).text() for i in range(window._failed_items_list.count())]
+    assert any(tr("chat_targets.reason.slowmode_wait", seconds=29) in t for t in texts)
