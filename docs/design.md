@@ -92,4 +92,45 @@ Recorded as they were taken. Each is "decision — why".
 11. **Accounts:** the active account's button became a quiet "✓ Active" state (ghost + check icon) instead of a filled primary button — it is a state, not an action; the page's single primary action is "Add account". Delete is an icon button that turns red on hover (the confirmation dialog already existed).
 12. **Changed tests (old markup only):** `test_color_contrast.py` known-gap test → AA assertion (as that test instructed); `test_message_preview.py` asserted the old hard-coded spoiler hex `#54565c` and the `📎` emoji glyph — now asserts the token value and the file name.
 
-(continued below as the work proceeds)
+13. **Shell.** Sidebar 220 px ↔ 64 px icon rail (labels become tooltips/accessible names), state in a new `sidebar_collapsed` setting; active item = 3 px accent bar + light fill; the active account (initials, name, status dot) at the bottom opens Accounts. The journal moved to the *right* of the page (it describes the page, it isn't navigation). The status bar no longer repeats the Demo Mode text.
+14. **Toasts vs. modals.** Toasts (bottom-right, ~3 s, 180 ms fade) for: preset saved, group saved, report saved, diagnostics copied, settings reset, chats added. File exports (CSV, diagnostic bundle) keep a modal box: it shows the saved path, which the user may need — and an existing test pins that behaviour.
+15. **Campaign page fold rule** uses the page area's own width (`CAMPAIGN_FOLD_WIDTH` = 1100 − sidebar), not the window's: an open journal or the expanded sidebar also folds the columns. In the folded layout, starting a campaign scrolls the progress panel into view. The pinned right column scrolls by itself when the window is short (found at 150 % scaling).
+16. **Launch panel people/chats split** is by recipient *format*: `-100…`, `t.me/c/…` and invite links are groups/channels; `@username`/`t.me/name` are counted with users ("Users & @usernames") because their type is only known after resolving — same rule as the start confirmation.
+17. **FloodWait block**: countdown in monospace; its Continue button only enables once the campaign has actually paused after the wait. The wait itself is never shortened.
+18. **Results**: "Retry all failures" is the page's single primary button (when there are failures); exports are secondary/ghost on a second row. Rows stay `QListWidgetItem`s (checkable for Retry, SendItem in UserRole, plain-text summary as their text) and a delegate paints the table — so Retry, filters and tests keep working unchanged. The filter is a segmented control with a QComboBox-compatible API (`_results_filter_combo` keeps working).
+19. **Status colours on tints.** In the light theme the plain status colours were 4.2–4.4:1 on their own 12 % tint (pills) — under AA for 12 px text. New `*_ink` tokens (status −18 % lightness in light, unchanged in dark) are used for text on tints only.
+20. **Message boxes.** A `QProxyStyle` installed by `apply_theme` supplies themed message-box icons (also for static `QMessageBox.warning()` calls, which some tests patch and which therefore stay static) and the GNOME button layout, so the primary action is on the right everywhere. Delete-account warns instead of asking.
+21. **Journal markers.** The campaign layer (logic — not touched) prefixes journal lines with `✓ ✗ … ▶ ⏸ ■ ✖ ↷`. The journal turns the marker into a themed icon and strips it from the visible text; the item text keeps it (tests, accessibility).
+22. **Hygiene is enforced, not just done once.** `scripts/check_ui_hygiene.py` (run by `tests/test_ui_hygiene.py`) fails on hex/rgb/named colours, `setStyleSheet`, numeric pixel arguments to size/margin/spacing setters, or emoji/symbol glyphs in `app/ui` outside `theme/`; the only allowed glyphs are the emoji palette and the journal-marker table.
+23. **Window minimum** lowered from 1040×760 to 900×600 so the app fits a 1366×768 screen at 125 % (1093×614 logical).
+24. **Changed tests (old markup only):** `test_main_window_ux` — `"▶  Start campaign"` → `"Start campaign"` (the ▶ glyph became an icon); `test_stat_card` — the value's colour property is `status` (was `variant`); `test_color_contrast` and `test_message_preview` as noted in 12. Nothing else in the existing suite changed; `test_theme.py` (theme application/persistence) passes unchanged.
+
+## 4. What changed on each screen
+
+| Screen | Before | After |
+| --- | --- | --- |
+| Shell | Fixed sidebar with a 3-line brand, journal wedged between menu and page, native title bar | Collapsible sidebar with accent bar and active-account block, journal on the right, thin status bar with a status dot, dark title bar in the dark theme, page fade, toasts |
+| Campaign | One long column; preview a plain text box; Start below the fold | Two columns: inputs left, chat-bubble preview + launch panel pinned right; panel turns into progress with a FloodWait countdown block; count pills; grouped action rows |
+| Results | Combo filter, list of "label — error" strings, yellow "completed" | Status pill, tiles coloured on the number only, failure reasons one per line, segmented filter, table rows (status pill, type icon + text, monospace ID), report rows with a "more" menu |
+| Accounts | Avatar pixmap, inline-HTML bullet status, filled "Active" button | Initials avatar, status pill, quiet "✓ Active" state, trash icon (red on hover), single-action empty state |
+| Settings | Labels above controls, varying widths, reset among options | Label column + one control width, hints under controls, danger reset last with an explanation, monospace diagnostics |
+| Journal | Truncated lines with horizontal scroll, text markers | Wrapped rows: muted monospace time, status icon, message; "no events yet" state |
+| Dialogs / Wizard | Ad-hoc layouts and button orders; emoji toolbar | Title / content / footer with primary right; Wizard step indicator; Lucide toolbar; themed message boxes |
+
+## 5. Verification
+
+- `pytest tests/` in one process: 913 passed (was 883 before this branch).
+- `scripts/check_ui_hygiene.py`: 0 findings. Plain greps, for the record:
+  - `setStyleSheet` in `app/`: one call, `app/ui/theme/__init__.py` (`apply_theme`).
+  - hex colours in `app/**/*.py` outside `app/ui/theme/tokens.py`: none.
+  - emoji/symbol glyphs in `app/ui`: only the emoji palette (`message_editor._EMOJI_LIST`) and the journal-marker table (input parsing, never displayed).
+- Screenshots: `docs/redesign/before/` (34) and `docs/redesign/after/` (84: every page and dialog, both themes, RU and EN, plus `window_frame_*` showing the real title bar and `theme_switch_live_*` taken right after a live switch with the editor open).
+- Checked by screenshot at 125 % and 150 % (`QT_SCALE_FACTOR`) and at the 900×600 minimum window.
+
+## 6. Not done / deliberately left
+
+- **Cascadia Mono is not bundled** (it ships with Windows 11 and Windows Terminal; Consolas is the fallback everywhere).
+- **Native message boxes** (QMessageBox) keep Qt's own layout; only their icons, button variants and order are themed. A fully custom confirmation dialog was not worth replacing a mechanism several tests patch directly.
+- **Attachments tile grid** keeps its existing structure (it has 100+ behavioural tests around drag-and-drop and selection); it got tokens, icons and the new colours, not a new layout.
+- **Text formatted as code** in the editor uses the monospace token; its background colour is not themed (it never was — only spoiler and link colours are tracked in the document).
+- Only the Campaign page has an explicit Tab chain; the other pages rely on Qt's creation order, which already matches their visual order after the redesign.

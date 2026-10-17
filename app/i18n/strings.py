@@ -50,14 +50,6 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "ru": "Рассылка остановлена из-за критической ошибки. Откройте приложение для подробностей.",
         "en": "The campaign was stopped due to a critical error. Open the app for details.",
     },
-    "main_window.flood_wait.started": {
-        "ru": "Telegram временно ограничил отправку. Необходимо подождать: {duration}",
-        "en": "Telegram has temporarily limited sending. Waiting: {duration}",
-    },
-    "main_window.flood_wait.tick": {
-        "ru": "Ожидание окончания ограничения Telegram: {duration}",
-        "en": "Waiting for the Telegram limit to lift: {duration}",
-    },
     "main_window.duration.minutes_seconds": {"ru": "{minutes} мин {seconds} сек", "en": "{minutes}m {seconds}s"},
     "main_window.duration.seconds": {"ru": "{seconds} сек", "en": "{seconds}s"},
 
@@ -123,7 +115,6 @@ STRINGS: Dict[str, Dict[str, str]] = {
         ),
     },
     "main_window.campaign_page.attachments_card": {"ru": "Вложения", "en": "Attachments"},
-    "main_window.campaign_page.campaign_card": {"ru": "Рассылка", "en": "Campaign"},
     "main_window.campaign_page.open_wizard_button": {"ru": "Мастер кампании", "en": "Campaign Wizard"},
 
     # ---- app/ui/campaign_wizard.py -------------------------------------------
@@ -295,7 +286,6 @@ STRINGS: Dict[str, Dict[str, str]] = {
     # ---- main_window: settings dialogs / handlers ----------------------------
     "main_window.dialogs.interval_title": {"ru": "Интервал отправки", "en": "Sending interval"},
     "main_window.dialogs.reports_directory_title": {"ru": "Папка для отчётов", "en": "Reports folder"},
-    "main_window.dialogs.settings_title": {"ru": "Настройки", "en": "Settings"},
     "main_window.dialogs.settings_reset_message": {
         "ru": "Настройки приложения сброшены к значениям по умолчанию.",
         "en": "Application settings have been reset to their defaults.",
@@ -401,7 +391,6 @@ STRINGS: Dict[str, Dict[str, str]] = {
     "main_window.dialogs.report_name_label": {"ru": "Название:", "en": "Name:"},
     "main_window.dialogs.save_report_error_title": {"ru": "Сохранение отчёта", "en": "Saving report"},
     "main_window.dialogs.save_report_error_message": {"ru": "Не удалось сохранить отчёт: {error}", "en": "Couldn't save the report: {error}"},
-    "main_window.dialogs.report_saved_title": {"ru": "Отчёт сохранён", "en": "Report saved"},
     "main_window.dialogs.report_saved_message": {
         "ru": "Отчёт «{name}» добавлен в сохранённые отчёты.",
         "en": "Report “{name}” was added to your saved reports.",
@@ -421,7 +410,6 @@ STRINGS: Dict[str, Dict[str, str]] = {
     "sidebar.nav.accounts": {"ru": "Аккаунты", "en": "Accounts"},
     "sidebar.nav.results": {"ru": "Результаты", "en": "Results"},
     "sidebar.nav.settings": {"ru": "Настройки", "en": "Settings"},
-    "sidebar.brand_subtitle": {"ru": "для Telegram", "en": "for Telegram"},
     "sidebar.collapse_tooltip": {"ru": "Свернуть меню", "en": "Collapse menu"},
     "sidebar.expand_tooltip": {"ru": "Развернуть меню", "en": "Expand menu"},
     "sidebar.no_account": {"ru": "Нет аккаунта", "en": "No account"},
@@ -470,7 +458,6 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "ru": "Сохранить результаты текущей рассылки в CSV-файл (открывается в Excel)",
         "en": "Save the current campaign's results to a CSV file (opens in Excel)",
     },
-    "campaign_controls.interval_summary": {"ru": "Интервал отправки: {min}–{max} сек", "en": "Sending interval: {min}–{max} sec"},
     "campaign_controls.duration_estimate": {"ru": "~ {duration}", "en": "~ {duration}"},
     "campaign_controls.current_item": {
         "ru": "Сейчас: {recipient}  ·  {position} из {total}",

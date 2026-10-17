@@ -17,14 +17,14 @@ import asyncio
 import sys
 import tempfile
 from pathlib import Path
-from typing import Callable, Dict, List
+from typing import Callable, List
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from PySide6.QtCore import QRect, Qt
 from PySide6.QtGui import QColor, QImage, QPainter
-from PySide6.QtWidgets import QApplication, QDialog, QMessageBox, QWidget
+from PySide6.QtWidgets import QApplication, QMessageBox, QWidget
 
 parser = argparse.ArgumentParser()
 parser.add_argument("out_dir")
@@ -113,6 +113,10 @@ window = main_window_module.MainWindow(
     database=db, secure_storage=SecureStorage(TMP / "secrets.dat"), close_event=close_event
 )
 window.resize(args.width, args.height)
+# The reports folder defaults to a path under the real Windows profile
+# (C:\\Users\\<account>\\...). Screenshots show a synthetic one instead --
+# display only, nothing is written there.
+window._reports_dir_edit.setText("C:\\Users\\demo\\Documents\\Mass Sender\\reports")
 window.show()
 
 
@@ -215,6 +219,25 @@ async def scenario() -> None:
     await settle()
     _save(window, "campaign_filled")
 
+    if not ONLY or "attachments" in ONLY:
+        attachments = window._attachments_widget
+        attachments._list.item(1).setSelected(True)
+        window._campaign_columns.scroll.ensureWidgetVisible(window._attachments_card)
+        await settle()
+        _save(window._attachments_card, "attachments")
+        attachments._list.clearSelection()
+
+    if not ONLY or "window_frame" in ONLY:
+        # The real window including its Windows title bar (dark in the dark
+        # theme): grabbed from the screen, not rendered from the widget.
+        window.raise_()
+        window.activateWindow()
+        await settle(0.6)
+        frame = window.frameGeometry()
+        shot = window.screen().grabWindow(0, frame.x(), frame.y(), frame.width(), frame.height())
+        shot.save(str(OUT / f"window_frame{SUFFIX}.png"))
+        print("saved window_frame")
+
     window._navigate_to_page(1)
     await settle()
     _save(window, "accounts")
@@ -286,6 +309,21 @@ async def scenario() -> None:
     window._results_filter_combo.setCurrentIndex(0)
     await settle()
     _save(window, "results")
+
+    if not ONLY or "theme_switch_live" in ONLY:
+        # Switch the theme on the fly with a dialog open: both must follow.
+        window._navigate_to_page(0)
+        editor = MessageEditorDialog(text, entities, window)
+        editor.show()
+        await settle()
+        other = "light" if args.theme == "dark" else "dark"
+        window._theme_combo.setCurrentIndex(window._theme_combo.findData(other))
+        await settle(0.5)
+        window.grab().save(str(OUT / f"theme_switch_live_window_{args.theme}-to-{other}_{args.lang}.png"))
+        editor.grab().save(str(OUT / f"theme_switch_live_dialog_{args.theme}-to-{other}_{args.lang}.png"))
+        print("saved theme_switch_live")
+        editor.hide()
+        editor.deleteLater()
 
 
 async def main() -> None:

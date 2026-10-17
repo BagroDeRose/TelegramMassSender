@@ -162,13 +162,6 @@ def _chat_type_of(item) -> Optional[TargetType]:
     return target_type if target_type in CHAT_TARGET_TYPES else None
 
 
-def _format_duration(total_seconds: int) -> str:
-    minutes, seconds = divmod(max(0, int(total_seconds)), 60)
-    if minutes:
-        return tr("main_window.duration.minutes_seconds", minutes=minutes, seconds=seconds)
-    return tr("main_window.duration.seconds", seconds=seconds)
-
-
 def _card(title: str, content: QWidget, count_label: Optional[QLabel] = None) -> QFrame:
     """A borderless-content card: a bold title (+ optional right-aligned
     badge) above the widget, all on one flat surface."""

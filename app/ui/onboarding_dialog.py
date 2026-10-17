@@ -13,8 +13,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QDialog, QLabel, QPushButton, QWidget
 
 from app.i18n import tr
 from app.ui.dialog_frame import build_dialog_frame

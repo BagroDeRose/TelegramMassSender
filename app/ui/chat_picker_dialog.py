@@ -21,7 +21,6 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QPushButton,
-    QVBoxLayout,
     QWidget,
 )
 

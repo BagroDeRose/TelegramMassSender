@@ -51,7 +51,7 @@ from app.ui.message_preview import MessagePreviewWidget
 from app.ui.recipient_widget import RecipientWidget
 from app.ui import icons, theme
 from app.ui.dialog_frame import build_dialog_frame
-from app.ui.theme import SPACE_MD, SPACE_SM, SPACE_XS, WIZARD_HEIGHT, WIZARD_WIDTH
+from app.ui.theme import SPACE_SM, SPACE_XS, WIZARD_HEIGHT, WIZARD_WIDTH
 
 _STEP_TITLE_KEYS = [
     "campaign_wizard.step.recipients",

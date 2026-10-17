@@ -15,7 +15,7 @@ from typing import List, Optional, Tuple
 
 from PySide6.QtCore import QRect
 from PySide6.QtGui import QCloseEvent, QGuiApplication
-from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QMessageBox, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QDialog, QLabel, QMessageBox, QPushButton, QWidget
 from telethon.tl.types import TypeMessageEntity
 
 from app.i18n import tr
