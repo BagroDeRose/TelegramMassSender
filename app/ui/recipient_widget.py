@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 from app.i18n import tr, trn
 from app.recipients.csv_importer import CsvImportError, import_recipients_from_csv
 from app.recipients.importer import import_recipients_from_txt
-from app.recipients.parser import ParsedRecipient, ParseSummary, parse_recipient_lines
+from app.recipients.parser import ParsedRecipient, ParseSummary, parse_recipient_line, parse_recipient_lines
 from app.ui.dialogs import show_invalid_rows
 
 _DEBOUNCE_MS = 300
@@ -31,8 +31,12 @@ _DEBOUNCE_MS = 300
 
 class RecipientWidget(QWidget):
     recipients_changed = Signal(object)  # ParseSummary
+    # "From my chats…" clicked. The widget can't load chats itself (that
+    # needs the active account's client) -- MainWindow does, through the
+    # service layer, and writes the picked chats back via append_lines().
+    pick_chats_requested = Signal()
 
-    def __init__(self, parent: Optional[QWidget] = None) -> None:
+    def __init__(self, parent: Optional[QWidget] = None, show_chat_picker: bool = False) -> None:
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -48,11 +52,17 @@ class RecipientWidget(QWidget):
         self._import_button.clicked.connect(self._on_import_clicked)
         self._import_csv_button = QPushButton(tr("recipient_widget.import_csv_button"), self)
         self._import_csv_button.clicked.connect(self._on_import_csv_clicked)
+        self._pick_chats_button = QPushButton(tr("recipient_widget.pick_chats_button"), self)
+        self._pick_chats_button.setToolTip(tr("recipient_widget.pick_chats_tooltip"))
+        self._pick_chats_button.clicked.connect(self.pick_chats_requested.emit)
+        self._pick_chats_button.setVisible(show_chat_picker)
+        self._pick_chats_button.setEnabled(False)  # until an account is connected
         self._clear_button = QPushButton(tr("recipient_widget.clear_button"), self)
         self._clear_button.setObjectName("ghostButton")
         self._clear_button.clicked.connect(self._on_clear_clicked)
         buttons.addWidget(self._import_button)
         buttons.addWidget(self._import_csv_button)
+        buttons.addWidget(self._pick_chats_button)
         buttons.addWidget(self._clear_button)
         buttons.addStretch(1)
         layout.addLayout(buttons)
@@ -108,6 +118,9 @@ class RecipientWidget(QWidget):
                 details.append(tr("recipient_widget.summary_invalid_count", count=summary.invalid_count))
             if summary.duplicates_removed:
                 details.append(tr("recipient_widget.summary_duplicates_removed", count=summary.duplicates_removed))
+            chat_count = sum(1 for p in summary.valid_recipients if p.is_chat_target)
+            if chat_count:
+                details.insert(0, tr("recipient_widget.summary_chat_count", count=chat_count))
             suffix = f"  ({', '.join(details)})" if details else ""
             self._summary_label.setText(f"{trn('recipient_widget.recipient_count', valid_count)}{suffix}")
         self._review_invalid_button.setVisible(summary.invalid_count > 0)
@@ -207,6 +220,31 @@ class RecipientWidget(QWidget):
     def get_text(self) -> str:
         return self._text_edit.toPlainText()
 
+    def set_pick_chats_enabled(self, enabled: bool) -> None:
+        self._pick_chats_button.setEnabled(enabled)
+
+    def append_lines(self, lines: List[str]) -> int:
+        """Append recipient lines (e.g. chats picked in "From my chats…")
+        below whatever is already there, skipping ones already present by
+        normalized identity. Returns how many were actually added."""
+        existing = {p.normalized_key for p in self._last_summary.valid_recipients}
+        new_lines = []
+        for line in lines:
+            parsed = parse_recipient_line(line)
+            key = parsed.normalized_key
+            if key is None or key in existing:
+                continue
+            existing.add(key)
+            new_lines.append(line)
+        if not new_lines:
+            return 0
+        existing_text = self._text_edit.toPlainText()
+        joined = "\n".join(new_lines)
+        combined = f"{existing_text.rstrip()}\n{joined}" if existing_text.strip() else joined
+        self._text_edit.setPlainText(combined)
+        self.flush()
+        return len(new_lines)
+
     def set_text(self, text: str) -> None:
         self._text_edit.setPlainText(text)
         self.flush()
@@ -225,6 +263,8 @@ class RecipientWidget(QWidget):
         self._text_edit.setToolTip(tr("recipient_widget.tooltip"))
         self._import_button.setText(tr("recipient_widget.import_txt_button"))
         self._import_csv_button.setText(tr("recipient_widget.import_csv_button"))
+        self._pick_chats_button.setText(tr("recipient_widget.pick_chats_button"))
+        self._pick_chats_button.setToolTip(tr("recipient_widget.pick_chats_tooltip"))
         self._clear_button.setText(tr("recipient_widget.clear_button"))
         self._review_invalid_button.setText(tr("recipient_widget.review_invalid_button"))
         self._recompute_summary()

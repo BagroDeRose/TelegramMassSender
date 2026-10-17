@@ -38,6 +38,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+from telethon.errors import FloodWaitError
 from telethon.tl.types import TypeMessageEntity
 
 from app.campaign.campaign_manager import CampaignManager, ProgressSnapshot
@@ -50,6 +51,7 @@ from app.campaign import presets
 from app.campaign.presets import PresetError
 from app.recipients import groups
 from app.recipients.groups import RecipientGroupError
+from app.recipients.parser import RecipientKind
 from app.campaign import report_library
 from app.config.paths import get_reports_dir, get_resource_path
 from app.config.settings import (
@@ -65,7 +67,8 @@ from app.database.models import Preset, RecipientGroup, SavedReport
 from app.database.repositories import PresetRepository, RecipientGroupRepository, SavedReportRepository
 from app.i18n import LANGUAGE_LABELS, VALID_LANGUAGES, get_language, set_language, tr
 from app.logging.logger import get_logger
-from app.telegram.account_manager import Account
+from app.telegram.account_manager import Account, AccountStatus
+from app.telegram.chat_targets import CHAT_TARGET_TYPES, TargetType, list_writable_chats, target_type_label
 from app.telegram.exceptions import AccountDeletionError, AccountSwitchBlockedError
 from app.security.secure_storage import SecureStorage
 from app.telegram.service import TelegramService
@@ -75,6 +78,7 @@ from app.ui.account_widget import AccountWidget
 from app.ui.attachments_widget import AttachmentsWidget
 from app.ui.campaign_controls import CampaignControlsWidget, format_duration
 from app.ui.campaign_wizard import CampaignWizardDialog
+from app.ui.chat_picker_dialog import ChatPickerDialog
 from app.ui.dialogs import (
     confirm_delete_account,
     confirm_delete_group,
@@ -117,6 +121,16 @@ _RESULTS_FILTER_STATUS = {
     _RESULTS_FILTER_FAILED: SendItemStatus.FAILED,
     _RESULTS_FILTER_SKIPPED: SendItemStatus.SKIPPED,
 }
+
+
+def _chat_type_of(item) -> Optional[TargetType]:
+    """The resolved group/channel type of a results item, or None for a
+    user or a not-yet-resolved target."""
+    try:
+        target_type = TargetType(item.target_type) if item.target_type else None
+    except ValueError:
+        return None
+    return target_type if target_type in CHAT_TARGET_TYPES else None
 
 
 def _format_duration(total_seconds: int) -> str:
@@ -243,6 +257,11 @@ class MainWindow(QMainWindow):
         # rebuild a Telethon client -- reopening its session file -- in the
         # middle of a delete, making the delete fail with WinError 32.
         self._account_lock = asyncio.Lock()
+        # Last known status per account id (from _refresh_accounts_locked),
+        # so "From my chats…" is only offered for an account that is
+        # actually connected and authorized.
+        self._account_statuses: Dict[int, AccountStatus] = {}
+        self._chat_picker_loading = False
 
         self._database = database if database is not None else Database()
         self._service = TelegramService(self._database, secure_storage=secure_storage)
@@ -490,7 +509,7 @@ class MainWindow(QMainWindow):
 
     def _build_ui(self) -> None:
         self._account_widget = AccountWidget(self)
-        self._recipient_widget = RecipientWidget(self)
+        self._recipient_widget = RecipientWidget(self, show_chat_picker=True)
         self._message_preview = MessagePreviewWidget(self)
         self._attachments_widget = AttachmentsWidget(self)
         self._campaign_controls = CampaignControlsWidget(self)
@@ -1046,6 +1065,7 @@ class MainWindow(QMainWindow):
 
         self._recipient_widget.recipients_changed.connect(self._on_form_state_changed)
         self._recipient_widget.recipients_changed.connect(self._on_recipients_changed)
+        self._recipient_widget.pick_chats_requested.connect(self._on_pick_chats_requested)
         self._attachments_widget.attachments_changed.connect(self._update_message_preview)
 
         self._campaign_controls.start_requested.connect(self._on_start_requested)
@@ -1410,12 +1430,14 @@ class MainWindow(QMainWindow):
         self._ensure_switch_guard()
         account_manager = self._service.account_manager
         if account_manager is None:
+            self._account_statuses = {}
             self._account_widget.set_accounts([])
             self._on_form_state_changed()
             self._update_connection_status()
             return
         statuses = await account_manager.list_accounts_with_status()
         valid_ids = {s.account.id for s in statuses}
+        self._account_statuses = {s.account.id: s for s in statuses}
 
         # Preference order: an explicit caller override (e.g. "select the
         # account I just added/reconnected") > whatever AccountManager
@@ -1679,6 +1701,73 @@ class MainWindow(QMainWindow):
         has_recipients = bool(self._recipient_widget.get_summary().valid_recipients)
         has_content = bool(self._message_text.strip()) or not self._attachments_widget.is_empty()
         self._campaign_controls.set_start_ready(has_account and has_recipients and has_content)
+        self._update_pick_chats_enabled()
+
+    # ---- "From my chats…" -------------------------------------------------------
+
+    def _active_account_connected(self) -> bool:
+        account = self._active_account()
+        if account is None:
+            return False
+        status = self._account_statuses.get(account.id)
+        return status is not None and status.is_authorized and not status.connection_error
+
+    def _update_pick_chats_enabled(self) -> None:
+        campaign_busy = self._campaign_starting or (
+            self._current_campaign is not None and self._current_campaign.is_active
+        )
+        self._recipient_widget.set_pick_chats_enabled(
+            self._active_account_connected() and not campaign_busy and not self._chat_picker_loading
+        )
+
+    def _on_pick_chats_requested(self) -> None:
+        if self._chat_picker_loading or self._campaign_starting:
+            return
+        if self._current_campaign is not None and self._current_campaign.is_active:
+            return
+        account = self._active_account()
+        if account is None or not self._active_account_connected():
+            show_error(self, tr("chat_picker.title"), tr("chat_picker.error.no_account"))
+            return
+        self._chat_picker_loading = True
+        self._update_pick_chats_enabled()
+        self._spawn(self._load_and_pick_chats(account), "загрузка списка чатов")
+
+    async def _load_and_pick_chats(self, account: Account) -> None:
+        try:
+            account_manager = self._service.account_manager
+            assert account_manager is not None
+            try:
+                # Same lock as refresh/switch/delete: this reads through the
+                # account's live client and must not interleave with them.
+                async with self._account_lock:
+                    client = await account_manager.ensure_connected(account)
+                    authorized = await client.is_user_authorized()
+                    chats = await list_writable_chats(client) if authorized else []
+                if not authorized:
+                    show_error(self, tr("chat_picker.title"), tr("main_window.start_error.not_authorized"))
+                    return
+            except FloodWaitError as exc:
+                # Never retried behind the user's back: they're told how long
+                # Telegram wants them to wait and can try again afterwards.
+                show_error(self, tr("chat_picker.title"), tr("chat_picker.error.flood_wait", seconds=int(exc.seconds)))
+                return
+            except Exception as exc:  # noqa: BLE001 - surfaced to the user
+                self._logger.warning("Не удалось загрузить список чатов: %s", exc)
+                show_error(self, tr("chat_picker.title"), tr("chat_picker.error.load_failed", error=exc))
+                return
+        finally:
+            self._chat_picker_loading = False
+            self._update_pick_chats_enabled()
+
+        if not chats:
+            show_info(self, tr("chat_picker.title"), tr("chat_picker.empty"))
+            return
+        dialog = ChatPickerDialog(chats, self)
+        if dialog.exec() != ChatPickerDialog.DialogCode.Accepted:
+            return
+        added = self._recipient_widget.append_lines([chat.recipient_line for chat in dialog.selected_targets()])
+        self.statusBar().showMessage(tr("chat_picker.added_status", count=added), 5000)
 
     # ---- campaign lifecycle ---------------------------------------------------
 
@@ -1722,8 +1811,11 @@ class MainWindow(QMainWindow):
             return
 
         settings = self._service.settings_repository.load_app_settings()
-        if settings.confirm_before_start and not confirm_start_campaign(self, len(recipients)):
-            return
+        if settings.confirm_before_start:
+            chat_count = sum(1 for r in recipients if r.is_chat_target)
+            username_count = sum(1 for r in recipients if r.kind == RecipientKind.USERNAME)
+            if not confirm_start_campaign(self, len(recipients), chat_count, username_count):
+                return
 
         try:
             rate_limiter = RateLimiter(settings.min_delay_seconds, settings.max_delay_seconds)
@@ -1738,6 +1830,7 @@ class MainWindow(QMainWindow):
         # one to actually start executing -- see _switch_account for the
         # same pattern applied to account switching.
         self._campaign_starting = True
+        self._update_pick_chats_enabled()
         self._spawn(
             self._start_campaign(
                 account, recipients, text, entities, attachments, rate_limiter, settings.retry_count, recipient_names
@@ -1746,7 +1839,17 @@ class MainWindow(QMainWindow):
         )
 
     async def _start_campaign(
-        self, account, recipients, text, entities, attachments, rate_limiter, retry_count, recipient_names
+        self,
+        account,
+        recipients,
+        text,
+        entities,
+        attachments,
+        rate_limiter,
+        retry_count,
+        recipient_names,
+        delivered_chat_ids=None,
+        resume_steps=None,
     ) -> None:
         account_manager = self._service.account_manager
         assert account_manager is not None
@@ -1755,10 +1858,12 @@ class MainWindow(QMainWindow):
             if not await client.is_user_authorized():
                 show_error(self, tr("main_window.dialogs.campaign_title"), tr("main_window.start_error.not_authorized"))
                 self._campaign_starting = False
+                self._update_pick_chats_enabled()
                 return
         except Exception as exc:  # noqa: BLE001 - surfaced to the user
             show_error(self, tr("main_window.dialogs.campaign_title"), tr("main_window.start_error.connect_failed", error=exc))
             self._campaign_starting = False
+            self._update_pick_chats_enabled()
             return
 
         campaign = CampaignManager(
@@ -1770,6 +1875,11 @@ class MainWindow(QMainWindow):
             rate_limiter=rate_limiter,
             max_retries=retry_count,
             recipient_names=recipient_names,
+            # Retry only: chats the retried campaign already delivered to,
+            # and steps of a partly delivered message that already went out
+            # -- neither is ever sent a second time.
+            delivered_chat_ids=delivered_chat_ids,
+            resume_steps=resume_steps,
             # No Qt parent on purpose: with parent=self, Qt's ownership
             # hierarchy would keep every past campaign alive forever as a
             # child of MainWindow. Plain Python refcounting reclaims it as
@@ -1790,6 +1900,7 @@ class MainWindow(QMainWindow):
         self._save_report_button.setEnabled(True)
         self._journal.clear()
         self._account_widget.set_enabled_switching(False)
+        self._update_pick_chats_enabled()
 
         campaign.state_changed.connect(self._on_campaign_state_changed)
         campaign.progress_changed.connect(self._campaign_controls.update_progress)
@@ -1946,6 +2057,9 @@ class MainWindow(QMainWindow):
         self._failed_items_list.clear()
         for item in displayed_items:
             text = item.recipient.display_label
+            chat_type = _chat_type_of(item)
+            if chat_type is not None:
+                text += f"  ({target_type_label(chat_type)})"
             if item.error:
                 text += f"  —  {item.error}"
             list_item = QListWidgetItem(text)
@@ -2032,10 +2146,31 @@ class MainWindow(QMainWindow):
         except SettingsValidationError as exc:
             show_error(self, tr("main_window.dialogs.interval_title"), str(exc))
             return
+        # "Retry" never re-sends what already arrived: chats the previous
+        # run delivered to are skipped (a failed "-100..." line may be the
+        # same chat as a delivered "@name" line), and a message that failed
+        # half-way resumes after its last delivered part.
+        source_items = self._report_source.items if self._report_source is not None else []
+        delivered_chat_ids = set(getattr(self._report_source, "delivered_chat_ids", ()) or ())
+        resume_steps = {
+            item.recipient.normalized_key: item.next_step
+            for item in source_items
+            if item.status == SendItemStatus.FAILED and item.next_step > 0
+        }
         self._campaign_starting = True
+        self._update_pick_chats_enabled()
         self._spawn(
             self._start_campaign(
-                account, recipients, text, entities, attachments, rate_limiter, settings.retry_count, recipient_names
+                account,
+                recipients,
+                text,
+                entities,
+                attachments,
+                rate_limiter,
+                settings.retry_count,
+                recipient_names,
+                delivered_chat_ids=delivered_chat_ids,
+                resume_steps=resume_steps,
             ),
             "запуск рассылки",
         )

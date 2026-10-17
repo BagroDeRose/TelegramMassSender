@@ -51,15 +51,37 @@ def show_info(parent: QWidget, title: str, message: str) -> None:
     QMessageBox.information(parent, title, message)
 
 
-def confirm_start_campaign(parent: QWidget, recipient_count: int) -> bool:
+def start_campaign_breakdown(user_count: int, chat_count: int, username_count: int) -> str:
+    """The users / groups-and-channels split shown under the confirmation
+    question. Counted from the recipient formats alone (nothing is resolved
+    before the user confirms): a @username or t.me/username may be either a
+    person or a public chat, so those get their own line instead of being
+    guessed into one of the other two."""
+    lines = []
+    if user_count:
+        lines.append(tr("dialogs.start_campaign.users_line", count=user_count))
+    if chat_count:
+        lines.append(tr("dialogs.start_campaign.chats_line", count=chat_count))
+    if username_count:
+        lines.append(tr("dialogs.start_campaign.usernames_line", count=username_count))
+    return "\n".join(lines)
+
+
+def confirm_start_campaign(
+    parent: QWidget, recipient_count: int, chat_count: int = 0, username_count: int = 0
+) -> bool:
     """Optional pre-start confirmation, gated behind
     AppSettings.confirm_before_start (off by default -- the app has never
     required this, so it stays opt-in rather than new friction for
-    everyone)."""
+    everyone). chat_count/username_count are the parts of recipient_count
+    that are definitely groups/channels and that are @username/t.me
+    names of not-yet-known type; the rest are users."""
     box = QMessageBox(parent)
     box.setIcon(QMessageBox.Icon.Question)
     box.setWindowTitle(tr("dialogs.start_campaign.title"))
     box.setText(trn("dialogs.start_campaign.message", recipient_count))
+    user_count = max(0, recipient_count - chat_count - username_count)
+    box.setInformativeText(start_campaign_breakdown(user_count, chat_count, username_count))
     yes_button = box.addButton(tr("dialogs.start_campaign.start"), QMessageBox.ButtonRole.YesRole)
     box.addButton(tr("dialogs.cancel"), QMessageBox.ButtonRole.RejectRole)
     box.setDefaultButton(yes_button)
