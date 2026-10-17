@@ -10,7 +10,7 @@ from typing import Optional
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout, QWidget
 
-from app.ui.theme import SPACE_LG, SPACE_MD, SPACE_XS
+from app.ui.theme import SPACE_LG, SPACE_MD, SPACE_XS, STAT_CARD_MIN_HEIGHT
 
 
 class StatCard(QFrame):
@@ -25,24 +25,25 @@ class StatCard(QFrame):
         self._value_label = QLabel("0", self)
         self._value_label.setObjectName("statValue")
         if variant:
-            self._value_label.setProperty("variant", variant)
+            # Colour only on the number, never on the tile.
+            self._value_label.setProperty("status", variant)
         layout.addWidget(self._value_label)
 
-        self._caption = QLabel(label.upper(), self)
+        self._caption = QLabel(label, self)
         self._caption.setObjectName("statLabel")
         layout.addWidget(self._caption)
 
         layout.addStretch(1)
-        self.setMinimumHeight(84)
+        self.setMinimumHeight(STAT_CARD_MIN_HEIGHT)
 
     def set_value(self, value: int) -> None:
         self._value_label.setText(str(value))
 
     def set_label(self, label: str) -> None:
-        self._caption.setText(label.upper())
+        self._caption.setText(label)
 
     def restyle(self) -> None:
-        """Force Qt to re-evaluate the [variant=...] property selector after
+        """Force Qt to re-evaluate the [status=...] property selector after
         a stylesheet swap (theme change) -- polish()/unpolish() is the
         standard way to make Qt re-apply QSS for a dynamic property."""
         style = self.style()

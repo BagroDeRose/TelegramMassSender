@@ -25,7 +25,6 @@ def build_empty_state(
     layout = QVBoxLayout(container)
     layout.setContentsMargins(0, SPACE_XL, 0, SPACE_XL)
     layout.setSpacing(SPACE_XS)
-    layout.setAlignment(Qt.AlignmentFlag.AlignHCenter)
 
     if icon_name:
         icon_label = QLabel(container)

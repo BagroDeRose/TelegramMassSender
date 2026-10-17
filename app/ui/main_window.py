@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -89,9 +90,10 @@ from app.ui.dialogs import (
     show_error,
     show_info,
 )
-from app.ui.empty_state import build_empty_state, retranslate_empty_state
+from app.ui.empty_state import build_empty_state, empty_state_action, retranslate_empty_state
 from app.ui.journal_widget import JournalWidget
 from app.ui.layouts import ResponsiveColumns
+from app.ui.results_view import ResultsHeader, ResultsRowDelegate, SegmentedControl
 from app.ui.motion import ToastHost, fade_in
 from app.ui.login_dialog import LoginDialog
 from app.ui.onboarding_dialog import (
@@ -107,7 +109,11 @@ from app.ui.stat_card import StatCard
 from app.ui.theme import (
     COMBO_MIN_WIDTH,
     LAUNCH_PANEL_WIDTH,
+    CONTROL_WIDTH,
+    DIAGNOSTICS_MAX_HEIGHT,
     PREVIEW_NAME_WIDTH,
+    RESULTS_LIST_MIN_HEIGHT,
+    SETTINGS_LABEL_WIDTH,
     SPACE_LG,
     SPACE_MD,
     SPACE_SM,
@@ -435,7 +441,10 @@ class MainWindow(QMainWindow):
             self._results_empty_label,
             tr("main_window.results_page.empty_title"),
             tr("main_window.results_page.empty_body"),
+            tr("main_window.results_page.empty_action"),
         )
+        self._failure_categories_title.setText(tr("main_window.results_page.failure_reasons_title"))
+        self._results_header.retranslate_ui()
         self._stat_total.set_label(tr("main_window.results_page.stat_total"))
         self._stat_success.set_label(tr("main_window.results_page.stat_successful"))
         self._stat_failed.set_label(tr("main_window.results_page.stat_failed"))
@@ -491,6 +500,8 @@ class MainWindow(QMainWindow):
         self._auto_save_reports_checkbox.setText(tr("main_window.settings.auto_save_reports_checkbox"))
         self._debug_logging_checkbox.setText(tr("main_window.settings.debug_logging_checkbox"))
         self._reset_settings_button.setText(tr("main_window.settings.reset_settings_button"))
+        self._reset_hint_label.setText(tr("main_window.settings.reset_hint"))
+        self._confirm_hint_label.setText(tr("main_window.settings.confirm_before_start_tooltip"))
 
         # Combo items themselves carry no translation-key state (their
         # itemData is the stable theme/language code, not display text),
@@ -760,7 +771,7 @@ class MainWindow(QMainWindow):
     def _build_results_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(SPACE_XXL, SPACE_XXL, SPACE_XXL, SPACE_XXL)
+        layout.setContentsMargins(SPACE_XL, SPACE_XL, SPACE_XL, SPACE_XL)
         layout.setSpacing(SPACE_LG)
         self._results_page_header = _page_header(
             tr("main_window.results_page.title"), tr("main_window.results_page.subtitle")
@@ -771,16 +782,22 @@ class MainWindow(QMainWindow):
             tr("main_window.results_page.empty_title"),
             tr("main_window.results_page.empty_body"),
             page,
+            icon_name="results",
+            action_text=tr("main_window.results_page.empty_action"),
         )
+        empty_state_action(self._results_empty_label).clicked.connect(lambda: self._navigate_to_page(_PAGE_CAMPAIGN))
         layout.addWidget(self._results_empty_label)
 
+        status_row = QHBoxLayout()
+        status_row.setSpacing(SPACE_SM)
         self._results_status_label = QLabel("", page)
-        self._results_status_label.setObjectName("statusLabel")
-        layout.addWidget(self._results_status_label)
-
+        self._results_status_label.setObjectName("pill")
+        status_row.addWidget(self._results_status_label)
         self._results_duration_label = QLabel("", page)
         self._results_duration_label.setObjectName("helperText")
-        layout.addWidget(self._results_duration_label)
+        status_row.addWidget(self._results_duration_label)
+        status_row.addStretch(1)
+        layout.addLayout(status_row)
 
         stats_row = QHBoxLayout()
         stats_row.setSpacing(SPACE_MD)
@@ -794,72 +811,92 @@ class MainWindow(QMainWindow):
         self._results_stats_widget.setLayout(stats_row)
         layout.addWidget(self._results_stats_widget)
 
+        self._failure_categories_title = QLabel(tr("main_window.results_page.failure_reasons_title"), page)
+        self._failure_categories_title.setObjectName("sectionTitle")
         self._failure_categories_label = QLabel("", page)
         self._failure_categories_label.setWordWrap(True)
         self._failure_categories_label.setObjectName("helperText")
+        self._failure_categories_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self._failure_categories_label.setVisible(False)
+        self._failure_categories_title.setVisible(False)
+        layout.addWidget(self._failure_categories_title)
         layout.addWidget(self._failure_categories_label)
 
-        export_row = QHBoxLayout()
-        self._results_export_button = QPushButton(tr("main_window.results_page.export_csv_button"), page)
-        self._results_export_button.setObjectName("primaryButton")
-        self._results_export_button.setEnabled(False)
-        self._results_export_button.clicked.connect(self._on_export_report_requested)
-        self._export_failures_button = QPushButton(tr("main_window.results_page.export_failures_button"), page)
-        self._export_failures_button.setEnabled(False)
-        self._export_failures_button.clicked.connect(self._on_export_failures_clicked)
-        self._save_report_button = QPushButton(tr("main_window.results_page.save_report_button"), page)
-        self._save_report_button.setEnabled(False)
-        self._save_report_button.clicked.connect(self._on_save_report_clicked)
-        export_row.addWidget(self._results_export_button)
-        export_row.addWidget(self._export_failures_button)
-        export_row.addWidget(self._save_report_button)
-        export_row.addStretch(1)
-        layout.addLayout(export_row)
-
+        # ---- recipients table ----
         self._failed_section_title = _section_title(tr("main_window.results_page.recipients_section"))
         self._failed_section_title.setVisible(False)
-        layout.addWidget(self._failed_section_title)
 
-        filter_row = QHBoxLayout()
+        toolbar = QHBoxLayout()
+        toolbar.setSpacing(SPACE_SM)
+        toolbar.addWidget(self._failed_section_title)
+        toolbar.addStretch(1)
         self._results_filter_label = QLabel(tr("main_window.results_page.filter_label"), page)
-        filter_row.addWidget(self._results_filter_label)
-        self._results_filter_combo = QComboBox(page)
+        self._results_filter_label.setObjectName("helperText")
+        toolbar.addWidget(self._results_filter_label)
+        self._results_filter_combo = SegmentedControl(page)
         self._results_filter_combo.addItem(tr("main_window.results_page.filter_all"), _RESULTS_FILTER_ALL)
         self._results_filter_combo.addItem(tr("main_window.results_page.filter_sent"), _RESULTS_FILTER_SENT)
         self._results_filter_combo.addItem(tr("main_window.results_page.filter_failed"), _RESULTS_FILTER_FAILED)
         self._results_filter_combo.addItem(tr("main_window.results_page.filter_skipped"), _RESULTS_FILTER_SKIPPED)
         self._results_filter_combo.setCurrentIndex(2)  # Failed -- the original Retry (v1.6) default
         self._results_filter_combo.currentIndexChanged.connect(lambda _i: self._refresh_failed_items())
-        filter_row.addWidget(self._results_filter_combo)
-        filter_row.addStretch(1)
+        toolbar.addWidget(self._results_filter_combo)
         self._results_filter_row_widget = QWidget(page)
-        self._results_filter_row_widget.setLayout(filter_row)
+        self._results_filter_row_widget.setLayout(toolbar)
         self._results_filter_row_widget.setVisible(False)
         layout.addWidget(self._results_filter_row_widget)
 
+        self._results_header = ResultsHeader(page)
+        self._results_header.setVisible(False)
+        layout.addWidget(self._results_header)
         self._failed_items_list = QListWidget(page)
-        self._failed_items_list.setMaximumHeight(180)
+        self._failed_items_list.setObjectName("resultsList")
+        self._failed_items_list.setItemDelegate(ResultsRowDelegate(self._failed_items_list))
+        self._failed_items_list.setMinimumHeight(RESULTS_LIST_MIN_HEIGHT)
+        self._failed_items_list.setUniformItemSizes(True)
+        self._failed_items_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._failed_items_list.setVisible(False)
         self._failed_items_list.itemChanged.connect(self._on_failed_item_check_changed)
         layout.addWidget(self._failed_items_list)
 
-        retry_row = QHBoxLayout()
+        actions_row = QHBoxLayout()
+        actions_row.setSpacing(SPACE_SM)
         self._retry_selected_button = QPushButton(tr("main_window.results_page.retry_selected_button"), page)
         self._retry_selected_button.setEnabled(False)
         self._retry_selected_button.clicked.connect(self._on_retry_selected_clicked)
         self._retry_all_button = QPushButton(tr("main_window.results_page.retry_all_button"), page)
-        self._retry_all_button.setObjectName("ghostButton")
+        self._retry_all_button.setProperty("variant", "primary")
+        self._retry_all_button.setIcon(icons.themed("retry", "on_accent"))
         self._retry_all_button.clicked.connect(self._on_retry_all_failures_clicked)
-        retry_row.addWidget(self._retry_selected_button)
-        retry_row.addWidget(self._retry_all_button)
-        retry_row.addStretch(1)
+        actions_row.addWidget(self._retry_all_button)
+        actions_row.addWidget(self._retry_selected_button)
         self._retry_row_widget = QWidget(page)
-        self._retry_row_widget.setLayout(retry_row)
+        self._retry_row_widget.setLayout(actions_row)
         self._retry_row_widget.setVisible(False)
-        layout.addWidget(self._retry_row_widget)
+
+        export_row = QHBoxLayout()
+        export_row.setSpacing(SPACE_SM)
+        export_row.addWidget(self._retry_row_widget)
+        export_row.addStretch(1)
+        self._results_export_button = QPushButton(tr("main_window.results_page.export_csv_button"), page)
+        self._results_export_button.setIcon(icons.themed("export"))
+        self._results_export_button.setEnabled(False)
+        self._results_export_button.clicked.connect(self._on_export_report_requested)
+        self._export_failures_button = QPushButton(tr("main_window.results_page.export_failures_button"), page)
+        self._export_failures_button.setProperty("variant", "ghost")
+        self._export_failures_button.setEnabled(False)
+        self._export_failures_button.clicked.connect(self._on_export_failures_clicked)
+        self._save_report_button = QPushButton(tr("main_window.results_page.save_report_button"), page)
+        self._save_report_button.setIcon(icons.themed("save"))
+        self._save_report_button.setEnabled(False)
+        self._save_report_button.clicked.connect(self._on_save_report_clicked)
+        export_row.addWidget(self._export_failures_button)
+        export_row.addWidget(self._results_export_button)
+        export_row.addWidget(self._save_report_button)
+        layout.addLayout(export_row)
 
         self._saved_reports_section_title = _section_title(tr("main_window.results_page.saved_reports_section"))
+        layout.addSpacing(SPACE_SM)
         layout.addWidget(self._saved_reports_section_title)
         self._saved_reports_empty_label = build_empty_state(
             tr("main_window.results_page.saved_reports_empty_title"),
@@ -879,7 +916,7 @@ class MainWindow(QMainWindow):
     def _build_settings_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(SPACE_XXL, SPACE_XXL, SPACE_XXL, SPACE_XXL)
+        layout.setContentsMargins(SPACE_XL, SPACE_XL, SPACE_XL, SPACE_XL)
         layout.setSpacing(SPACE_LG)
         self._settings_page_header = _page_header(tr("main_window.settings_page.title"), tr("main_window.settings_page.subtitle"))
         layout.addWidget(self._settings_page_header)
@@ -892,65 +929,84 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._application_card)
         self._reports_card = _card(tr("main_window.settings.reports_card"), self._build_reports_settings())
         layout.addWidget(self._reports_card)
-        self._advanced_card = _card(tr("main_window.settings.advanced_card"), self._build_advanced_settings())
-        layout.addWidget(self._advanced_card)
         self._diagnostics_card = _card(tr("main_window.settings.diagnostics_card"), self._build_diagnostics_settings())
         layout.addWidget(self._diagnostics_card)
+        # Destructive options last, in their own section.
+        self._advanced_card = _card(tr("main_window.settings.advanced_card"), self._build_advanced_settings())
+        layout.addWidget(self._advanced_card)
         layout.addStretch(1)
         return page
 
+    @staticmethod
+    def _settings_grid(widget: QWidget) -> QGridLayout:
+        """Label column on the left, one shared control width on the right,
+        the explanation under each control in the secondary colour."""
+        grid = QGridLayout(widget)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(SPACE_XL)
+        grid.setVerticalSpacing(SPACE_XS)
+        grid.setColumnMinimumWidth(0, SETTINGS_LABEL_WIDTH)
+        grid.setColumnStretch(2, 1)
+        return grid
+
+    @staticmethod
+    def _settings_row(grid: QGridLayout, row: int, label: Optional[QLabel], control, hint: Optional[QLabel]) -> int:
+        """Place one setting; returns the next free row."""
+        if label is not None:
+            label.setObjectName("fieldLabel")
+            grid.addWidget(label, row, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        if isinstance(control, QWidget):
+            if not isinstance(control, (QCheckBox, QLineEdit)):
+                control.setFixedWidth(CONTROL_WIDTH)
+            grid.addWidget(control, row, 1, 1, 2 if isinstance(control, (QCheckBox, QLineEdit)) else 1)
+        else:
+            grid.addLayout(control, row, 1, 1, 2)
+        row += 1
+        if hint is not None:
+            hint.setObjectName("helperText")
+            hint.setWordWrap(True)
+            grid.addWidget(hint, row, 1, 1, 2)
+            row += 1
+        grid.setRowMinimumHeight(row, SPACE_MD)
+        return row + 1
+
     def _build_appearance_settings(self) -> QWidget:
         widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(SPACE_SM)
+        grid = self._settings_grid(widget)
         self._theme_section_label = QLabel(tr("main_window.settings.theme_label"), widget)
-        layout.addWidget(self._theme_section_label)
         self._theme_combo = QComboBox(widget)
         for value in theme.VALID_THEMES:
             self._theme_combo.addItem(theme.THEME_LABELS[value], value)
-        self._theme_combo.setMaximumWidth(220)
-        layout.addWidget(self._theme_combo)
         self._theme_hint_label = QLabel(tr("main_window.settings.theme_hint"), widget)
-        self._theme_hint_label.setObjectName("helperText")
-        layout.addWidget(self._theme_hint_label)
+        row = self._settings_row(grid, 0, self._theme_section_label, self._theme_combo, self._theme_hint_label)
 
         self._language_section_label = QLabel(tr("main_window.settings.language_label"), widget)
-        layout.addWidget(self._language_section_label)
         self._language_combo = QComboBox(widget)
         for value in VALID_LANGUAGES:
             self._language_combo.addItem(LANGUAGE_LABELS[value], value)
-        self._language_combo.setMaximumWidth(220)
-        layout.addWidget(self._language_combo)
         self._language_hint_label = QLabel(tr("main_window.settings.language_hint"), widget)
-        self._language_hint_label.setObjectName("helperText")
-        layout.addWidget(self._language_hint_label)
+        self._settings_row(grid, row, self._language_section_label, self._language_combo, self._language_hint_label)
         return widget
 
     def _build_sending_settings(self) -> QWidget:
         widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(SPACE_SM)
+        grid = self._settings_grid(widget)
 
         self._interval_section_label = QLabel(tr("main_window.settings.interval_label"), widget)
-        layout.addWidget(self._interval_section_label)
-        interval_row = QHBoxLayout()
+        interval_box = QWidget(widget)
+        interval_row = QHBoxLayout(interval_box)
+        interval_row.setContentsMargins(0, 0, 0, 0)
         interval_row.setSpacing(SPACE_SM)
-        self._settings_min_spin = QSpinBox(widget)
+        self._settings_min_spin = QSpinBox(interval_box)
         self._settings_min_spin.setRange(MIN_ALLOWED_DELAY_SECONDS, MAX_ALLOWED_DELAY_SECONDS)
-        self._settings_max_spin = QSpinBox(widget)
+        self._settings_max_spin = QSpinBox(interval_box)
         self._settings_max_spin.setRange(MIN_ALLOWED_DELAY_SECONDS, MAX_ALLOWED_DELAY_SECONDS)
-        interval_row.addWidget(self._settings_min_spin)
-        self._interval_dash_label = QLabel(tr("main_window.settings.interval_dash"), widget)
+        interval_row.addWidget(self._settings_min_spin, 1)
+        self._interval_dash_label = QLabel(tr("main_window.settings.interval_dash"), interval_box)
         interval_row.addWidget(self._interval_dash_label)
-        interval_row.addWidget(self._settings_max_spin)
-        interval_row.addStretch(1)
-        layout.addLayout(interval_row)
+        interval_row.addWidget(self._settings_max_spin, 1)
         self._interval_hint_label = QLabel(tr("main_window.settings.interval_hint"), widget)
-        self._interval_hint_label.setObjectName("helperText")
-        self._interval_hint_label.setWordWrap(True)
-        layout.addWidget(self._interval_hint_label)
+        row = self._settings_row(grid, 0, self._interval_section_label, interval_box, self._interval_hint_label)
         self._settings_min_spin.editingFinished.connect(self._on_interval_settings_changed)
         self._settings_max_spin.editingFinished.connect(self._on_interval_settings_changed)
 
@@ -959,77 +1015,66 @@ class MainWindow(QMainWindow):
         self._confirm_before_start_checkbox.toggled.connect(
             lambda checked: self._save_setting_field("confirm_before_start", checked)
         )
-        layout.addWidget(self._confirm_before_start_checkbox)
+        self._confirm_hint_label = QLabel(tr("main_window.settings.confirm_before_start_tooltip"), widget)
+        self._settings_row(grid, row, None, self._confirm_before_start_checkbox, self._confirm_hint_label)
         return widget
 
     def _build_application_settings(self) -> QWidget:
         widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(SPACE_SM)
-
+        grid = self._settings_grid(widget)
         self._remember_window_checkbox = QCheckBox(tr("main_window.settings.remember_window_size_checkbox"), widget)
         self._remember_window_checkbox.toggled.connect(
             lambda checked: self._save_setting_field("remember_window_size", checked)
         )
-        layout.addWidget(self._remember_window_checkbox)
-
+        row = self._settings_row(grid, 0, None, self._remember_window_checkbox, None)
         self._remember_page_checkbox = QCheckBox(tr("main_window.settings.remember_last_page_checkbox"), widget)
         self._remember_page_checkbox.toggled.connect(
             lambda checked: self._save_setting_field("remember_last_page", checked)
         )
-        layout.addWidget(self._remember_page_checkbox)
+        self._settings_row(grid, row, None, self._remember_page_checkbox, None)
         return widget
 
     def _build_reports_settings(self) -> QWidget:
         widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(SPACE_SM)
-
+        grid = self._settings_grid(widget)
         self._reports_dir_section_label = QLabel(tr("main_window.settings.reports_directory_label"), widget)
-        layout.addWidget(self._reports_dir_section_label)
         dir_row = QHBoxLayout()
         dir_row.setSpacing(SPACE_SM)
         self._reports_dir_edit = QLineEdit(widget)
         self._reports_dir_edit.setPlaceholderText(str(get_reports_dir()))
         self._reports_dir_edit.setReadOnly(True)
         self._browse_reports_button = QPushButton(tr("main_window.settings.browse_button"), widget)
+        self._browse_reports_button.setIcon(icons.themed("folder"))
         self._browse_reports_button.clicked.connect(self._on_browse_reports_directory)
         self._reset_reports_dir_button = QPushButton(tr("main_window.settings.default_button"), widget)
-        self._reset_reports_dir_button.setObjectName("ghostButton")
+        self._reset_reports_dir_button.setProperty("variant", "ghost")
         self._reset_reports_dir_button.clicked.connect(self._on_reset_reports_directory)
         dir_row.addWidget(self._reports_dir_edit, 1)
         dir_row.addWidget(self._browse_reports_button)
         dir_row.addWidget(self._reset_reports_dir_button)
-        layout.addLayout(dir_row)
+        row = self._settings_row(grid, 0, self._reports_dir_section_label, dir_row, None)
 
         self._auto_save_reports_checkbox = QCheckBox(tr("main_window.settings.auto_save_reports_checkbox"), widget)
         self._auto_save_reports_checkbox.toggled.connect(
             lambda checked: self._save_setting_field("auto_save_reports", checked)
         )
-        layout.addWidget(self._auto_save_reports_checkbox)
+        self._settings_row(grid, row, None, self._auto_save_reports_checkbox, None)
         return widget
 
     def _build_advanced_settings(self) -> QWidget:
         widget = QWidget()
-        layout = QVBoxLayout(widget)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(SPACE_SM)
-
+        grid = self._settings_grid(widget)
         self._debug_logging_checkbox = QCheckBox(tr("main_window.settings.debug_logging_checkbox"), widget)
         self._debug_logging_checkbox.toggled.connect(
             lambda checked: self._save_setting_field("debug_logging", checked)
         )
-        layout.addWidget(self._debug_logging_checkbox)
+        row = self._settings_row(grid, 0, None, self._debug_logging_checkbox, None)
 
-        reset_row = QHBoxLayout()
         self._reset_settings_button = QPushButton(tr("main_window.settings.reset_settings_button"), widget)
-        self._reset_settings_button.setObjectName("dangerButton")
+        self._reset_settings_button.setProperty("variant", "danger")
         self._reset_settings_button.clicked.connect(self._on_reset_settings_clicked)
-        reset_row.addWidget(self._reset_settings_button)
-        reset_row.addStretch(1)
-        layout.addLayout(reset_row)
+        self._reset_hint_label = QLabel(tr("main_window.settings.reset_hint"), widget)
+        self._settings_row(grid, row, None, self._reset_settings_button, self._reset_hint_label)
         return widget
 
     def _build_diagnostics_settings(self) -> QWidget:
@@ -1039,19 +1084,25 @@ class MainWindow(QMainWindow):
         layout.setSpacing(SPACE_SM)
 
         self._diagnostics_text = QPlainTextEdit(widget)
+        self._diagnostics_text.setObjectName("monoText")
         self._diagnostics_text.setReadOnly(True)
-        self._diagnostics_text.setMaximumHeight(160)
+        self._diagnostics_text.setMaximumHeight(DIAGNOSTICS_MAX_HEIGHT)
+        self._diagnostics_text.setFont(theme.mono_font())
         layout.addWidget(self._diagnostics_text)
 
         diagnostics_row = QHBoxLayout()
+        diagnostics_row.setSpacing(SPACE_SM)
         self._copy_diagnostics_button = QPushButton(tr("main_window.settings.copy_diagnostics_button"), widget)
+        self._copy_diagnostics_button.setIcon(icons.themed("copy"))
         self._copy_diagnostics_button.clicked.connect(self._on_copy_diagnostics_clicked)
         self._export_diagnostic_bundle_button = QPushButton(
             tr("main_window.settings.export_diagnostic_bundle_button"), widget
         )
+        self._export_diagnostic_bundle_button.setIcon(icons.themed("export"))
         self._export_diagnostic_bundle_button.clicked.connect(self._on_export_diagnostic_bundle_clicked)
         self._refresh_diagnostics_button = QPushButton(tr("main_window.settings.refresh_diagnostics_button"), widget)
-        self._refresh_diagnostics_button.setObjectName("ghostButton")
+        self._refresh_diagnostics_button.setProperty("variant", "ghost")
+        self._refresh_diagnostics_button.setIcon(icons.themed("refresh"))
         self._refresh_diagnostics_button.clicked.connect(self._refresh_diagnostics)
         diagnostics_row.addWidget(self._copy_diagnostics_button)
         diagnostics_row.addWidget(self._export_diagnostic_bundle_button)
@@ -1237,6 +1288,7 @@ class MainWindow(QMainWindow):
         # dedicated control, not silently flipped by a general reset.
         defaults.theme = theme.get_active_theme()
         defaults.language = get_language()
+        defaults.sidebar_collapsed = self._sidebar.is_collapsed  # a layout choice, like the theme
         self._service.settings_repository.save_app_settings(defaults)
         self._load_settings_into_page(defaults)
         self._campaign_controls.set_interval_summary(defaults.min_delay_seconds, defaults.max_delay_seconds)
@@ -2015,7 +2067,7 @@ class MainWindow(QMainWindow):
             self._campaign_columns.scroll.ensureWidgetVisible(self._campaign_controls)
         self._campaign_controls.start_elapsed_timer()
         self._campaign_controls.set_running_state(True, paused=False)
-        self._results_status_label.setText(tr("main_window.results.running"))
+        self._set_results_status(tr("main_window.results.running"), "info")
         self._update_results_page()
         self.statusBar().showMessage(tr("main_window.status.campaign_running"))
 
@@ -2049,7 +2101,7 @@ class MainWindow(QMainWindow):
         status = CampaignStatus(status_value)
         if status == CampaignStatus.COMPLETED:
             self.statusBar().showMessage(tr("main_window.status.campaign_completed"))
-            self._results_status_label.setText(tr("main_window.results.completed"))
+            self._set_results_status(tr("main_window.results.completed"), "success")
             self._notify(
                 tr("main_window.notifications.campaign_completed_title"),
                 tr("main_window.notifications.campaign_completed_body"),
@@ -2057,10 +2109,10 @@ class MainWindow(QMainWindow):
             )
         elif status == CampaignStatus.STOPPED:
             self.statusBar().showMessage(tr("main_window.status.campaign_stopped"))
-            self._results_status_label.setText(tr("main_window.results.stopped"))
+            self._set_results_status(tr("main_window.results.stopped"), "warning")
         elif status == CampaignStatus.ERROR:
             self.statusBar().showMessage(tr("main_window.status.campaign_error"))
-            self._results_status_label.setText(tr("main_window.results.error"))
+            self._set_results_status(tr("main_window.results.error"), "error")
             show_error(
                 self,
                 tr("main_window.dialogs.campaign_error_title"),
@@ -2122,6 +2174,10 @@ class MainWindow(QMainWindow):
             self._update_results_stats(self._report_source.snapshot())
         self._refresh_failed_items()
 
+    def _set_results_status(self, text: str, status: str) -> None:
+        self._results_status_label.setText(text)
+        theme.set_status(self._results_status_label, status)
+
     def _update_results_stats(self, snapshot: ProgressSnapshot) -> None:
         self._results_empty_label.setVisible(False)
         self._results_stats_widget.setVisible(True)
@@ -2167,6 +2223,7 @@ class MainWindow(QMainWindow):
             else:
                 list_item.setFlags(list_item.flags() & ~Qt.ItemFlag.ItemIsUserCheckable)
             list_item.setData(Qt.ItemDataRole.UserRole, item)
+            list_item.setToolTip(text)
             self._failed_items_list.addItem(list_item)
         self._failed_items_list.blockSignals(False)
 
@@ -2174,6 +2231,7 @@ class MainWindow(QMainWindow):
         self._failed_section_title.setVisible(has_any)
         self._results_filter_row_widget.setVisible(has_any)
         self._failed_items_list.setVisible(has_any)
+        self._results_header.setVisible(has_any)
         self._retry_row_widget.setVisible(bool(failed_items))
         self._retry_all_button.setEnabled(bool(failed_items))
         self._export_failures_button.setEnabled(bool(failed_items))
@@ -2183,6 +2241,7 @@ class MainWindow(QMainWindow):
     def _update_failure_categories(self, failed_items: List) -> None:
         if not failed_items:
             self._failure_categories_label.setVisible(False)
+            self._failure_categories_title.setVisible(False)
             return
         counts: Dict[str, int] = {}
         for item in failed_items:
@@ -2190,10 +2249,9 @@ class MainWindow(QMainWindow):
             reason = tr(category_key) if category_key else item.error or tr("main_window.results_page.unknown_error")
             counts[reason] = counts.get(reason, 0) + 1
         parts = [f"{reason}: {count}" for reason, count in sorted(counts.items(), key=lambda kv: -kv[1])]
-        self._failure_categories_label.setText(
-            tr("main_window.results_page.failure_categories", categories="; ".join(parts))
-        )
+        self._failure_categories_label.setText("\n".join(parts))
         self._failure_categories_label.setVisible(True)
+        self._failure_categories_title.setVisible(True)
 
     def _on_failed_item_check_changed(self, _item: QListWidgetItem) -> None:
         self._update_retry_selected_enabled()
@@ -2315,68 +2373,67 @@ class MainWindow(QMainWindow):
             self._saved_report_cards.append(card)
 
     def _build_saved_report_card(self, report: SavedReport) -> QFrame:
+        """One saved report as a row: favourite star, name, counts and date,
+        Open, and the rest (export / rename / delete) in a "more" menu."""
         card = QFrame()
         card.setObjectName("reportCard")
-        layout = QVBoxLayout(card)
-        layout.setContentsMargins(SPACE_MD, SPACE_MD, SPACE_MD, SPACE_MD)
-        layout.setSpacing(4)
+        row = QHBoxLayout(card)
+        row.setContentsMargins(SPACE_MD, SPACE_SM, SPACE_SM, SPACE_SM)
+        row.setSpacing(SPACE_SM)
 
-        header = QHBoxLayout()
-        header.setSpacing(SPACE_XS)
         favorite_button = QToolButton(card)
         favorite_button.setObjectName("favoriteButton")
-        favorite_button.setText(tr("main_window.results_page.report_favorite_on") if report.is_favorite else tr("main_window.results_page.report_favorite_off"))
+        favorite_button.setCheckable(True)
+        favorite_button.setChecked(report.is_favorite)
+        favorite_button.setIcon(icons.themed("favorite", "text_muted", checked_role="favorite"))
         favorite_button.setProperty("active", "true" if report.is_favorite else "false")
         favorite_button.setToolTip(tr("main_window.results_page.report_favorite_tooltip"))
+        favorite_button.setAccessibleName(tr("main_window.results_page.report_favorite_tooltip"))
         favorite_button.clicked.connect(lambda: self._on_toggle_favorite(report))
-        header.addWidget(favorite_button)
+        row.addWidget(favorite_button)
+
+        text_col = QVBoxLayout()
+        text_col.setSpacing(0)
         name_label = QLabel(report.name, card)
         name_label.setObjectName("reportName")
-        header.addWidget(name_label, 1)
-        layout.addLayout(header)
-
+        text_col.addWidget(name_label)
         meta = QLabel(
             tr(
                 "main_window.results_page.report_meta_line",
                 total=report.total,
                 successful=report.successful,
                 failed=report.failed,
-            ),
+            )
+            + "  ·  "
+            + report.created_at,
             card,
         )
         meta.setObjectName("reportMeta")
-        meta.setWordWrap(True)
-        layout.addWidget(meta)
+        text_col.addWidget(meta)
+        row.addLayout(text_col, 1)
 
-        date_label = QLabel(report.created_at, card)
-        date_label.setObjectName("helperText")
-        layout.addWidget(date_label)
-
-        actions = QHBoxLayout()
-        actions.setSpacing(SPACE_XS)
         open_button = QPushButton(tr("main_window.results_page.report_open_button"), card)
-        open_button.setObjectName("ghostButton")
+        open_button.setProperty("variant", "ghost")
+        open_button.setIcon(icons.themed("open"))
         open_button.clicked.connect(lambda: self._on_open_saved_report(report))
-        export_button = QPushButton(tr("main_window.results_page.report_export_button"), card)
-        export_button.setObjectName("ghostButton")
-        export_button.clicked.connect(lambda: self._on_export_saved_report(report))
-        actions.addWidget(open_button)
-        actions.addWidget(export_button)
+        row.addWidget(open_button)
 
-        more_button = QPushButton(tr("main_window.results_page.report_more_button"), card)
-        more_button.setObjectName("ghostButton")
+        more_button = QToolButton(card)
+        more_button.setObjectName("iconButton")
+        more_button.setIcon(icons.themed("more"))
         more_button.setToolTip(tr("main_window.results_page.report_more_tooltip"))
+        more_button.setAccessibleName(tr("main_window.results_page.report_more_tooltip"))
+        more_button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         more_menu = QMenu(more_button)
-        rename_action = more_menu.addAction(tr("main_window.results_page.report_rename_action"))
+        export_action = more_menu.addAction(icons.themed("export"), tr("main_window.results_page.report_export_button"))
+        export_action.triggered.connect(lambda: self._on_export_saved_report(report))
+        rename_action = more_menu.addAction(icons.themed("edit"), tr("main_window.results_page.report_rename_action"))
         rename_action.triggered.connect(lambda: self._on_rename_saved_report(report))
-        delete_action = more_menu.addAction(tr("main_window.results_page.report_delete_action"))
+        more_menu.addSeparator()
+        delete_action = more_menu.addAction(icons.themed("delete", "error"), tr("main_window.results_page.report_delete_action"))
         delete_action.triggered.connect(lambda: self._on_delete_saved_report(report))
         more_button.setMenu(more_menu)
-        actions.addWidget(more_button)
-
-        actions.addStretch(1)
-        layout.addLayout(actions)
-
+        row.addWidget(more_button)
         return card
 
     def _on_toggle_favorite(self, report: SavedReport) -> None:
