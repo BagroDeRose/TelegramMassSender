@@ -22,7 +22,7 @@ from typing import Callable, List
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from PySide6.QtCore import QRect, Qt
+from PySide6.QtCore import QRect, Qt, QTimer
 from PySide6.QtGui import QColor, QImage, QPainter
 from PySide6.QtWidgets import QApplication, QMessageBox, QWidget
 
@@ -48,8 +48,6 @@ import app.ui.main_window as main_window_module  # noqa: E402
 from app.database.database import Database  # noqa: E402
 from app.database.repositories import SettingsRepository  # noqa: E402
 from app.security.secure_storage import SecureStorage  # noqa: E402
-from app.telegram.chat_targets import list_dialogs  # noqa: E402
-from app.telegram.demo_client import DemoTelegramClient  # noqa: E402
 
 
 class _QuickRateLimiter:
@@ -186,6 +184,12 @@ RECIPIENTS = "\n".join(
 )
 
 
+def tick(picker, *titles: str) -> None:
+    model = picker._model
+    rows = [row for row in range(model.rowCount()) if model.dialog(row).title in titles]
+    model.set_rows_checked(rows, True)
+
+
 async def scenario() -> None:
     from app.ui.campaign_wizard import CampaignWizardDialog
     from app.ui.chat_picker_dialog import ChatPickerDialog
@@ -249,19 +253,44 @@ async def scenario() -> None:
 
     await show_dialog(MessageEditorDialog(text, entities, window), "dialog_editor")
 
-    picker = ChatPickerDialog({r.normalized_key for r in window._recipient_widget.valid_recipients()}, window)
-    picker.set_dialogs(await list_dialogs(DemoTelegramClient()))
-
-    def tick_two() -> None:
-        model = picker._model
-        ticked = [row for row in range(model.rowCount()) if model.is_selectable(row)][:2]
-        model.set_rows_checked(ticked, True)
-
-    await show_dialog(picker, "dialog_chat_picker", tick_two)
+    # The picker through the real button: opens at once, loads through
+    # the service layer in the background.
+    await show_dialog(ChatPickerDialog(parent=window), "dialog_chat_picker_loading")
+    window._recipient_widget._pick_chats_button.click()
+    await wait_until(lambda: window._chat_picker is not None and window._chat_picker._loaded)
+    picker = window._chat_picker
+    tick(picker, "Anna Smirnova", "Ivan Petrov", "Demo Text-Only Group")
+    await settle()
+    _save(picker, "dialog_chat_picker")
+    picker._folder_combo.setCurrentIndex(picker._folder_combo.findData(2))
+    picker._archive_toggle.setChecked(True)
+    picker._type_filter.setCurrentIndex(1)
+    await settle()
+    _save(picker, "dialog_chat_picker_filters")
+    picker.reject()
+    await wait_until(lambda: window._chat_picker is None)
 
     wizard = CampaignWizardDialog(window._service.settings_repository, window)
     wizard._recipient_widget.set_text(RECIPIENTS)
     await show_dialog(wizard, "dialog_wizard_recipients")
+
+    # The wizard as the app runs it (exec() from a Qt slot) with the picker
+    # opened from its recipients step: the nested loop keeps loading.
+    QTimer.singleShot(0, window._on_open_campaign_wizard_clicked)
+    await wait_until(lambda: window._campaign_wizard is not None)
+    live_wizard = window._campaign_wizard
+    await settle()
+    live_wizard.recipient_widget._pick_chats_button.click()
+    await wait_until(lambda: window._chat_picker is not None and window._chat_picker._loaded)
+    tick(window._chat_picker, "Maria Orlova", "Demo Team Chat")
+    await settle()
+    _save(window._chat_picker, "dialog_wizard_chat_picker")
+    window._chat_picker._add_button.click()
+    await wait_until(lambda: window._chat_picker is None)
+    await settle()
+    _save(live_wizard, "dialog_wizard_recipients_picked")
+    live_wizard.reject()
+    await wait_until(lambda: window._campaign_wizard is None)
     wizard = CampaignWizardDialog(window._service.settings_repository, window)
     wizard._recipient_widget.set_text(RECIPIENTS)
     wizard._message_text, wizard._message_entities = text, entities
@@ -320,12 +349,19 @@ async def scenario() -> None:
         editor = MessageEditorDialog(text, entities, window)
         editor.show()
         await settle()
+        window._recipient_widget._pick_chats_button.click()
+        await wait_until(lambda: window._chat_picker is not None and window._chat_picker._loaded)
+        live_picker = window._chat_picker
+        tick(live_picker, "Anna Smirnova", "Weather Bot")
+        await settle()
         other = "light" if args.theme == "dark" else "dark"
         window._theme_combo.setCurrentIndex(window._theme_combo.findData(other))
         await settle(0.5)
         window.grab().save(str(OUT / f"theme_switch_live_window_{args.theme}-to-{other}_{args.lang}.png"))
         editor.grab().save(str(OUT / f"theme_switch_live_dialog_{args.theme}-to-{other}_{args.lang}.png"))
+        live_picker.grab().save(str(OUT / f"theme_switch_live_picker_{args.theme}-to-{other}_{args.lang}.png"))
         print("saved theme_switch_live")
+        live_picker.reject()
         editor.hide()
         editor.deleteLater()
 

@@ -124,15 +124,33 @@ described below.
     dialogs. The optional start confirmation splits the count into users,
     groups/channels (by format) and `@username`/`t.me` names whose type
     is only known after resolving — nothing is resolved before confirming.
-  - `chat_picker_dialog.py` — the "From my chats…" picker (type filter,
-    title search, checkboxes). Presentational only: `MainWindow` loads the
-    list through `chat_targets.list_writable_chats` under
-    `_account_lock` and writes picked chats back via
-    `RecipientWidget.append_lines()` (as `@username`, else the marked ID).
-    The button exists only on the Campaign page's `RecipientWidget`
-    (`show_chat_picker=True`), not in the wizard's, and is enabled only for
-    a connected, authorized active account with no campaign starting or
-    running.
+  - `chat_picker_dialog.py` — the "From my chats…" picker: every dialog
+    of the active account (people, bots, groups, supergroups, forums,
+    channels) with type segments, a folder combo (hidden when the account
+    has no folders), an archive toggle (off by default), search, muted
+    unavailable rows (reason as tooltip, not tickable), "already listed"
+    rows (matched by normalized key, so `@name` and the ID of the same
+    addressee both count) and a people/bots/chats counter.
+    Presentational only: it opens at once in a loading state and emits
+    `refresh_requested`; `MainWindow._on_pick_chats_requested(target,
+    parent)` opens it with `open()` (never `exec()` inside a coroutine),
+    loads through `chat_targets.list_dialogs` in `self._spawn(...)` under
+    `_account_lock`, feeds `set_dialogs()`/`set_error()` (FloodWait shown,
+    never retried), drops a result that arrives after it closed, and
+    writes picked dialogs back via `RecipientWidget.append_lines()` (as
+    `@username`, else the ID: positive for people, marked for chats). One
+    picker at a time (`MainWindow._chat_picker`). The button is on the
+    Campaign page's `RecipientWidget` and the Campaign Wizard's
+    (`show_chat_picker=True` on both; the wizard's opens the picker over
+    the wizard and fills the wizard's box), enabled only for a connected,
+    authorized active account with no campaign starting or running.
+  - `dialog_picker_model.py` — the picker's `DialogListModel` (newest
+    first, ticked set, already-listed flags), `DialogFilterProxy` (type/
+    folder/archive/search on fields precomputed per load, never on data()
+    roles, no re-sort — 5000 dialogs filter in well under 0.25 s) and
+    `DialogRowDelegate` (initials circle — no avatars are downloaded —,
+    name, type icon + label, @username/ID in monospace, date, pill; all
+    colours from tokens at paint time).
   - `campaign_wizard.py` — optional step-by-step Campaign Wizard (a modal
     dialog reusing `RecipientWidget`/`MessageEditorDialog`/
     `AttachmentsWidget`/`MessagePreviewWidget` instances, one per step, so
@@ -203,7 +221,10 @@ described below.
     propagates like any other); an invite link only goes through
     `CheckChatInviteRequest`, and anything but `ChatInviteAlready` is
     NOT_MEMBER. A positive numeric ID that resolves to a chat is still
-    rejected (it has always meant a user).
+    rejected (it has always meant a user). A positive user ID the session
+    has no access_hash for (`get_entity` → ValueError — e.g. a person
+    picked by ID) triggers the same one-time dialogs read, and the user is
+    taken from there; users already in loaded dialogs need no lookup.
   - `chat_targets.py` — `TargetType` (user/group/supergroup/forum/
     channel), the pure permission preflight `check_send_rights()`
     (channel: creator or `post_messages` admin; group: left/banned/
@@ -211,8 +232,17 @@ described below.
     `send_media` and the granular media flags, expired restrictions
     ignored, multi-part messages refused in slow mode), the send-error →
     reason mapping (by Telethon error class, and by RPC message code for
-    errors newer than Telethon 1.36's list), and `list_writable_chats()`
-    behind the "From my chats…" picker.
+    errors newer than Telethon 1.36's list), and `list_dialogs()` behind
+    the "From my chats…" picker: `DialogList` of `DialogTarget`s (type
+    incl. bot, title, @username, peer id, archived, last-message date,
+    unavailable reason — people/bots writable by default, chats through
+    `check_send_rights` for plain text —, folder ids) plus folders from
+    `GetDialogFiltersRequest`, mapped with Telegram's own rule order
+    (explicit peers, exclusions, archived/read/muted, type flags). Leaves
+    out Saved Messages, deleted accounts and 777000 and migrated basic
+    groups. Reads only the dialog and folder lists; a folder failure
+    (FloodWait included) only hides folders, a FloodWait on the dialogs
+    propagates.
   - `template.py` — `{name}` placeholder expansion; works in UTF-16
     surrogate-pair space so formatting-entity offsets stay correct.
   - `service.py`, `qt_bridge.py` — glue between the Telethon client and the
@@ -228,7 +258,10 @@ described below.
     (see ROADMAP v2.0), including a fixed set of simulated chats (real
     Telethon `Chat`/`Channel` objects) set up for each realistic outcome:
     posted, no admin rights, members can't write, no media, forum, and a
-    slow-mode chat that starts "just posted to".
+    slow-mode chat that starts "just posted to" — and a dialog list with
+    people (with and without a @username), bots, archived dialogs, three
+    folders, the three dialogs the picker leaves out, and dates; dialog
+    people resolve to themselves by @username or ID.
   - `exceptions.py` — Telegram-error taxonomy used by the campaign layer.
 - `app/campaign/` — send orchestration:
   - `campaign_manager.py`, `send_queue.py`, `campaign_state.py` — the send
@@ -289,7 +322,7 @@ described below.
   `MainWindow.retranslate_ui()` the same way theme switching already
   dispatches `apply_theme()`. Deliberately not gettext or Qt Linguist
   (.ts/.qm + lupdate/lrelease) — this app has no other use for either.
-- `tests/` — pytest + pytest-asyncio (`asyncio_mode = auto`), 913 tests,
+- `tests/` — pytest + pytest-asyncio (`asyncio_mode = auto`), 1009 tests,
   using `tests/mocks/mock_telegram_client.py` and
   `tests/mocks/fake_client_manager.py` instead of a real Telegram
   connection. `tests/conftest.py` has two autouse fixtures: an
@@ -328,7 +361,7 @@ reproduced with a failing test first, then fixed.
 
 **Tests.** After any code change, run the targeted test file, then the
 full suite (`pytest tests/ -v`). Don't delete or weaken existing tests just
-to make the suite pass. The current baseline is 913 passed, 0 failures —
+to make the suite pass. The current baseline is 1009 passed, 0 failures —
 if that number changes, know exactly why before saying the change is done.
 
 **GUI.** Never block the Qt event loop or the asyncio event loop.
