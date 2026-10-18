@@ -767,7 +767,6 @@ QListWidget::item:selected {
    check that this stays suppressed. */
 QListWidget#attachmentsList::item,
 QListWidget#attachmentsList::item:selected,
-QListWidget#attachmentsList::item:hover,
 QListWidget#attachmentsList::item:focus {
     background-color: transparent;
     border: none;
@@ -966,6 +965,17 @@ QWidget#attachmentTile {
 
 QWidget#attachmentTile[selected="true"] {
     background-color: $accent_soft;
+    border: 2px solid $accent;
+}
+
+/* Attachment cards have no hover effect. The remove button inside a card
+   would otherwise pick up the generic QToolButton:hover and
+   #chipRemoveButton:hover highlights, which flash as the mouse sweeps
+   across a row of cards. Scoped to cards only: the account cards use the
+   same button and keep their hover. */
+QWidget#attachmentTile QToolButton#chipRemoveButton:hover {
+    background-color: transparent;
+    color: $text_muted;
 }
 
 /* Deliberate, QSS-driven keyboard-focus ring for the tile itself --

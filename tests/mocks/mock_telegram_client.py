@@ -5,6 +5,16 @@ per-recipient behaviour via `entity_behavior` (what get_entity should do)
 and `send_behavior` (what send_message/send_file should do), keyed by the
 exact identifier used to look the recipient up (username string or
 numeric id).
+
+Groups/supergroups/channels are modelled with *real* Telethon Chat/Channel
+objects (make_fake_channel / make_fake_group), so isinstance checks,
+utils.get_peer_id and every rights field behave exactly as they do against
+Telegram. Register them via `chats` (keyed by username and/or marked id)
+and list them in `dialogs`. Like real Telethon, a marked chat id only
+resolves after the dialogs have been fetched once (no access_hash
+otherwise) -- see `get_entity`. Per-chat send outcomes go in
+`chat_send_behavior`, keyed by marked id (Telethon TL objects are
+unhashable, so they can't key `send_behavior` directly).
 """
 from __future__ import annotations
 
@@ -21,9 +31,26 @@ from telethon.errors import (
     UsernameNotOccupiedError,
     UserPrivacyRestrictedError,
 )
+from telethon import utils as telethon_utils
+from telethon.errors import InviteHashExpiredError, InviteHashInvalidError
 from telethon.tl.functions.contacts import ResolvePhoneRequest
-from telethon.tl.functions.messages import UploadMediaRequest
-from telethon.tl.types import Chat, InputMediaPhoto, Photo, User
+from telethon.tl.functions.messages import (
+    CheckChatInviteRequest,
+    SendMultiMediaRequest,
+    UploadMediaRequest,
+)
+from telethon.tl.types import (
+    Channel,
+    Chat,
+    ChatAdminRights,
+    ChatBannedRights,
+    ChatInvite,
+    ChatInviteAlready,
+    ChatInvitePeek,
+    InputMediaPhoto,
+    Photo,
+    User,
+)
 
 PERMANENT_ERROR_FACTORIES = {
     "not_found": lambda: UsernameNotOccupiedError(request=None),
@@ -56,6 +83,90 @@ def make_fake_chat() -> Chat:
     return MagicMock(spec=Chat)
 
 
+def banned_rights(**flags: bool) -> ChatBannedRights:
+    """ChatBannedRights with only the given flags set (until_date=None,
+    i.e. permanent)."""
+    return ChatBannedRights(until_date=None, **flags)
+
+
+def admin_rights(**flags: bool) -> ChatAdminRights:
+    return ChatAdminRights(**flags)
+
+
+def make_fake_channel(
+    channel_id: int,
+    title: str,
+    *,
+    username: Optional[str] = None,
+    broadcast: bool = False,
+    forum: bool = False,
+    creator: bool = False,
+    left: bool = False,
+    slowmode_enabled: bool = False,
+    admin: Optional[ChatAdminRights] = None,
+    banned: Optional[ChatBannedRights] = None,
+    default_banned: Optional[ChatBannedRights] = None,
+) -> Channel:
+    """A real telethon Channel: broadcast=True is a channel, otherwise a
+    supergroup (megagroup), optionally a forum."""
+    return Channel(
+        id=channel_id,
+        title=title,
+        photo=None,
+        date=None,
+        creator=creator or None,
+        left=left or None,
+        broadcast=broadcast or None,
+        megagroup=(not broadcast) or None,
+        forum=forum or None,
+        slowmode_enabled=slowmode_enabled or None,
+        access_hash=channel_id * 7 + 1,
+        username=username,
+        admin_rights=admin,
+        banned_rights=banned,
+        default_banned_rights=default_banned,
+    )
+
+
+def make_fake_group(
+    chat_id: int,
+    title: str,
+    *,
+    creator: bool = False,
+    admin: Optional[ChatAdminRights] = None,
+    default_banned: Optional[ChatBannedRights] = None,
+    left: bool = False,
+    deactivated: bool = False,
+) -> Chat:
+    """A real telethon Chat (basic group)."""
+    return Chat(
+        id=chat_id,
+        title=title,
+        photo=None,
+        participants_count=3,
+        date=None,
+        version=1,
+        creator=creator or None,
+        left=left or None,
+        deactivated=deactivated or None,
+        admin_rights=admin,
+        default_banned_rights=default_banned,
+    )
+
+
+def _is_chat_entity(entity: Any) -> bool:
+    return isinstance(entity, (Chat, Channel))
+
+
+class FakeDialog:
+    """The slice of telethon.tl.custom.Dialog this app reads."""
+
+    def __init__(self, entity: Any) -> None:
+        self.entity = entity
+        self.id = telethon_utils.get_peer_id(entity) if _is_chat_entity(entity) else getattr(entity, "id", None)
+        self.name = getattr(entity, "title", None) or getattr(entity, "first_name", None) or ""
+
+
 @dataclass
 class MockTelegramClient:
     """Duck-compatible stand-in for telethon.TelegramClient, covering only
@@ -77,6 +188,23 @@ class MockTelegramClient:
     get_entity_calls: int = 0
     file_to_media_calls: List[Any] = field(default_factory=list)
     raw_requests: List[Any] = field(default_factory=list)
+    # Groups/channels, keyed by username (no '@') and/or marked id.
+    chats: Dict[Any, Any] = field(default_factory=dict)
+    # Entities returned by iter_dialogs/get_dialogs (users or chats).
+    dialogs: List[Any] = field(default_factory=list)
+    # Exceptions raised by successive dialog fetches, oldest first (e.g.
+    # [make_flood_wait(30)] fails only the first fetch).
+    dialogs_errors: List[BaseException] = field(default_factory=list)
+    dialogs_calls: int = 0
+    # Invite hash -> a chat entity (account already a member:
+    # ChatInviteAlready), "not_member" (ChatInvite), "peek"
+    # (ChatInvitePeek), "expired", "invalid", or an exception instance.
+    # Absent hashes behave as "invalid".
+    invite_behavior: Dict[str, Any] = field(default_factory=dict)
+    # Marked chat id -> an exception instance raised by every send to that
+    # chat, or a list of exceptions/None consumed one per send call.
+    chat_send_behavior: Dict[int, Any] = field(default_factory=dict)
+    dialogs_cached: bool = False
 
     async def connect(self) -> None:
         self.connected = True
@@ -92,6 +220,14 @@ class MockTelegramClient:
 
     async def get_entity(self, identifier: Any):
         self.get_entity_calls += 1
+        if identifier in self.chats and identifier not in self.entity_behavior:
+            if isinstance(identifier, int) and not self.dialogs_cached:
+                # Real Telethon: a bare marked id has no access_hash until
+                # the dialogs (or a message from that chat) were seen.
+                raise ValueError(f"Could not find the input entity for {identifier}")
+            return self.chats[identifier]
+        if isinstance(identifier, int) and identifier < 0 and identifier not in self.entity_behavior:
+            raise ValueError(f"Could not find the input entity for {identifier}")
         behavior = self.entity_behavior.get(identifier, "found")
         if behavior == "found":
             return make_fake_user(identifier, first_name=self.first_name_behavior.get(identifier))
@@ -104,15 +240,34 @@ class MockTelegramClient:
     async def get_input_entity(self, entity: Any):
         return entity
 
+    async def iter_dialogs(self, *args, **kwargs):
+        self.dialogs_calls += 1
+        if self.dialogs_errors:
+            raise self.dialogs_errors.pop(0)
+        self.dialogs_cached = True
+        for entity in self.dialogs:
+            yield FakeDialog(entity)
+
+    async def get_dialogs(self, *args, **kwargs):
+        return [dialog async for dialog in self.iter_dialogs(*args, **kwargs)]
+
+    def _send_outcome(self, entity):
+        if _is_chat_entity(entity):
+            outcome = self.chat_send_behavior.get(telethon_utils.get_peer_id(entity))
+            if isinstance(outcome, list):
+                outcome = outcome.pop(0) if outcome else None
+            return outcome
+        return self.send_behavior.get(entity)
+
     async def send_message(self, entity, text, formatting_entities=None):
-        outcome = self.send_behavior.get(entity)
+        outcome = self._send_outcome(entity)
         if isinstance(outcome, BaseException):
             raise outcome
         self.sent_messages.append(("message", entity, text, formatting_entities))
         return None
 
     async def send_file(self, entity, files, caption=None, formatting_entities=None):
-        outcome = self.send_behavior.get(entity)
+        outcome = self._send_outcome(entity)
         if isinstance(outcome, BaseException):
             raise outcome
         if isinstance(files, (list, tuple)):
@@ -140,6 +295,23 @@ class MockTelegramClient:
 
     async def __call__(self, request):
         self.raw_requests.append(request)
+        if isinstance(request, SendMultiMediaRequest) and _is_chat_entity(request.peer):
+            outcome = self._send_outcome(request.peer)
+            if isinstance(outcome, BaseException):
+                raise outcome
+        if isinstance(request, CheckChatInviteRequest):
+            behavior = self.invite_behavior.get(request.hash, "invalid")
+            if isinstance(behavior, BaseException):
+                raise behavior
+            if behavior == "expired":
+                raise InviteHashExpiredError(request=None)
+            if behavior == "invalid":
+                raise InviteHashInvalidError(request=None)
+            if behavior == "not_member":
+                return ChatInvite(title="Some chat", photo=None, participants_count=10, color=0)
+            if behavior == "peek":
+                return ChatInvitePeek(chat=make_fake_channel(424242, "Peek chat"), expires=0)
+            return ChatInviteAlready(chat=behavior)
         if isinstance(request, UploadMediaRequest):
             response = MagicMock()
             response.photo = MagicMock(spec=Photo)

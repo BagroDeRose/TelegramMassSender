@@ -1013,6 +1013,66 @@ previously-untested module).
 
 ---
 
+# Groups & Channels as Targets
+
+Posting to groups, supergroups and channels **the account is already a
+member of and allowed to post in**, next to (and mixed with) the
+existing personal messages. Never joins a chat, never works around a
+chat's permissions, slow mode or FloodWait, never switches accounts on
+an error.
+
+- [x] Target formats — `@username` / `t.me/username` (typed after
+      resolving), marked chat IDs `-100…` / `-…` (a positive number stays
+      a user ID), `t.me/c/<id>[/<msg_id>]`, and invite links
+      `t.me/+hash` / `t.me/joinchat/hash`, which are only checked with
+      `CheckChatInviteRequest` (`ChatInviteAlready` → that chat, anything
+      else → "not a member"). In the Recipients box, TXT and CSV import
+      (one recognizer, `app/recipients/parser.py`) — `tests/test_parser_chat_targets.py`
+- [x] Resolving — one dialogs fetch per campaign, lazily, before the
+      first chat ID (no access_hash otherwise); FloodWait there pauses
+      the campaign like a send does. Type detection user / group /
+      supergroup / forum / channel (`app/telegram/chat_targets.py`,
+      `app/telegram/recipient_resolver.py`) — `tests/test_chat_targets_resolve.py`
+- [x] Permission preflight before any send — channel: creator or admin
+      with `post_messages`; group/supergroup: not left/banned/restricted,
+      `send_messages` not banned (personal `banned_rights` + chat
+      `default_banned_rights`, expired restrictions ignored), `send_plain`
+      for standalone text, `send_media` and the granular `send_photos` /
+      `send_videos` / `send_docs` / `send_audios` / `send_gifs` when
+      attachments are present, and multi-part messages refused up front
+      in a slow-mode chat
+- [x] Error mapping to RU/EN reasons (ChatWriteForbidden, ChatAdminRequired,
+      ChannelPrivate, UserBannedInChannel, ChatRestricted,
+      ChatSendMediaForbidden, ChannelInvalid, PeerIdInvalid,
+      SlowModeMultiMsgsDisabled, TOPIC_CLOSED, CHAT_SEND_*_FORBIDDEN,
+      ALLOW_PAYMENT_REQUIRED, …); `SlowModeWaitError` fails just that
+      target ("slow mode, wait N sec") and the campaign continues —
+      `tests/test_campaign_chat_targets.py`; the Results failure breakdown
+      counts every slow-mode wait as one "slow mode" reason
+      (`SendItem.error_category`) while each target keeps its exact wait
+- [x] `{name}` → chat title for chats; a CSV name still wins
+- [x] Forum supergroups — plain send, i.e. the "General" topic; a clear
+      reason if that fails
+- [x] UI — "From my chats…" picker (type filter, title search,
+      checkboxes; only chats the account can post to), users vs
+      groups/channels in the start confirmation, chat type on the
+      Results list — `tests/test_chat_targets_ui.py`
+- [x] Reports/Retry — "Тип" column says группа/супергруппа/канал; Retry
+      skips chats already delivered to (also under another spelling)
+      and resumes a partly delivered message after its last delivered
+      part — `tests/test_report_chat_targets.py`
+- [x] Demo Mode — simulated chats with realistic outcomes (posted, no
+      admin rights, members can't write, no media, slow mode, not a
+      member) — `tests/test_demo_mode_chats.py`
+- [ ] Posting into a specific forum topic (per-target topic id, e.g.
+      `t.me/c/<id>/<topic_id>` as an explicit opt-in format) — deferred:
+      today every forum target goes to "General"
+- [ ] Verify against a real account (own test channel + own group) —
+      see the manual checklist in the change summary; not something the
+      automated suite can cover
+
+---
+
 # Cross-cutting Engineering Goals
 
 These are ongoing properties of the codebase, not one-time deliverables

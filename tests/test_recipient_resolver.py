@@ -34,10 +34,36 @@ async def test_resolve_invalid_id():
     assert result.status == ResolveStatus.INVALID_ID
 
 
-async def test_resolve_group_rejected():
+async def test_resolve_group_by_username_is_a_chat_target():
+    # Groups/channels used to be rejected outright here; they are now a
+    # supported target type (see tests/test_chat_targets_resolve.py for the
+    # full coverage). A @username resolving to a group is READY, typed as
+    # a chat -- the permission preflight happens later, in the campaign.
     client = MockTelegramClient(entity_behavior={"groupchat": "not_a_user"})
     resolver = RecipientResolver(client)
     result = await resolver.resolve(parse_recipient_line("@groupchat"))
+    assert result.status == ResolveStatus.READY
+    assert result.is_chat
+
+
+async def test_resolve_positive_id_resolving_to_a_chat_is_still_rejected():
+    # A positive numeric id has always meant a user; it must not silently
+    # start targeting a chat.
+    client = MockTelegramClient(entity_behavior={555: "not_a_user"})
+    resolver = RecipientResolver(client)
+    result = await resolver.resolve(parse_recipient_line("555"))
+    assert result.status == ResolveStatus.NOT_A_USER
+
+
+async def test_resolve_unknown_entity_type_rejected():
+    client = MockTelegramClient()
+
+    async def weird_entity(identifier):
+        return object()
+
+    client.get_entity = weird_entity  # type: ignore[method-assign]
+    resolver = RecipientResolver(client)
+    result = await resolver.resolve(parse_recipient_line("@strange_thing"))
     assert result.status == ResolveStatus.NOT_A_USER
 
 

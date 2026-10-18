@@ -84,8 +84,8 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "en": "Full-size editor for long, formatted messages",
     },
     "main_window.campaign_page.name_placeholder_hint": {
-        "ru": "{{name}} — имя получателя в Telegram, подставляется при отправке",
-        "en": "{{name}} — the recipient's Telegram name, filled in when sending",
+        "ru": "{{name}} — имя получателя в Telegram (для группы или канала — его название), подставляется при отправке",
+        "en": "{{name}} — the recipient's Telegram name (for a group or channel, its title), filled in when sending",
     },
     "main_window.campaign_page.message_card": {"ru": "Сообщение", "en": "Message"},
     "main_window.presets.placeholder": {"ru": "Выберите шаблон…", "en": "Choose a preset…"},
@@ -108,13 +108,13 @@ STRINGS: Dict[str, Dict[str, str]] = {
     "main_window.campaign_page.preview_name_tooltip": {
         "ru": (
             "Показывает, как сообщение будет выглядеть после подстановки "
-            "{{name}} -- реальное имя получателя недоступно до момента "
-            "отправки, это лишь пример"
+            "{{name}} -- реальное имя получателя (или название чата) "
+            "недоступно до момента отправки, это лишь пример"
         ),
         "en": (
             "Shows how the message will look once {{name}} is filled in -- "
-            "the recipient's real name isn't available before sending, "
-            "this is just an example"
+            "the recipient's real name (or the chat's title) isn't "
+            "available before sending, this is just an example"
         ),
     },
     "main_window.campaign_page.attachments_card": {"ru": "Вложения", "en": "Attachments"},
@@ -135,12 +135,18 @@ STRINGS: Dict[str, Dict[str, str]] = {
     "campaign_wizard.cancel_button": {"ru": "Отмена", "en": "Cancel"},
     "campaign_wizard.start_button": {"ru": "Начать рассылку", "en": "Start campaign"},
     "campaign_wizard.recipients.hint": {
-        "ru": "Добавьте получателей: @username, ID, ссылки t.me или номера телефонов в международном формате.",
-        "en": "Add recipients: @username, ID, t.me links, or international-format phone numbers.",
+        "ru": (
+            "Добавьте получателей: @username, ID, ссылки t.me или номера телефонов в международном формате. "
+            "Группы и каналы, в которых состоит аккаунт: @username, ID вида -100…, ссылки t.me/c/… или t.me/+…"
+        ),
+        "en": (
+            "Add recipients: @username, ID, t.me links, or international-format phone numbers. "
+            "Groups and channels the account is in: @username, a -100… ID, or t.me/c/… / t.me/+… links."
+        ),
     },
     "campaign_wizard.message.hint": {
-        "ru": "Составьте текст сообщения. {{name}} будет заменено на имя получателя при отправке.",
-        "en": "Write the message text. {{name}} will be replaced with the recipient's name when sending.",
+        "ru": "Составьте текст сообщения. {{name}} будет заменено на имя получателя (или название чата) при отправке.",
+        "en": "Write the message text. {{name}} will be replaced with the recipient's name (or the chat's title) when sending.",
     },
     "campaign_wizard.message.open_editor_button": {"ru": "✏  Открыть редактор", "en": "✏  Open editor"},
     "campaign_wizard.message.empty": {"ru": "Сообщение ещё не задано.", "en": "No message text yet."},
@@ -457,30 +463,42 @@ STRINGS: Dict[str, Dict[str, str]] = {
 
     # ---- recipient_widget -----------------------------------------------
     "recipient_widget.placeholder": {
-        "ru": "@username1\n123456789\n+4917612345678\nhttps://t.me/username3",
-        "en": "@username1\n123456789\n+4917612345678\nhttps://t.me/username3",
+        "ru": "@username1\n123456789\n+4917612345678\nhttps://t.me/username3\n@my_channel\n-1001234567890",
+        "en": "@username1\n123456789\n+4917612345678\nhttps://t.me/username3\n@my_channel\n-1001234567890",
     },
     "recipient_widget.tooltip": {
         "ru": (
             "По одному получателю на строку: @username, Telegram ID, ссылка "
             "t.me/...\nили номер телефона в международном формате (например "
-            "+4917612345678)"
+            "+4917612345678).\n\nГруппы и каналы, в которых аккаунт уже "
+            "состоит и может писать:\n@username или t.me/username, ID чата "
+            "(-100… или -…), ссылка t.me/c/…\nили ссылка-приглашение "
+            "t.me/+… (только проверяется — вступления в чат не происходит)"
         ),
         "en": (
             "One recipient per line: @username, Telegram ID, a t.me/... "
             "link,\nor a phone number in international format (e.g. "
-            "+4917612345678)"
+            "+4917612345678).\n\nGroups and channels the account is already "
+            "in and can post to:\n@username or t.me/username, a chat ID "
+            "(-100… or -…), a t.me/c/… link,\nor a t.me/+… invite link "
+            "(only checked — the account never joins a chat)"
         ),
     },
     "recipient_widget.import_txt_button": {"ru": "Импорт TXT", "en": "Import TXT"},
     "recipient_widget.import_csv_button": {"ru": "Импорт CSV", "en": "Import CSV"},
     "recipient_widget.clear_button": {"ru": "Очистить", "en": "Clear"},
     "recipient_widget.empty_summary": {
-        "ru": "Нет получателей — вставьте @username, ID, ссылки t.me/... или номера телефонов, либо импортируйте TXT- или CSV-файл",
-        "en": "No recipients — paste @usernames, IDs, t.me/... links, or phone numbers, or import a TXT or CSV file",
+        "ru": "Нет получателей — вставьте @username, ID, ссылки t.me/... или номера телефонов, импортируйте TXT- или CSV-файл, либо выберите группы и каналы из своих чатов",
+        "en": "No recipients — paste @usernames, IDs, t.me/... links, or phone numbers, import a TXT or CSV file, or pick groups and channels from your chats",
     },
     "recipient_widget.summary_invalid_count": {"ru": "ошибок формата: {count}", "en": "format errors: {count}"},
     "recipient_widget.summary_duplicates_removed": {"ru": "дубликатов удалено: {count}", "en": "duplicates removed: {count}"},
+    "recipient_widget.summary_chat_count": {"ru": "из них групп/каналов по ID или ссылке: {count}", "en": "groups/channels by ID or link: {count}"},
+    "recipient_widget.pick_chats_button": {"ru": "Из моих чатов…", "en": "From my chats…"},
+    "recipient_widget.pick_chats_tooltip": {
+        "ru": "Выбрать группы и каналы, в которых состоит активный аккаунт и может писать",
+        "en": "Pick groups and channels the active account is in and can post to",
+    },
     "recipient_widget.review_invalid_button": {"ru": "Показать ошибки", "en": "Show errors"},
     "recipient_widget.review_invalid_title": {"ru": "Некорректные строки", "en": "Invalid rows"},
     "recipient_widget.import_dialog_title": {"ru": "Импорт получателей", "en": "Import recipients"},
@@ -507,6 +525,11 @@ STRINGS: Dict[str, Dict[str, str]] = {
     "recipients.parser.error.invalid_tme_link": {"ru": "Некорректная ссылка t.me", "en": "Invalid t.me link"},
     "recipients.parser.error.invalid_username": {"ru": "Некорректный username", "en": "Invalid username"},
     "recipients.parser.error.unknown_format": {"ru": "Неизвестный формат получателя", "en": "Unrecognized recipient format"},
+    "recipients.parser.error.invalid_chat_id": {"ru": "Некорректный ID чата", "en": "Invalid chat ID"},
+    "recipients.parser.error.invalid_invite_link": {
+        "ru": "Некорректная ссылка-приглашение t.me",
+        "en": "Invalid t.me invite link",
+    },
 
     # ---- app/recipients/csv_importer.py -------------------------------------
     "csv_importer.error.no_identifier_in_row": {
@@ -591,8 +614,8 @@ STRINGS: Dict[str, Dict[str, str]] = {
     "onboarding_dialog.title": {"ru": "Добро пожаловать", "en": "Welcome"},
     "onboarding_dialog.welcome_title": {"ru": "Добро пожаловать в Telegram Mass Sender", "en": "Welcome to Telegram Mass Sender"},
     "onboarding_dialog.welcome_body": {
-        "ru": "Это приложение отправляет персональные сообщения в Telegram по одному, от вашего собственного аккаунта — не бот и не массовая рассылка по группам/каналам.",
-        "en": "This app sends personal Telegram messages one by one, from your own account — not a bot, and never to groups or channels.",
+        "ru": "Это приложение отправляет сообщения в Telegram по одному, от вашего собственного аккаунта — не бот. Писать можно людям, а также в группы и каналы, где аккаунт уже состоит и имеет право писать; в чаты оно не вступает и ограничения Telegram не обходит.",
+        "en": "This app sends Telegram messages one by one, from your own account — not a bot. It can message people, and post to groups and channels the account is already in and allowed to write to; it never joins chats or works around Telegram's limits.",
     },
     "onboarding_dialog.steps_title": {"ru": "Как это работает", "en": "How it works"},
     "onboarding_dialog.step_account": {"ru": "Подключите аккаунт Telegram", "en": "Connect a Telegram account"},
@@ -674,6 +697,40 @@ STRINGS: Dict[str, Dict[str, str]] = {
     "dialogs.exit": {"ru": "Выйти", "en": "Quit"},
     "dialogs.start_campaign.title": {"ru": "Начать рассылку?", "en": "Start the campaign?"},
     "dialogs.start_campaign.start": {"ru": "Начать", "en": "Start"},
+    "dialogs.start_campaign.users_line": {"ru": "Пользователи (ID, телефон): {count}", "en": "Users (ID, phone): {count}"},
+    "dialogs.start_campaign.chats_line": {"ru": "Группы и каналы (ID, ссылка): {count}", "en": "Groups and channels (ID, link): {count}"},
+    "dialogs.start_campaign.usernames_line": {
+        "ru": "@username и ссылки t.me/…: {count} — пользователь или чат, определится при отправке",
+        "en": "@usernames and t.me/… links: {count} — a user or a chat, determined when sending",
+    },
+
+    # ---- chat_picker_dialog --------------------------------------------------
+    "chat_picker.title": {"ru": "Из моих чатов", "en": "From my chats"},
+    "chat_picker.hint": {
+        "ru": "Группы и каналы активного аккаунта, в которые он сейчас может писать. Выбранные чаты будут добавлены в список получателей.",
+        "en": "Groups and channels of the active account it can currently post to. The chats you tick are added to the recipient list.",
+    },
+    "chat_picker.search_placeholder": {"ru": "Поиск по названию…", "en": "Search by title…"},
+    "chat_picker.filter.all": {"ru": "Все типы", "en": "All types"},
+    "chat_picker.filter.channels": {"ru": "Каналы", "en": "Channels"},
+    "chat_picker.filter.supergroups": {"ru": "Супергруппы", "en": "Supergroups"},
+    "chat_picker.filter.forums": {"ru": "Форумы", "en": "Forums"},
+    "chat_picker.filter.groups": {"ru": "Группы", "en": "Groups"},
+    "chat_picker.select_visible": {"ru": "Выбрать показанные", "en": "Select shown"},
+    "chat_picker.select_none": {"ru": "Снять выбор", "en": "Select none"},
+    "chat_picker.nothing_matches": {"ru": "Ничего не найдено.", "en": "Nothing matches."},
+    "chat_picker.add_button": {"ru": "Добавить", "en": "Add"},
+    "chat_picker.empty": {
+        "ru": "У этого аккаунта нет групп или каналов, в которые он может писать.",
+        "en": "This account has no groups or channels it can post to.",
+    },
+    "chat_picker.added_status": {"ru": "Добавлено чатов: {count}", "en": "Chats added: {count}"},
+    "chat_picker.error.no_account": {"ru": "Сначала подключите аккаунт.", "en": "Connect an account first."},
+    "chat_picker.error.flood_wait": {
+        "ru": "Telegram временно ограничил запросы. Повторите через {seconds} сек.",
+        "en": "Telegram has temporarily limited requests. Try again in {seconds} sec.",
+    },
+    "chat_picker.error.load_failed": {"ru": "Не удалось загрузить список чатов: {error}", "en": "Couldn't load the chat list: {error}"},
     "dialogs.reset_settings.title": {"ru": "Сбросить настройки?", "en": "Reset settings?"},
     "dialogs.reset_settings.message": {
         "ru": "Все настройки приложения будут возвращены к значениям по умолчанию. Продолжить?",
@@ -781,6 +838,98 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "en": "The recipient must be a user, not a group or channel",
     },
 
+    # ---- app/telegram/chat_targets.py: group/channel targets --------------
+    "chat_targets.type.user": {"ru": "пользователь", "en": "user"},
+    "chat_targets.type.group": {"ru": "группа", "en": "group"},
+    "chat_targets.type.supergroup": {"ru": "супергруппа", "en": "supergroup"},
+    "chat_targets.type.forum": {"ru": "форум", "en": "forum"},
+    "chat_targets.type.channel": {"ru": "канал", "en": "channel"},
+    "chat_targets.reason.not_member": {
+        "ru": "аккаунт не состоит в этом чате",
+        "en": "the account is not a member of this chat",
+    },
+    "chat_targets.reason.no_access": {
+        "ru": "нет доступа к чату (аккаунт удалён из него или чат закрыт)",
+        "en": "no access to this chat (the account was removed or the chat is closed)",
+    },
+    "chat_targets.reason.private": {
+        "ru": "чат или канал приватный, либо аккаунт был из него удалён",
+        "en": "the chat or channel is private, or the account was removed from it",
+    },
+    "chat_targets.reason.invalid": {
+        "ru": "чат не найден или недоступен",
+        "en": "chat not found or unavailable",
+    },
+    "chat_targets.reason.invite_invalid": {
+        "ru": "ссылка-приглашение недействительна или истекла",
+        "en": "the invite link is invalid or has expired",
+    },
+    "chat_targets.reason.channel_admin_required": {
+        "ru": "нужны права администратора с правом публикации",
+        "en": "admin rights with permission to post are required",
+    },
+    "chat_targets.reason.write_forbidden": {
+        "ru": "в этом чате участникам запрещено писать",
+        "en": "members are not allowed to write in this chat",
+    },
+    "chat_targets.reason.write_forbidden_personal": {
+        "ru": "аккаунту запрещено писать в этом чате",
+        "en": "this account is not allowed to write in this chat",
+    },
+    "chat_targets.reason.banned": {
+        "ru": "аккаунт заблокирован в этом чате",
+        "en": "this account is banned in this chat",
+    },
+    "chat_targets.reason.plain_forbidden": {
+        "ru": "в этом чате запрещены текстовые сообщения",
+        "en": "text messages are not allowed in this chat",
+    },
+    "chat_targets.reason.media_forbidden": {
+        "ru": "в этом чате запрещено отправлять медиа или файлы такого типа",
+        "en": "sending media or files of this type is not allowed in this chat",
+    },
+    "chat_targets.reason.restricted": {
+        "ru": "Telegram ограничил этот чат",
+        "en": "Telegram has restricted this chat",
+    },
+    "chat_targets.reason.account_restricted": {
+        "ru": "Telegram ограничил аккаунту отправку сообщений в группы и каналы",
+        "en": "Telegram has restricted this account from posting in groups and channels",
+    },
+    "chat_targets.reason.slowmode_multi": {
+        "ru": "медленный режим: в этот чат нельзя отправить сообщение из нескольких частей",
+        "en": "slow mode: a multi-part message can't be posted to this chat",
+    },
+    "chat_targets.reason.slowmode": {"ru": "медленный режим", "en": "slow mode"},
+    "chat_targets.reason.slowmode_wait": {
+        "ru": "медленный режим, подождите {seconds} сек.",
+        "en": "slow mode, wait {seconds} sec.",
+    },
+    "chat_targets.reason.forum_general_closed": {
+        "ru": "форум: тема «General» закрыта для сообщений",
+        "en": "forum: the “General” topic is closed",
+    },
+    "chat_targets.reason.forum_general_unavailable": {
+        "ru": "форум: не удалось отправить в тему «General»",
+        "en": "forum: couldn't post to the “General” topic",
+    },
+    "chat_targets.reason.migrated": {
+        "ru": "группа преобразована в супергруппу — используйте её новый ID",
+        "en": "the group was upgraded to a supergroup — use its new ID",
+    },
+    "chat_targets.reason.deactivated": {
+        "ru": "группа деактивирована",
+        "en": "the group has been deactivated",
+    },
+    "chat_targets.reason.paid_messages": {
+        "ru": "чат принимает только платные сообщения — не поддерживается",
+        "en": "this chat only accepts paid messages — not supported",
+    },
+    "chat_targets.reason.duplicate_chat": {
+        "ru": "уже доставлено в этот чат",
+        "en": "already delivered to this chat",
+    },
+
     # ---- app/campaign/campaign_manager.py: Journal messages -----------------
     "campaign_manager.journal.started": {"ru": "▶ Рассылка запущена: получателей {count}", "en": "▶ Campaign started: {count} recipients"},
     "campaign_manager.journal.paused": {"ru": "⏸ Рассылка поставлена на паузу", "en": "⏸ Campaign paused"},
@@ -802,6 +951,7 @@ STRINGS: Dict[str, Dict[str, str]] = {
     },
     "campaign_manager.journal.item_failed": {"ru": "✗ {recipient} — {error}", "en": "✗ {recipient} — {error}"},
     "campaign_manager.journal.item_sent": {"ru": "✓ {recipient} — отправлено", "en": "✓ {recipient} — sent"},
+    "campaign_manager.journal.item_skipped": {"ru": "↷ {recipient} — пропущено: {reason}", "en": "↷ {recipient} — skipped: {reason}"},
     "campaign_manager.journal.critical_error": {"ru": "✗ Критическая ошибка аккаунта: {error}", "en": "✗ Critical account error: {error}"},
     "campaign_manager.journal.retrying": {
         "ru": "… повтор {attempt}/{max_attempts} для {recipient} через {backoff} сек.",
@@ -824,6 +974,10 @@ STRINGS: Dict[str, Dict[str, str]] = {
 }
 
 PLURALS: Dict[str, Dict[str, Dict[str, str]]] = {
+    "chat_picker.selected_count": {
+        "ru": {"one": "Выбран {n} чат", "few": "Выбрано {n} чата", "many": "Выбрано {n} чатов"},
+        "en": {"one": "{n} chat selected", "other": "{n} chats selected"},
+    },
     "recipient_widget.recipient_count": {
         "ru": {"one": "{n} получатель", "few": "{n} получателя", "many": "{n} получателей"},
         "en": {"one": "{n} recipient", "other": "{n} recipients"},

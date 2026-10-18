@@ -12,13 +12,22 @@ Pause/Stop never touch a blocking call -- only asyncio.sleep, polled in
 short, cancellable increments, and never mid-item (spec item 25: a Pause
 takes effect only *between* recipients, never interrupting a send that
 is already in flight).
+
+Group/supergroup/channel targets (app.telegram.chat_targets) go through
+the very same loop: after resolving, a chat is preflighted against the
+rights Telegram reports for it, and send errors are mapped to chat-specific
+reasons. SlowModeWaitError fails just that target (the campaign continues,
+never waits it out or pauses); FloodWaitError is handled exactly as for a
+user. A chat already delivered to in this run -- or in the run a Retry
+comes from (delivered_chat_ids) -- is skipped, so two spellings of the same
+chat (@name and -100...) never get the message twice.
 """
 from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, Iterable, List, Optional
 
 from PySide6.QtCore import QObject, Signal
 from telethon import TelegramClient
@@ -27,6 +36,7 @@ from telethon.errors import (
     ChatWriteForbiddenError,
     FloodWaitError,
     PeerIdInvalidError,
+    SlowModeWaitError,
     UserDeactivatedBanError,
     UserDeactivatedError,
     UserIsBlockedError,
@@ -42,8 +52,14 @@ from app.i18n import tr
 from app.logging.events import EventType, log_event
 from app.logging.logger import get_logger
 from app.recipients.parser import ParsedRecipient
+from app.telegram.chat_targets import (
+    chat_error_reason,
+    chat_peer_id,
+    check_send_rights,
+    send_requirements,
+)
 from app.telegram.media_sender import Attachment, SendProgress
-from app.telegram.recipient_resolver import RecipientResolver
+from app.telegram.recipient_resolver import RecipientResolver, ResolvedRecipient
 from app.telegram.sender import send_to_recipient
 from app.telegram.template import expand_name_placeholder
 
@@ -71,6 +87,9 @@ _CRITICAL_ERROR_TYPES = (AuthKeyError, UserDeactivatedError, UserDeactivatedBanE
 _TRANSIENT_ERROR_TYPES = (ConnectionError, OSError, asyncio.TimeoutError, TimeoutError)
 
 _MAX_BACKOFF_SECONDS = 30
+
+# SendItem.error_category values (see app.campaign.send_queue.SendItem).
+ERROR_CATEGORY_SLOWMODE = "slowmode"
 
 
 def _now_iso() -> str:
@@ -106,11 +125,13 @@ class CampaignManager(QObject):
         rate_limiter: RateLimiter,
         max_retries: int,
         recipient_names: Optional[Dict[str, str]] = None,
+        delivered_chat_ids: Optional[Iterable[int]] = None,
+        resume_steps: Optional[Dict[str, int]] = None,
         parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)
         self._client = client
-        self._queue = SendQueue(recipients)
+        self._queue = SendQueue(recipients, resume_steps=resume_steps)
         self._text = message_text
         self._entities = message_entities
         self._attachments = attachments
@@ -123,6 +144,10 @@ class CampaignManager(QObject):
         # specific recipient. See _attempt_send.
         self._recipient_names = recipient_names or {}
         self._resolver = RecipientResolver(client)
+        # Marked ids of chats this campaign (or, for a Retry, the campaign
+        # it retries) already delivered to.
+        self._delivered_chat_ids = set(delivered_chat_ids or ())
+        self._send_requirements = send_requirements(message_text, attachments)
 
         self._state = CampaignStateMachine()
         self._pause_event = asyncio.Event()
@@ -144,6 +169,13 @@ class CampaignManager(QObject):
         (app.campaign.report) -- the only supported way for UI code to read
         per-item results; SendQueue itself stays private."""
         return self._queue.items
+
+    @property
+    def delivered_chat_ids(self) -> set:
+        """Marked ids of every chat delivered to by this campaign, plus the
+        ones it was started with -- what a Retry of this campaign must not
+        post to again."""
+        return set(self._delivered_chat_ids)
 
     def snapshot(self) -> ProgressSnapshot:
         counts = self._queue.counts()
@@ -345,6 +377,27 @@ class CampaignManager(QObject):
         await self._sleep_interruptible(wait_seconds, on_tick=self.flood_wait_tick.emit)
         return "floodwait"
 
+    def _fail(self, item: SendItem, error: str) -> str:
+        item.status = SendItemStatus.FAILED
+        item.error = error
+        item.sent_at = _now_iso()
+        self._log(tr("campaign_manager.journal.item_failed", recipient=item.recipient.display_label, error=item.error))
+        return "failed"
+
+    def _preflight_chat(self, item: SendItem, resolved: ResolvedRecipient) -> Optional[str]:
+        """Checks that need no network call, run before any send to a chat.
+        Returns an outcome to stop at, or None to go ahead and send."""
+        if item.resolved_id in self._delivered_chat_ids:
+            item.status = SendItemStatus.SKIPPED
+            item.error = tr("chat_targets.reason.duplicate_chat")
+            item.sent_at = _now_iso()
+            self._log(tr("campaign_manager.journal.item_skipped", recipient=item.recipient.display_label, reason=item.error))
+            return "skipped"
+        reason_key = check_send_rights(resolved.entity, self._send_requirements)
+        if reason_key is not None:
+            return self._fail(item, tr(reason_key))
+        return None
+
     async def _attempt_send(self, item: SendItem) -> str:
         try:
             resolved = await self._resolver.resolve(item.recipient)
@@ -352,17 +405,29 @@ class CampaignManager(QObject):
             return await self._handle_flood_wait(item, exc)
 
         if not resolved.is_ready:
-            item.status = SendItemStatus.FAILED
-            item.error = resolved.error or tr("campaign_manager.error.recipient_unavailable")
-            item.sent_at = _now_iso()
-            self._log(tr("campaign_manager.journal.item_failed", recipient=item.recipient.display_label, error=item.error))
-            return "failed"
+            return self._fail(item, resolved.error or tr("campaign_manager.error.recipient_unavailable"))
 
-        item.resolved_id = getattr(resolved.entity, "id", None)
+        is_chat = resolved.is_chat
+        item.target_type = resolved.target_type.value if resolved.target_type is not None else None
+        item.resolved_id = chat_peer_id(resolved.entity) if is_chat else getattr(resolved.entity, "id", None)
         item.resolved_username = getattr(resolved.entity, "username", None)
-        log_event(EventType.RECIPIENT_RESOLVED, recipient=item.recipient.display_label, resolved_id=item.resolved_id)
+        log_event(
+            EventType.RECIPIENT_RESOLVED,
+            recipient=item.recipient.display_label,
+            resolved_id=item.resolved_id,
+            target_type=item.target_type,
+        )
+
+        if is_chat:
+            outcome = self._preflight_chat(item, resolved)
+            if outcome is not None:
+                return outcome
+
         override_name = self._recipient_names.get(item.recipient.normalized_key)
-        first_name = override_name or getattr(resolved.entity, "first_name", None)
+        if is_chat:
+            first_name = override_name or getattr(resolved.entity, "title", None)
+        else:
+            first_name = override_name or getattr(resolved.entity, "first_name", None)
         send_text, send_entities = expand_name_placeholder(self._text, self._entities, first_name)
 
         attempt = 0
@@ -382,6 +447,12 @@ class CampaignManager(QObject):
                 )
             except FloodWaitError as exc:
                 return await self._handle_flood_wait(item, exc)
+            except SlowModeWaitError as exc:
+                # Not a FloodWait: Telegram only says *this chat* won't take
+                # another message for a while. The target fails with that
+                # reason and the campaign moves on -- nothing waits it out.
+                item.error_category = ERROR_CATEGORY_SLOWMODE
+                return self._fail(item, tr("chat_targets.reason.slowmode_wait", seconds=int(exc.seconds)))
             except _CRITICAL_ERROR_TYPES as exc:
                 item.status = SendItemStatus.FAILED
                 item.error = tr("campaign_manager.error.account_unavailable")
@@ -390,11 +461,7 @@ class CampaignManager(QObject):
                 self._log(tr("campaign_manager.journal.critical_error", error=exc))
                 return "critical"
             except _PERMANENT_ERROR_TYPES as exc:
-                item.status = SendItemStatus.FAILED
-                item.error = _permanent_error_message(exc)
-                item.sent_at = _now_iso()
-                self._log(tr("campaign_manager.journal.item_failed", recipient=item.recipient.display_label, error=item.error))
-                return "failed"
+                return self._fail(item, (chat_error_reason(exc) if is_chat else None) or _permanent_error_message(exc))
             except _TRANSIENT_ERROR_TYPES:
                 if attempt >= self._max_retries:
                     item.status = SendItemStatus.FAILED
@@ -419,6 +486,9 @@ class CampaignManager(QObject):
                     return "failed"
                 continue
             except Exception as exc:  # noqa: BLE001 - last-resort, categorized as a normal failure
+                chat_reason = chat_error_reason(exc) if is_chat else None
+                if chat_reason is not None:
+                    return self._fail(item, chat_reason)
                 logger.exception("Непредвиденная ошибка при отправке %s", item.recipient.display_label)
                 item.status = SendItemStatus.FAILED
                 item.error = tr("campaign_manager.error.unexpected")
@@ -428,6 +498,8 @@ class CampaignManager(QObject):
             else:
                 item.status = SendItemStatus.SENT
                 item.sent_at = _now_iso()
+                if is_chat:
+                    self._delivered_chat_ids.add(item.resolved_id)
                 self._log(tr("campaign_manager.journal.item_sent", recipient=item.recipient.display_label))
                 return "sent"
             finally:

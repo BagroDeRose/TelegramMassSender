@@ -33,18 +33,34 @@ class SendItem:
     # sent again.
     next_step: int = 0
     # Populated once the recipient is successfully resolved to a Telegram
-    # user (app.campaign.campaign_manager); used only for the CSV report
-    # (app.campaign.report) -- never logged.
+    # user or chat (app.campaign.campaign_manager); used only for the CSV
+    # report (app.campaign.report) -- never logged. For a chat target
+    # resolved_id is the marked id (-100.../-...), so it can be pasted back
+    # as a recipient.
     resolved_id: Optional[int] = None
     resolved_username: Optional[str] = None
+    # app.telegram.chat_targets.TargetType value ("user", "group",
+    # "supergroup", "forum", "channel") once resolved; None before that.
+    target_type: Optional[str] = None
+    # Set when several distinct `error` texts are really one reason -- e.g.
+    # "slow mode, wait 12 sec" / "... 47 sec" are both "slowmode" -- so the
+    # Results page's failure breakdown can count them together while each
+    # item keeps its exact error text.
+    error_category: Optional[str] = None
     # ISO-8601 timestamp stamped when this item reaches a terminal status
     # (SENT/FAILED/SKIPPED); left None for an item never attempted.
     sent_at: Optional[str] = None
 
 
 class SendQueue:
-    def __init__(self, recipients: List[ParsedRecipient]) -> None:
-        self._items: List[SendItem] = [SendItem(recipient=r) for r in recipients]
+    def __init__(self, recipients: List[ParsedRecipient], resume_steps: Optional[Dict[str, int]] = None) -> None:
+        # resume_steps: normalized_key -> delivery steps an earlier run
+        # already completed for that recipient (Retry), so they're not
+        # sent a second time.
+        resume_steps = resume_steps or {}
+        self._items: List[SendItem] = [
+            SendItem(recipient=r, next_step=max(0, int(resume_steps.get(r.normalized_key, 0)))) for r in recipients
+        ]
 
     def __len__(self) -> int:
         return len(self._items)

@@ -138,17 +138,31 @@ class _AttachmentTile(QWidget):
         super().__init__(parent)
         self._item = item
         self._press_pos: Optional[QPoint] = None
-        # Accessibility (ROADMAP v1.8): a plain QWidget has no focus
-        # policy by default, so without this the tile could only ever be
-        # selected/removed/dragged with a mouse -- unreachable by Tab and
-        # invisible to a screen reader. StrongFocus (not just TabFocus)
-        # also allows click-to-focus, matching every other clickable
-        # control in the app.
-        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self._was_sole_selection_on_press = False
+        self._focus_from_click = False
+        # Accessibility (ROADMAP v1.8): without a focus policy the tile is
+        # unreachable by Tab and invisible to a screen reader.
+        #
+        # TabFocus rather than StrongFocus, with mouse focus taken by hand in
+        # mousePressEvent: when a click moves focus onto an item widget, the
+        # list view selects that item *during* the press, before this class
+        # sees the event. Click-to-deselect has to know whether the tile was
+        # already selected before the click, so focus must move only after
+        # that has been recorded. A click still focuses the tile, so Delete
+        # and Ctrl+Arrow keep working after clicking.
+        self.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         self.setProperty("focused", "false")
 
     def mousePressEvent(self, event) -> None:  # noqa: N802 (Qt override)
         if event.button() == Qt.MouseButton.LeftButton:
+            list_widget = self._item.listWidget()
+            self._was_sole_selection_on_press = (
+                list_widget is not None
+                and self._item.isSelected()
+                and len(list_widget.selectedItems()) == 1
+            )
+            self._focus_from_click = True
+            self.setFocus(Qt.FocusReason.MouseFocusReason)
             self._press_pos = event.position().toPoint()
             # Explicit grab, on top of accept() below: accept() alone stops
             # *this* press from being redelivered to the parent, but Qt's
@@ -212,6 +226,11 @@ class _AttachmentTile(QWidget):
             selection_model.select(index, QItemSelectionModel.SelectionFlag.Toggle)
             selection_model.setCurrentIndex(index, QItemSelectionModel.SelectionFlag.Current)
             return
+        if self._was_sole_selection_on_press:
+            # Clicking the only selected tile again deselects it. With several
+            # selected, a plain click still narrows the selection to this one.
+            selection_model.clearSelection()
+            return
         selection_model.setCurrentIndex(index, QItemSelectionModel.SelectionFlag.ClearAndSelect)
 
     def focusInEvent(self, event) -> None:  # noqa: N802 (Qt override)
@@ -223,12 +242,22 @@ class _AttachmentTile(QWidget):
         # bugfix). Keyboard users still need to see where focus is; this
         # is a correctly-scoped replacement for it, not a reintroduction
         # of that bug.
-        self.setProperty("focused", "true")
+        #
+        # No ring when the focus came from a mouse click: the ring shares its
+        # color with the selection border, so a ring left behind by a click
+        # would make a tile that was just clicked to deselect it still look
+        # selected. Tracked by flag rather than by event.reason(), because
+        # focus restored by re-activating the window arrives as
+        # ActiveWindowFocusReason whichever way it originally got there.
+        self.setProperty("focused", "false" if self._focus_from_click else "true")
         self.style().unpolish(self)
         self.style().polish(self)
         super().focusInEvent(event)
 
     def focusOutEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        if event.reason() not in (Qt.FocusReason.ActiveWindowFocusReason, Qt.FocusReason.PopupFocusReason):
+            # A real move elsewhere; just switching windows keeps how focus arrived.
+            self._focus_from_click = False
         self.setProperty("focused", "false")
         self.style().unpolish(self)
         self.style().polish(self)

@@ -14,21 +14,22 @@ A Windows desktop application that sends personal Telegram messages to a list of
 
 ## Overview
 
-TelegramMassSender sends the *same message, personally, to each recipient in a list* — one Telegram message per person, from the user's own account, the way you'd write to each of them individually. It is not a bot, not a bulk-marketing tool, and does not send to groups or channels. It integrates directly with Telegram's native **MTProto** protocol via **Telethon** — not the Bot API — and runs a real async event loop (**qasync**) bridging Qt's UI thread with `asyncio` network I/O.
+TelegramMassSender sends the *same message, personally, to each recipient in a list* — one Telegram message per recipient, from the user's own account, the way you'd write to each of them individually. Recipients are people, and optionally groups, supergroups and channels **the account is already a member of and allowed to post in** — it never joins a chat on its own, and Telegram's restrictions (permissions, slow mode, FloodWait) are respected, never worked around. It is not a bot and not a bulk-marketing tool. It integrates directly with Telegram's native **MTProto** protocol via **Telethon** — not the Bot API — and runs a real async event loop (**qasync**) bridging Qt's UI thread with `asyncio` network I/O.
 
-It supports multiple Telegram accounts, rich text formatting, media/album attachments, per-recipient `{name}` personalization (including from a CSV column), phone-number recipient resolution, a Telegram-style live message preview, named message presets and recipient groups, an optional step-by-step Campaign Wizard, failed-recipient retry, structured diagnostics, a full Russian/English UI, and campaign reporting — all backed by a 747-test automated regression suite and a real Windows-packaged build (PyInstaller).
+It supports multiple Telegram accounts, rich text formatting, media/album attachments, per-recipient `{name}` personalization (including from a CSV column), phone-number recipient resolution, a Telegram-style live message preview, named message presets and recipient groups, an optional step-by-step Campaign Wizard, failed-recipient retry, structured diagnostics, a full Russian/English UI, and campaign reporting — all backed by an 883-test automated regression suite and a real Windows-packaged build (PyInstaller).
 
 ## Key Features
 
-- Personal, one-by-one messages from your own Telegram account — no bots, no group/channel sending.
+- Personal, one-by-one messages from your own Telegram account — no bots.
 - Recipients by `@username`, numeric Telegram ID, `t.me` link, or E.164 phone number — pasted directly, imported from a TXT file, or imported from a CSV file (columns detected automatically, including an optional name column mapped to `{name}`).
-- Per-recipient name personalization via a `{name}` placeholder, including inside rich-text formatting; a CSV-supplied name takes priority over Telegram's own name for that recipient.
+- Groups, supergroups (including forums — posted to "General") and channels the account is already in and may post to: by `@username` / `t.me/username`, by chat ID (`-100…` / `-…`), by `t.me/c/…` link, or by an invite link the account has already joined (`t.me/+…`, only checked — never joined). Mixed lists of people and chats work, a **From my chats…** picker lists the active account's writable groups/channels, and each chat is pre-checked against its permissions (admin rights for channels, member restrictions and media rights for groups) before anything is sent.
+- Per-recipient name personalization via a `{name}` placeholder, including inside rich-text formatting; for a group/channel it becomes the chat's title; a CSV-supplied name takes priority over Telegram's own name for that recipient.
 - Rich text editor (bold/italic/underline/strikethrough/spoiler/monospace/code block/links/emoji) with a live Telegram-style message preview, including a personalization preview against an example name.
 - Named message presets (text, formatting, attachments, optionally the sending interval) and named local recipient groups — save and reload a recipient list or a message template by name.
 - An optional step-by-step Campaign Wizard (Recipients → Message → Attachments → Sending options → Preview → Confirmation) alongside the existing fast single-page workflow.
 - Photo, video, and document attachments, with automatic album batching, image thumbnails, and reordering by drag or by explicit Move earlier/Move later controls (also Ctrl+←/Ctrl+→).
 - Multiple Telegram accounts with persistent sessions and live switching.
-- Configurable randomized send interval with FloodWait-aware pausing (Telegram's own rate limits are respected, never bypassed), a pre-start duration estimate, and a live elapsed/remaining-time display while a campaign runs.
+- Configurable randomized send interval with FloodWait-aware pausing (Telegram's own rate limits are respected, never bypassed), a pre-start duration estimate, and a live elapsed/remaining-time display while a campaign runs. A chat in slow mode fails with a "wait N sec" reason and the campaign moves on — slow mode is never waited out or bypassed.
 - Retry failed recipients (selected or all) after a campaign finishes, without resending anyone who already succeeded.
 - Live campaign statistics, failure-reason breakdowns, a filterable per-recipient results list, an event journal, and CSV report export/saving (including an export-failures-only option).
 - A Diagnostics panel (app/Python/Telethon versions, database/Telegram/network status) and a one-click sanitized diagnostic bundle export for troubleshooting.
@@ -111,6 +112,8 @@ A few parts of this project involved real engineering problems, not just wiring 
 13. **A direction-dependent drag-reorder bug — and a fix that did not actually fix it.** Attachment reordering felt unreliable in practice. The first attempt changed the rule to "insert immediately before the target tile" and was shipped in v2.0.0 as fixed; real use afterwards showed it still was not. Replaying every (source, target) pair over a small list showed why: that rule coincides with the slot the user dropped on only for backward drags, so every forward drag landed exactly one slot short (dropping row 0 onto slot 2 put the item at index 1). The lesson was that the test asserted the wrong invariant — "ends up before the target" rather than "ends up on the slot it was dropped on" — so it passed while the bug was still there. Ordering now goes through a single `move_attachment(from, to)` that treats the target as the *final index*, which is direction-independent by construction, and the same operation backs drag-and-drop, the Move earlier/later buttons and the Ctrl+Arrow shortcuts.
 14. **Demo Mode as a genuine duck-typed backend, not a mocked UI state.** `DemoTelegramClient` implements the same surface a real Telethon client does (entity resolution, message/album sending) with realistic random outcomes and zero network access — the real, unmodified `CampaignManager` runs an actual campaign against it, so Demo Mode exercises the same send/retry/results pipeline production traffic does, not a separate hand-faked code path.
 
+15. **Groups and channels without guessing.** A `-100…` ID carries no access_hash, so the account's own dialogs are fetched once — lazily, before the first chat ID, with FloodWait there pausing the campaign like any send. Invite links are only *checked*, never joined. Each chat is preflighted against the rights Telegram itself reports (admin `post_messages`, personal and default `ChatBannedRights` including the granular media flags and expiry, slow mode vs. multi-part messages), so most refusals are clear up front, and whatever Telegram still raises maps to a readable reason — with slow mode deliberately failing just that one target, unlike FloodWait.
+
 Ordinary parts — not oversold: the settings page is a straightforward form bound to a dataclass, SQLite access is plain parameterized `sqlite3`, and the CSV export itself is a standard `csv.writer`. None of that is architecturally novel; the value is in the items above.
 
 ## Testing
@@ -119,11 +122,12 @@ Ordinary parts — not oversold: the settings page is a straightforward form bou
 pytest tests/ -v
 ```
 
-**747 automated tests, 0 failures** (pytest + pytest-asyncio), run against a hand-built mock Telegram client (`tests/mocks/mock_telegram_client.py`) — no real Telegram account or network access needed. Coverage includes:
+**883 automated tests, 0 failures** (pytest + pytest-asyncio), run against a hand-built mock Telegram client (`tests/mocks/mock_telegram_client.py`) — no real Telegram account or network access needed. Coverage includes:
 
 - Recipient parsing and import (all supported formats including phone numbers and malformed input, TXT import, and content-based CSV column/name detection).
 - Rich-text formatting and UTF-16 entity offset correctness, including the `{name}` placeholder (typed, CSV-supplied, and at message lengths well past Telegram's own text limit).
 - Campaign lifecycle: start/pause/stop, FloodWait handling, retry/resume, the duplicate-start race fix, failed-recipient retry, and reconnection after a simulated network drop.
+- Groups/channels as targets: every chat format and its malformed variants, mixed people+chat lists, chat-ID resolving after a one-time dialogs warm-up (including FloodWait there), the permission preflight (channel without admin rights, group with writing disabled, media forbidden with attachments, slow mode with multi-part messages), slow mode failing one target without pausing, FloodWait in a chat pausing exactly as before, invite links never joined, `{name}` = chat title vs. a CSV name, Retry over a mixed list, chat types in the CSV report, and Demo Mode's simulated chats.
 - Account persistence and switching (including the mid-campaign switch guard).
 - Presets and recipient groups: save/load/rename/delete round-trips, including corrupted-data handling.
 - Reporting: CSV generation, the formula-injection guard, saved-report persistence, failure-category grouping, export-failures-only.
@@ -145,7 +149,7 @@ This is distinct from **manual packaged-build validation**: before each release,
 
 This project's requirements, architecture, and scope were defined and directed by the developer (BagroDeRose). Implementation was done with extensive AI assistance — primarily **Claude Code** — used for writing code, debugging, writing tests, code review, and documentation, always under human direction and verification rather than as unsupervised generation:
 
-- Every change is covered by the automated test suite (747 tests, pytest/pytest-asyncio, mocked Telegram client).
+- Every change is covered by the automated test suite (883 tests, pytest/pytest-asyncio, mocked Telegram client).
 - Bug fixes follow a reproduce → understand root cause → write a failing test → fix → regression test cycle, not guesswork.
 - A dedicated code review and security/privacy audit was performed before each public release (secret storage, log contents, session handling, git history sanitization).
 - The packaged Windows `.exe` is manually launched and validated before release — a successful build is not treated as sufficient on its own.
@@ -161,8 +165,9 @@ Latest release: **[v2.0.1](https://github.com/BagroDeRose/TelegramMassSender/rel
 - Does not bypass or attempt to bypass Telegram's anti-spam/flood limits — it is not a policy-bypass tool.
 - Telegram itself determines what sending activity is allowed for a given account; this cannot be controlled or guaranteed by the app.
 - Recipient resolution by phone/username/ID can fail due to the recipient's own Telegram privacy settings, not an app defect.
+- Groups and channels: only chats the account is already a member of and has the right to post in. The app never joins a chat (invite links are only checked), never changes accounts on an error, and never works around slow mode, member restrictions or FloodWait. Posting into a specific forum topic is not supported yet (messages go to "General").
 - Delivery and read receipts are not guaranteed — the app only sends via the official API.
-- Recipient lists must be people you have a legitimate personal reason to message — not cold/purchased contact lists, and never groups or channels.
+- Recipient lists must be people you have a legitimate personal reason to message, and chats you legitimately take part in — not cold/purchased contact lists, and not other people's chats you have no business posting to.
 
 ---
 
@@ -214,6 +219,7 @@ Latest release: **[v2.0.1](https://github.com/BagroDeRose/TelegramMassSender/rel
 ### Возможности
 
 - Личные сообщения из вашего собственного Telegram-аккаунта, по одному, только тем получателям, которых вы указали сами.
+- Отправка в группы, супергруппы (в том числе форумы — в тему «General») и каналы, в которых ваш аккаунт **уже состоит и имеет право писать**: по `@username`, ID чата (`-100…`/`-…`), ссылке `t.me/c/…` или ссылке-приглашению `t.me/+…` (она только проверяется — программа никогда не вступает в чаты сама). Люди и чаты могут быть в одном списке; кнопка **«Из моих чатов…»** показывает группы и каналы активного аккаунта, куда он может писать. Перед отправкой права в каждом чате проверяются заранее.
 - Получатели в любом сочетании форматов: `@username`, числовой Telegram ID, ссылка `t.me/username`, номер телефона в международном формате — вручную, из TXT-файла или из CSV-файла (колонки определяются автоматически, включая необязательную колонку с именем для `{name}`).
 - Автоматическая подстановка имени получателя в текст сообщения — плейсхолдер `{name}`; имя из CSV-файла имеет приоритет над именем из самого Telegram для этого получателя.
 - Форматирование текста (жирный, курсив, подчёркнутый, зачёркнутый, спойлер, моноширинный текст, блок кода, ссылки, emoji) в отдельном редакторе сообщений, с живым предпросмотром сообщения в стиле Telegram прямо на странице «Кампания», включая предпросмотр с примером имени для `{name}`.
@@ -221,7 +227,7 @@ Latest release: **[v2.0.1](https://github.com/BagroDeRose/TelegramMassSender/rel
 - Необязательный пошаговый «Мастер кампании» (Получатели → Сообщение → Вложения → Параметры отправки → Предпросмотр → Подтверждение) как альтернатива обычной работе на одной странице — быстрый способ остаётся без изменений.
 - Фото, видео и документы вложением, с автоматической группировкой фото/видео в альбомы, миниатюрами изображений и изменением порядка вложений — перетаскиванием либо кнопками «Раньше»/«Позже» (а также Ctrl+←/Ctrl+→).
 - Несколько подключённых Telegram-аккаунтов с быстрым переключением между ними.
-- Настраиваемый случайный интервал между отправками, корректная и безопасная обработка временных ограничений Telegram (FloodWait) без попыток их обойти, приблизительная оценка длительности рассылки до старта и живой счётчик прошедшего/оставшегося времени во время неё.
+- Настраиваемый случайный интервал между отправками, корректная и безопасная обработка временных ограничений Telegram (FloodWait) без попыток их обойти, приблизительная оценка длительности рассылки до старта и живой счётчик прошедшего/оставшегося времени во время неё. Чат в медленном режиме (slow mode) помечается ошибкой «медленный режим, подождите N сек.», и рассылка идёт дальше — медленный режим не обходится и не «пережидается».
 - Повторная отправка неудачным получателям (выбранным или всем сразу) после завершения рассылки — без повторной отправки тем, кому сообщение уже доставлено.
 - Живая статистика рассылки, разбивка по причинам ошибок, фильтруемый список получателей по статусу, журнал событий в реальном времени, экспорт и сохранение отчётов в CSV (включая экспорт только неудачных отправок).
 - Раздел «Диагностика» (версии приложения/Python/Telethon, состояние базы данных, статус подключения к Telegram) и экспорт диагностического пакета в один клик — для обращения в поддержку.
@@ -412,9 +418,15 @@ https://my.telegram.org/apps
 https://t.me/username
 t.me/username
 +4917612345678
+-1001234567890
+-123456789
+https://t.me/c/1234567890
+https://t.me/c/1234567890/42
+https://t.me/+AbCdEfGh123
+https://t.me/joinchat/AbCdEfGh123
 ```
 
-Пример списка получателей:
+Пример смешанного списка (люди и чаты вместе):
 
 ```
 @user1
@@ -422,12 +434,28 @@ t.me/username
 123456789
 https://t.me/user3
 +4917612345678
+@my_channel
+-1001234567890
 ```
 
 - **`@username`** — Telegram username получателя.
 - **Числовой ID** — просто цифры, Telegram ID пользователя.
 - **Ссылка на профиль** — `https://t.me/username`, `http://t.me/username` или `t.me/username`.
 - **Номер телефона** — строго в международном формате E.164: начинается со знака `+`, затем код страны и номер (всего 8–15 цифр, первая — не ноль), например `+4917612345678`. Номер **без** `+` (местный формат) программа не принимает — она не пытается угадать код страны, чтобы случайно не написать не тому человеку.
+
+**Группы, супергруппы и каналы** — только те, в которых ваш аккаунт **уже состоит и имеет право писать**:
+
+- **`@username` / `t.me/username`** публичной группы или канала — тип (человек или чат) программа определяет сама, когда находит получателя.
+- **ID чата** — отрицательное число: `-100XXXXXXXXXX` для канала или супергруппы, `-XXXXXXXXX` для обычной группы. Положительное число по-прежнему означает ID **пользователя**.
+- **Ссылка `t.me/c/<id>`** или ссылка на сообщение `t.me/c/<id>/<номер>` — это канал/супергруппа с ID `-100<id>` (номер сообщения не важен, сообщение уходит в сам чат).
+- **Ссылка-приглашение** `t.me/+…` или `t.me/joinchat/…` — программа только **проверяет** её: если аккаунт уже состоит в этом чате, сообщение уйдёт туда; если нет — строка будет помечена ошибкой «аккаунт не состоит в этом чате». **В чаты программа никогда не вступает сама.**
+- Кнопка **«Из моих чатов…»** (рядом с «Импорт TXT» / «Импорт CSV») открывает список групп и каналов активного аккаунта, куда он сейчас может писать, — с фильтром по типу, поиском по названию и флажками. Выбранные чаты добавляются в поле как `@username` (если он есть) или как ID `-100…`. Кнопка доступна только при подключённом аккаунте и неактивна во время рассылки.
+
+Перед отправкой в каждый чат программа проверяет права: в **канал** можно писать только владельцу или администратору с правом публикации; в **группе/супергруппе** аккаунт не должен быть заблокирован или ограничен, а отправка сообщений не должна быть запрещена участникам; если к сообщению приложены файлы — должна быть разрешена отправка медиа (и файлов нужного типа). В **форум** сообщение отправляется в тему «General»; отправка в конкретные темы пока не поддерживается. Если в чате включён **медленный режим**, а сообщение состоит из нескольких частей (текст и вложения отдельными сообщениями, альбом), отправить его туда нельзя — это тоже видно заранее.
+
+Если в списке есть числовые ID чатов, перед первым таким чатом программа один раз загружает список ваших диалогов (без этого Telegram не даёт найти чат по ID). Если Telegram в этот момент попросит подождать (FloodWait), рассылка встанет на паузу так же, как при отправке.
+
+Если подтверждение перед стартом включено (Настройки), окно подтверждения показывает отдельно число пользователей и число групп/каналов; `@username` и ссылки `t.me/username` посчитаны отдельно, потому что человек это или чат, становится известно только при отправке.
 
 Программа автоматически:
 - убирает пустые строки;
@@ -436,7 +464,7 @@ https://t.me/user3
 
 Под полем ввода в реальном времени видно: сколько получателей распознано как валидные, сколько с ошибками формата и сколько дубликатов было убрано.
 
-> **Важно:** программа предназначена **только для личной переписки** — по одному сообщению каждому получателю лично. Она не должна использоваться для отправки сообщений в группы, каналы или чужие беседы, и списки для рассылки должны состоять из ваших личных контактов, готовых получить от вас сообщение.
+> **Важно:** программа отправляет по одному сообщению каждому получателю лично. Писать можно людям из ваших личных контактов, готовым получить от вас сообщение, а также в группы и каналы, где ваш аккаунт уже состоит и имеет право писать. Программа не вступает в чаты, не обходит ограничения Telegram и не должна использоваться для рассылок по чужим беседам.
 
 #### Если получатель не находится
 
@@ -444,6 +472,7 @@ https://t.me/user3
 
 - **Username не находится** — вероятно, опечатка, пользователь сменил username, либо аккаунта с таким именем не существует.
 - **Числовой ID не срабатывает** — чтобы найти пользователя по одному только числовому ID, серверу Telegram иногда нужно, чтобы этот пользователь уже был так или иначе «виден» вашему аккаунту (например, есть в контактах или в общем чате). Попробуйте вместо ID указать `@username` или ссылку на профиль.
+- **Чат не находится или в него нельзя написать** — причина будет указана в результатах: «аккаунт не состоит в этом чате», «нужны права администратора с правом публикации» (канал), «в этом чате участникам запрещено писать», «аккаунту запрещено писать в этом чате», «в этом чате запрещено отправлять медиа или файлы такого типа», «медленный режим, подождите N сек.», «чат или канал приватный, либо аккаунт был из него удалён», «ссылка-приглашение недействительна или истекла» и т.п. Это ограничения самого Telegram и настроек чата; программа их не обходит и не меняет аккаунт. Если чат по ID не находится, а аккаунт в нём точно состоит — укажите `@username` чата или выберите его через «Из моих чатов…».
 - **Номер телефона не резолвится** — программа ищет пользователя по номеру напрямую, не добавляя его в контакты. Если Telegram не смог найти пользователя по номеру, программа покажет: *«Telegram не смог разрешить этот номер телефона. Пользователь может быть недоступен по номеру из-за настроек приватности Telegram.»* — это значит, что сам получатель в настройках приватности Telegram скрыл возможность находить себя по номеру телефона; программа не может и не пытается обойти это ограничение.
 
 #### Импорт получателей из TXT-файла
@@ -550,11 +579,11 @@ https://t.me/user3
 
 ### Автоматическая подстановка имени ({name})
 
-Текст сообщения может содержать плейсхолдер **`{name}`** — прямо в поле ввода, в любом месте текста, в том числе внутри форматированного (жирного, курсивного и т.д.) фрагмента. Подсказка об этом видна прямо в карточке «Сообщение»: *«{name} — имя получателя в Telegram, подставляется при отправке»*.
+Текст сообщения может содержать плейсхолдер **`{name}`** — прямо в поле ввода, в любом месте текста, в том числе внутри форматированного (жирного, курсивного и т.д.) фрагмента. Подсказка об этом видна прямо в карточке «Сообщение»: *«{name} — имя получателя в Telegram (для группы или канала — его название), подставляется при отправке»*.
 
 Как это работает:
 
-- Перед отправкой каждому конкретному получателю программа подставляет вместо `{name}` его имя (first name) из Telegram — то, которое реально видно вашему аккаунту после того, как получатель найден.
+- Перед отправкой каждому конкретному получателю программа подставляет вместо `{name}` его имя (first name) из Telegram — то, которое реально видно вашему аккаунту после того, как получатель найден. Для группы, супергруппы или канала подставляется **название чата**.
 - Подстановка происходит для каждого получателя отдельно, непосредственно перед отправкой ему сообщения — один и тот же исходный текст с `{name}` используется для всех, но каждый получает версию со своим именем.
 - Форматирование вокруг `{name}` (жирный, ссылка и т.п.) остаётся корректным независимо от того, короче или длиннее оказалось реальное имя, чем сам плейсхолдер.
 - Если у получателя не удалось определить имя (редкий случай), `{name}` заменяется на пустую строку — сообщение не потеряется, но может выглядеть чуть иначе (например, «Здравствуйте, !» вместо «Здравствуйте, Иван!»). Учитывайте это при формулировке текста — например, добавляйте `{name}` не в самое начало фразы, а так, чтобы предложение оставалось осмысленным и без него.
@@ -647,7 +676,9 @@ https://t.me/user3
 - **«Повторить выбранные»** — запускает новую, отдельную рассылку только по отмеченным флажком получателям.
 - **«Повторить все ошибки»** — то же самое, но сразу по всем получателям со статусом «ошибка», независимо от выбранного сейчас фильтра.
 
-Повторная отправка использует ровно тот же текст сообщения, форматирование, вложения и аккаунт, что и в исходной рассылке — те, что были на момент её запуска, а не то, что сейчас случайно находится в полях на странице «Кампания». Интервал отправки при этом берётся заново из текущих настроек. Получателям, которым сообщение уже было успешно доставлено, при повторной отправке сообщение заново не отправляется — они просто не участвуют в повторной рассылке.
+Повторная отправка использует ровно тот же текст сообщения, форматирование, вложения и аккаунт, что и в исходной рассылке — те, что были на момент её запуска, а не то, что сейчас случайно находится в полях на странице «Кампания». Интервал отправки при этом берётся заново из текущих настроек. Получателям, которым сообщение уже было успешно доставлено, при повторной отправке сообщение заново не отправляется — они просто не участвуют в повторной рассылке. То же для чатов: если один и тот же чат указан дважды (например, `@username` и `-100…`) и в него уже доставлено, повтор его пропустит; а если сообщение из нескольких частей ушло лишь частично, повтор продолжит с первой недоставленной части.
+
+Для групп и каналов в списке рядом с получателем указан тип чата — «(канал)», «(супергруппа)», «(группа)», «(форум)».
 
 #### Сохранённые отчёты
 
@@ -666,7 +697,7 @@ https://t.me/user3
 
 #### Формат CSV
 
-Файл сохраняется в кодировке UTF-8 с BOM (корректно открывается в Excel без «кракозябр»), разделитель столбцов — `;`. Столбцы: **Получатель**, **Тип** (username / Telegram ID / телефон), **Resolved ID** и **Resolved username** (реальные Telegram ID и username получателя — заполняются, если программа смогла его найти), **Статус**, **Ошибка** (если была), **Попыток**, **Шагов доставлено**, **Время**.
+Файл сохраняется в кодировке UTF-8 с BOM (корректно открывается в Excel без «кракозябр»), разделитель столбцов — `;`. Столбцы: **Получатель**, **Тип** (username / Telegram ID / телефон для людей; группа / супергруппа / канал для чатов; ID чата / ссылка-приглашение, если чат не удалось найти), **Resolved ID** и **Resolved username** (реальные Telegram ID и username получателя — заполняются, если программа смогла его найти; для чата ID записывается в виде `-100…`), **Статус**, **Ошибка** (если была), **Попыток**, **Шагов доставлено**, **Время**.
 
 ---
 
@@ -763,9 +794,10 @@ https://t.me/user3
 - Программа **не обходит и не пытается обходить** антиспам- и flood-ограничения Telegram и не является инструментом для обхода политики Telegram — она не должна использоваться для этого.
 - Допустимую активность аккаунта (сколько сообщений и как часто можно отправлять без ограничений) в любой момент определяет **сам Telegram** — это может зависеть от возраста аккаунта, его репутации, региона и множества других факторов, которые программа не контролирует и не может предсказать или гарантировать.
 - Поиск получателя по номеру телефона, username или ID может не сработать не из-за ошибки программы, а из-за настроек приватности самого получателя в Telegram — см. раздел [«Если получатель не находится»](#если-получатель-не-находится) выше.
+- В группы и каналы можно писать **только туда, где аккаунт уже состоит и имеет право писать**. Программа **не вступает в чаты автоматически** (ссылки-приглашения только проверяются), не обходит медленный режим, запреты администраторов чата и FloodWait и не переключает аккаунт при ошибке. Отправка в конкретную тему форума пока не поддерживается — сообщение уходит в тему «General».
 - Подстановка `{name}` зависит от того, есть ли у получателя видимое вашему аккаунту имя в Telegram — если его нет, подставляется пустая строка.
 - Программа **не гарантирует доставку или прочтение** сообщения — она лишь отправляет его через официальный Telegram API; всё, что происходит дальше, целиком зависит от Telegram и от самого получателя.
-- Списки получателей должны состоять только из людей, которым вы лично имеете право написать. Программа не предназначена для рассылок по холодным базам, купленным номерам/контактам, а также в группы или каналы.
+- Списки получателей должны состоять только из людей, которым вы лично имеете право написать, и из чатов, в которых вы законно участвуете. Программа не предназначена для рассылок по холодным базам, купленным номерам/контактам и по чужим чатам.
 
 ---
 
@@ -811,7 +843,7 @@ build_windows.bat
 .venv\Scripts\python -m pytest tests/ -v
 ```
 
-На момент подготовки этой версии README полный набор тестов проходит целиком: **747 тестов, 0 ошибок** (pytest + pytest-asyncio). Тесты используют собственный мок Telegram-клиента (`tests/mocks/mock_telegram_client.py`) вместо настоящего сервера Telegram, поэтому для их запуска не нужен ни интернет, ни реальный Telegram-аккаунт. Тесты также запускаются автоматически в GitHub Actions при каждом push/PR — см. значок «Tests» в начале README.
+На момент подготовки этой версии README полный набор тестов проходит целиком: **883 тестов, 0 ошибок** (pytest + pytest-asyncio). Тесты используют собственный мок Telegram-клиента (`tests/mocks/mock_telegram_client.py`) вместо настоящего сервера Telegram, поэтому для их запуска не нужен ни интернет, ни реальный Telegram-аккаунт. Тесты также запускаются автоматически в GitHub Actions при каждом push/PR — см. значок «Tests» в начале README.
 
 #### Технологический стек
 
@@ -823,7 +855,7 @@ Windows-приложение на **Python + PySide6** (Qt для интерфе
 - `app/version.py` — номер версии приложения, показанный в «Диагностике».
 - `app/diagnostics.py`, `app/diagnostic_bundle.py` — сбор диагностической информации и экспорт диагностического ZIP-пакета.
 - `app/ui/` — окна и виджеты PySide6: боковое меню и страницы «Кампания» / «Аккаунты» / «Результаты» / «Настройки», редактор сообщения и предпросмотр сообщения, журнал, мастер кампании (`campaign_wizard.py`), диалоги.
-- `app/telegram/` — клиент Telethon (MTProto) и управление подключением/переподключением, отправка сообщений и медиа, резолвинг получателей, подстановка `{name}`.
+- `app/telegram/` — клиент Telethon (MTProto) и управление подключением/переподключением, отправка сообщений и медиа, резолвинг получателей, группы и каналы как получатели (`chat_targets.py`: тип чата, проверка прав, причины ошибок), подстановка `{name}`.
 - `app/campaign/` — очередь отправки, ограничитель частоты (rate limiter), состояние и логика кампании, шаблоны сообщений (`presets.py`), CSV-отчёты и библиотека сохранённых отчётов.
 - `app/recipients/` — разбор, импорт (TXT и CSV) и группы получателей.
 - `app/security/` — хранение секретов на основе Windows DPAPI.
@@ -835,7 +867,7 @@ Windows-приложение на **Python + PySide6** (Qt для интерфе
 
 #### Как разрабатывался этот проект
 
-Требования, архитектуру и объём функциональности этого проекта определял автор репозитория. AI-инструменты (Claude Code) активно использовались в реализации, отладке, написании тестов, ревью кода и подготовке документации — но под его руководством и с его проверкой на каждом шаге, а не как автономная генерация без контроля. Это не означает, что код не проверялся: каждое изменение сопровождается автоматическими тестами (сейчас это упомянутые выше 747 тестов на pytest/pytest-asyncio с мок-клиентом Telegram), а исправление ошибок в проекте ведётся по принципу «сначала воспроизвести проблему → понять причину → написать тест → исправить → прогнать регрессионные тесты», а не «на глаз». Перед публикацией репозитория отдельно проведены обзор кода и проверка безопасности/приватности (хранение секретов, содержимое логов, работа с сессиями), а собранный Windows-EXE запускался и проверялся вручную, а не считался готовым сразу по факту успешной сборки.
+Требования, архитектуру и объём функциональности этого проекта определял автор репозитория. AI-инструменты (Claude Code) активно использовались в реализации, отладке, написании тестов, ревью кода и подготовке документации — но под его руководством и с его проверкой на каждом шаге, а не как автономная генерация без контроля. Это не означает, что код не проверялся: каждое изменение сопровождается автоматическими тестами (сейчас это упомянутые выше 883 тестов на pytest/pytest-asyncio с мок-клиентом Telegram), а исправление ошибок в проекте ведётся по принципу «сначала воспроизвести проблему → понять причину → написать тест → исправить → прогнать регрессионные тесты», а не «на глаз». Перед публикацией репозитория отдельно проведены обзор кода и проверка безопасности/приватности (хранение секретов, содержимое логов, работа с сессиями), а собранный Windows-EXE запускался и проверялся вручную, а не считался готовым сразу по факту успешной сборки.
 
 #### Где на диске хранятся данные пользователя
 
