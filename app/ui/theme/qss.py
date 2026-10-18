@@ -534,6 +534,24 @@ QSpinBox[focusRing="true"], QComboBox[focusRing="true"], QListWidget[focusRing="
     border: ${focus_ring}px solid $focus_ring;
 }
 
+/* A QLineEdit's action icons (addAction: search, clear button) are
+   QToolButtons inside the field. Without this they inherit the regular
+   button rule above -- min-height, padding, border, background -- and
+   sit taller than the field itself, pushed down and over its frame. Qt
+   positions and sizes them; the QSS only has to stay out of the way. */
+QLineEdit QToolButton,
+QLineEdit QToolButton:hover,
+QLineEdit QToolButton:pressed,
+QLineEdit QToolButton:disabled,
+QLineEdit QToolButton[focusRing="true"] {
+    background: transparent;
+    border: none;
+    padding: 0px;
+    margin: 0px;
+    min-height: 0px;
+    min-width: 0px;
+}
+
 QLineEdit:disabled, QPlainTextEdit:disabled, QSpinBox:disabled, QComboBox:disabled {
     color: $disabled_text;
     background-color: $disabled_bg;
