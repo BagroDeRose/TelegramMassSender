@@ -161,7 +161,7 @@ Screens: `docs/redesign/after/dialog_chat_picker_*` (list, `_filters` with a fol
 
 ### Verification
 
-- `pytest tests/` in one process: 1009 passed (913 before this branch); 1162 after the follow-up below.
+- `pytest tests/` in one process: 1009 passed (913 before this branch); 1162 after the follow-up below, 1168 with the line-edit icon tests.
 - `scripts/check_ui_hygiene.py`: 0 findings.
 - Screenshots captured on the real Windows platform through the real qasync loop, including the wizard run via `exec()` from a Qt slot with the picker loading inside it.
 
