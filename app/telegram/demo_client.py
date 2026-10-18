@@ -26,12 +26,21 @@ one message per DEMO_SLOWMODE_SECONDS (the demo account "posted there
 just now" when the session starts, so the first campaign meets slow mode
 and a later Retry succeeds). Only one invite link is "already joined";
 any other is a chat the account isn't in -- nothing ever joins anything.
+
+Its dialog list (what "From my chats…" shows) also has people -- with
+and without a @username, contacts and not --, bots, archived dialogs,
+three folders, and the dialogs the picker must leave out (Saved
+Messages, a deleted account, Telegram's service notifications), each
+with a last-message date. People in the dialogs resolve to themselves
+(by @username or by ID), so a demo campaign to picked people and chats
+reads naturally.
 """
 from __future__ import annotations
 
 import random
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 from unittest.mock import MagicMock
 
@@ -51,7 +60,11 @@ from telethon.tl.types import (
     ChatBannedRights,
     ChatInvite,
     ChatInviteAlready,
+    DialogFilter,
     InputMediaPhoto,
+    InputPeerChannel,
+    InputPeerChat,
+    InputPeerUser,
     Photo,
     User,
 )
@@ -129,14 +142,72 @@ def make_demo_chats() -> List[Any]:
             default_banned_rights=ChatBannedRights(until_date=None, send_media=True),
         ),
         _demo_channel(1900000008, "Demo Slow Chat", "demo_slow_chat", slowmode_enabled=True),
+        _demo_channel(1900000009, "Demo Old Project", None),  # archived, no @username
+    ]
+
+
+def _demo_user(user_id: int, first_name: str, last_name: Optional[str] = None, **flags: Any) -> User:
+    return User(id=user_id, first_name=first_name, last_name=last_name, access_hash=user_id * 31 + 7, **flags)
+
+
+def make_demo_people() -> List[User]:
+    """The demo account's private dialogs: people and bots, plus the three
+    dialogs the picker leaves out on purpose."""
+    return [
+        _demo_user(700000001, "Anna", "Smirnova", username="demo_friend", contact=True),
+        _demo_user(700000002, "Ivan", "Petrov", contact=True),  # no @username: picked by ID
+        _demo_user(700000003, "Maria", "Orlova", username="maria_demo"),
+        _demo_user(700000004, "Pavel", "Kuznetsov", contact=True),
+        _demo_user(700000005, "Olga", "Sokolova", username="olga_demo", contact=True),
+        _demo_user(700000010, "Weather", "Bot", username="demo_weather_bot", bot=True),
+        _demo_user(700000011, "Shop", "Bot", username="demo_shop_bot", bot=True),
+        _demo_user(700000000, "Demo", is_self=True),  # Saved Messages
+        _demo_user(700000099, "", deleted=True),
+        _demo_user(777000, "Telegram", verified=True, support=True),
+    ]
+
+
+# Archived demo dialogs, by peer id.
+_DEMO_ARCHIVED = {700000004, 700000011, -1001900000009}
+
+
+def make_demo_folders() -> List[DialogFilter]:
+    """Folders as Telegram returns them: explicit peers and type flags."""
+    return [
+        DialogFilter(
+            id=2,
+            title="Work",
+            pinned_peers=[InputPeerChannel(channel_id=1900000002, access_hash=1900000002 * 31 + 7)],
+            include_peers=[
+                InputPeerChannel(channel_id=1900000004, access_hash=1900000004 * 31 + 7),
+                InputPeerChannel(channel_id=1900000005, access_hash=1900000005 * 31 + 7),
+                InputPeerUser(user_id=700000002, access_hash=700000002 * 31 + 7),
+                InputPeerUser(user_id=700000003, access_hash=700000003 * 31 + 7),
+            ],
+            exclude_peers=[],
+        ),
+        DialogFilter(
+            id=3,
+            title="Family",
+            pinned_peers=[],
+            include_peers=[InputPeerChat(chat_id=900000003)],
+            exclude_peers=[],
+            contacts=True,
+        ),
+        DialogFilter(id=4, title="Bots", pinned_peers=[], include_peers=[], exclude_peers=[], bots=True),
     ]
 
 
 class _DemoDialog:
-    def __init__(self, entity: Any) -> None:
+    def __init__(self, entity: Any, date: Optional[datetime] = None) -> None:
         self.entity = entity
-        self.id = telethon_utils.get_peer_id(entity) if isinstance(entity, (Chat, Channel)) else entity.id
+        self.id = telethon_utils.get_peer_id(entity)
         self.name = getattr(entity, "title", None) or getattr(entity, "first_name", None) or ""
+        self.archived = self.id in _DEMO_ARCHIVED
+        self.folder_id = 1 if self.archived else None
+        self.date = date
+        self.unread_count = 0
+        self.dialog = None
 
 
 def _is_demo_chat(entity: Any) -> bool:
@@ -161,6 +232,7 @@ class DemoTelegramClient:
     connected: bool = False
     sent_messages: List[Tuple] = field(default_factory=list)
     chats: List[Any] = field(default_factory=make_demo_chats)
+    people: List[User] = field(default_factory=make_demo_people)
     # Marked chat id -> time.monotonic() of the last post there; the slow
     # chat starts "just posted to" (see the module docstring).
     last_chat_post: Dict[int, float] = field(default_factory=dict)
@@ -204,10 +276,21 @@ class DemoTelegramClient:
     async def is_user_authorized(self) -> bool:
         return True
 
+    def _person_by_identifier(self, identifier: Any) -> Optional[User]:
+        for person in self.people:
+            if isinstance(identifier, str) and person.username == identifier:
+                return person
+            if isinstance(identifier, int) and person.id == identifier:
+                return person
+        return None
+
     async def get_entity(self, identifier: Any) -> Any:
         chat = self._chat_by_identifier(identifier)
         if chat is not None:
             return chat
+        person = self._person_by_identifier(identifier)
+        if person is not None:
+            return person
         if isinstance(identifier, int) and identifier < 0:
             raise ValueError(f"Could not find the input entity for {identifier}")
         if random.random() < FAILURE_RATE:
@@ -215,9 +298,17 @@ class DemoTelegramClient:
         return make_demo_user(identifier)
 
     async def iter_dialogs(self, *args: Any, **kwargs: Any):
-        yield _DemoDialog(User(id=700000001, first_name="Anna", username="demo_friend", access_hash=700000001 * 31 + 7))
-        for chat in self.chats:
-            yield _DemoDialog(chat)
+        """People and chats interleaved, most recent first, as Telegram
+        lists them -- dates spread over the past months."""
+        entities: List[Any] = []
+        for index in range(max(len(self.people), len(self.chats))):
+            if index < len(self.chats):
+                entities.append(self.chats[index])
+            if index < len(self.people):
+                entities.append(self.people[index])
+        now = datetime.now(timezone.utc)
+        for index, entity in enumerate(entities):
+            yield _DemoDialog(entity, now - timedelta(hours=index * index * 7 + index))
 
     async def get_dialogs(self, *args: Any, **kwargs: Any) -> List[Any]:
         return [dialog async for dialog in self.iter_dialogs()]
@@ -250,7 +341,7 @@ class DemoTelegramClient:
 
     async def __call__(self, request: Any) -> Any:
         if isinstance(request, GetDialogFiltersRequest):
-            return DialogFilters(filters=[])
+            return DialogFilters(filters=make_demo_folders())
         if isinstance(request, CheckChatInviteRequest):
             if request.hash == DEMO_INVITE_HASH:
                 return ChatInviteAlready(chat=self._chat_by_identifier("demo_team_chat"))

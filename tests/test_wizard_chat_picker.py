@@ -64,7 +64,7 @@ async def test_wizard_picker_fills_the_wizard_through_the_same_path(qapp, tmp_pa
     # Already in the wizard's box: marked, not offered again.
     assert model.is_already_added(titles.index("Demo News"))
     for row, title in enumerate(titles):
-        if title in ("Anna", "Demo Family"):
+        if title in ("Anna Smirnova", "Demo Family"):
             model.setData(model.index(row), Qt.CheckState.Checked, Qt.ItemDataRole.CheckStateRole)
     picker._add_button.click()
     await _wait_until(lambda: window._chat_picker is None)
