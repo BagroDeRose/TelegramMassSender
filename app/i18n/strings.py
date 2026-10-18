@@ -876,6 +876,7 @@ STRINGS: Dict[str, Dict[str, str]] = {
     "chat_targets.type.supergroup": {"ru": "супергруппа", "en": "supergroup"},
     "chat_targets.type.forum": {"ru": "форум", "en": "forum"},
     "chat_targets.type.channel": {"ru": "канал", "en": "channel"},
+    "chat_targets.type.bot": {"ru": "бот", "en": "bot"},
     "chat_targets.reason.not_member": {
         "ru": "аккаунт не состоит в этом чате",
         "en": "the account is not a member of this chat",
