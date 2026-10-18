@@ -260,6 +260,10 @@ class MockTelegramClient:
     # What GetDialogFiltersRequest returns: a list of DialogFilter /
     # DialogFilterChatlist / DialogFilterDefault, or an exception to raise.
     dialog_filters: Any = field(default_factory=list)
+    # Positive user ids the session has no access_hash for: get_entity
+    # raises ValueError for them until the dialogs were fetched (like a
+    # user picked by ID whose entity this session never stored).
+    uncached_user_ids: set = field(default_factory=set)
 
     async def connect(self) -> None:
         self.connected = True
@@ -281,6 +285,14 @@ class MockTelegramClient:
                 # the dialogs (or a message from that chat) were seen.
                 raise ValueError(f"Could not find the input entity for {identifier}")
             return self.chats[identifier]
+        if isinstance(identifier, int) and identifier in self.uncached_user_ids:
+            if not self.dialogs_cached:
+                raise ValueError(f"Could not find the input entity for PeerUser(user_id={identifier})")
+            for item in self.dialogs:
+                entity = item.entity if isinstance(item, FakeDialog) else item
+                if isinstance(entity, User) and entity.id == identifier:
+                    return entity
+            raise ValueError(f"Could not find the input entity for PeerUser(user_id={identifier})")
         if isinstance(identifier, int) and identifier < 0 and identifier not in self.entity_behavior:
             raise ValueError(f"Could not find the input entity for {identifier}")
         behavior = self.entity_behavior.get(identifier, "found")
@@ -315,6 +327,9 @@ class MockTelegramClient:
             if isinstance(outcome, list):
                 outcome = outcome.pop(0) if outcome else None
             return outcome
+        if isinstance(entity, User) and not isinstance(entity, MagicMock):
+            # Real Telethon users (make_user) are unhashable: keyed by id.
+            return self.send_behavior.get(entity.id)
         return self.send_behavior.get(entity)
 
     async def send_message(self, entity, text, formatting_entities=None):

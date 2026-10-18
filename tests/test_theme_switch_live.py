@@ -128,7 +128,7 @@ async def test_dark_light_dark_with_open_dialogs_leaves_no_stale_colors(qapp, tm
             assert QColor(theme.tokens_for(previous).placeholder).name() not in window._message_preview.rendered_html()
 
 
-def test_stored_light_choice_from_an_older_version_opens_light(qapp, tmp_path: Path):
+async def test_stored_light_choice_from_an_older_version_opens_light(qapp, tmp_path: Path):
     # The redesign kept the settings key and values: a database that says
     # "light" (as written by the old version) opens the light theme as-is.
     from app.database.repositories import SettingsRepository
