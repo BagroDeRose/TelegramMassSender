@@ -260,6 +260,13 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "ru": "Показывать диалог подтверждения перед стартом каждой рассылки",
         "en": "Show a confirmation dialog before every campaign start",
     },
+    "main_window.settings.large_campaign_label": {"ru": "Большая рассылка", "en": "Large campaign"},
+    "main_window.settings.large_campaign_suffix": {"ru": " получателей", "en": " recipients"},
+    "main_window.settings.large_campaign_prefix": {"ru": "больше ", "en": "more than "},
+    "main_window.settings.large_campaign_hint": {
+        "ru": "Если получателей больше этого числа, перед запуском всегда показывается отдельное подтверждение — даже когда «Подтверждать запуск рассылки» выключено. Не меньше 10.",
+        "en": "With more recipients than this, a separate confirmation is always shown before starting — even with \"Confirm before starting a campaign\" off. At least 10.",
+    },
     "main_window.settings.remember_window_size_checkbox": {"ru": "Запоминать размер окна", "en": "Remember window size"},
     "main_window.settings.remember_last_page_checkbox": {"ru": "Открывать последний раздел при запуске", "en": "Open the last-used page on launch"},
     "main_window.settings.reports_directory_label": {"ru": "Папка для отчётов", "en": "Reports folder"},
@@ -526,8 +533,8 @@ STRINGS: Dict[str, Dict[str, str]] = {
     "recipient_widget.summary_chat_count": {"ru": "из них групп/каналов по ID или ссылке: {count}", "en": "groups/channels by ID or link: {count}"},
     "recipient_widget.pick_chats_button": {"ru": "Из моих чатов…", "en": "From my chats…"},
     "recipient_widget.pick_chats_tooltip": {
-        "ru": "Выбрать группы и каналы, в которых состоит активный аккаунт и может писать",
-        "en": "Pick groups and channels the active account is in and can post to",
+        "ru": "Выбрать получателей из диалогов активного аккаунта: люди, боты, группы и каналы",
+        "en": "Pick recipients from the active account's dialogs: people, bots, groups and channels",
     },
     "recipient_widget.review_invalid_button": {"ru": "Показать ошибки", "en": "Show errors"},
     "recipient_widget.review_invalid_title": {"ru": "Некорректные строки", "en": "Invalid rows"},
@@ -728,6 +735,19 @@ STRINGS: Dict[str, Dict[str, str]] = {
     "dialogs.close": {"ru": "Закрыть", "en": "Close"},
     "dialogs.exit": {"ru": "Выйти", "en": "Quit"},
     "dialogs.start_campaign.title": {"ru": "Начать рассылку?", "en": "Start the campaign?"},
+    "dialogs.large_campaign.title": {"ru": "Большая рассылка", "en": "Large campaign"},
+    "dialogs.large_campaign.start": {"ru": "Начать рассылку", "en": "Start campaign"},
+    "dialogs.large_campaign.message": {
+        "ru": "Сообщение уйдёт {count} получателям — это больше порога {threshold}. Проверьте список перед запуском.",
+        "en": "The message will go to {count} recipients — more than the threshold of {threshold}. Check the list before starting.",
+    },
+    "dialogs.large_campaign.people_line": {"ru": "Людей: {count}", "en": "People: {count}"},
+    "dialogs.large_campaign.bots_line": {"ru": "Ботов: {count}", "en": "Bots: {count}"},
+    "dialogs.large_campaign.chats_line": {"ru": "Групп и каналов: {count}", "en": "Groups and channels: {count}"},
+    "dialogs.large_campaign.unknown_line": {
+        "ru": "@username, тип которых станет известен при отправке: {count}",
+        "en": "@usernames whose type is known only when sending: {count}",
+    },
     "dialogs.start_campaign.start": {"ru": "Начать", "en": "Start"},
     "dialogs.start_campaign.users_line": {"ru": "Пользователи (ID, телефон): {count}", "en": "Users (ID, phone): {count}"},
     "dialogs.start_campaign.chats_line": {"ru": "Группы и каналы (ID, ссылка): {count}", "en": "Groups and channels (ID, link): {count}"},
@@ -739,30 +759,60 @@ STRINGS: Dict[str, Dict[str, str]] = {
     # ---- chat_picker_dialog --------------------------------------------------
     "chat_picker.title": {"ru": "Из моих чатов", "en": "From my chats"},
     "chat_picker.hint": {
-        "ru": "Группы и каналы активного аккаунта, в которые он сейчас может писать. Выбранные чаты будут добавлены в список получателей.",
-        "en": "Groups and channels of the active account it can currently post to. The chats you tick are added to the recipient list.",
+        "ru": "Все диалоги активного аккаунта: люди, боты, группы и каналы. Туда, куда писать нельзя, выбрать не получится — причина во всплывающей подсказке.",
+        "en": "Every dialog of the active account: people, bots, groups and channels. Ones it can't write to can't be ticked; the tooltip says why.",
     },
-    "chat_picker.search_placeholder": {"ru": "Поиск по названию…", "en": "Search by title…"},
-    "chat_picker.filter.all": {"ru": "Все типы", "en": "All types"},
-    "chat_picker.filter.channels": {"ru": "Каналы", "en": "Channels"},
-    "chat_picker.filter.supergroups": {"ru": "Супергруппы", "en": "Supergroups"},
-    "chat_picker.filter.forums": {"ru": "Форумы", "en": "Forums"},
+    "chat_picker.search_placeholder": {"ru": "Поиск по имени, названию или @username…", "en": "Search by name, title or @username…"},
+    "chat_picker.filter.all": {"ru": "Все", "en": "All"},
+    "chat_picker.filter.people": {"ru": "Люди", "en": "People"},
     "chat_picker.filter.groups": {"ru": "Группы", "en": "Groups"},
-    "chat_picker.select_visible": {"ru": "Выбрать показанные", "en": "Select shown"},
-    "chat_picker.select_none": {"ru": "Снять выбор", "en": "Select none"},
-    "chat_picker.nothing_matches": {"ru": "Ничего не найдено.", "en": "Nothing matches."},
-    "chat_picker.add_button": {"ru": "Добавить", "en": "Add"},
-    "chat_picker.empty": {
-        "ru": "У этого аккаунта нет групп или каналов, в которые он может писать.",
-        "en": "This account has no groups or channels it can post to.",
+    "chat_picker.filter.channels": {"ru": "Каналы", "en": "Channels"},
+    "chat_picker.filter.bots": {"ru": "Боты", "en": "Bots"},
+    "chat_picker.folder_all": {"ru": "Все папки", "en": "All folders"},
+    "chat_picker.folder_tooltip": {"ru": "Папка Telegram", "en": "Telegram folder"},
+    "chat_picker.show_archive": {"ru": "Показывать архив", "en": "Show archive"},
+    "chat_picker.refresh": {"ru": "Обновить", "en": "Refresh"},
+    "chat_picker.refresh_tooltip": {"ru": "Заново загрузить список диалогов", "en": "Load the dialog list again"},
+    "chat_picker.loading_title": {"ru": "Загружаем диалоги…", "en": "Loading dialogs…"},
+    "chat_picker.loading_body": {
+        "ru": "Если диалогов много, это может занять немного времени.",
+        "en": "With many dialogs this can take a moment.",
     },
-    "chat_picker.added_status": {"ru": "Добавлено чатов: {count}", "en": "Chats added: {count}"},
+    "chat_picker.error_title": {"ru": "Не удалось загрузить диалоги", "en": "Couldn't load the dialogs"},
+    "chat_picker.select_visible": {"ru": "Выбрать все показанные", "en": "Select all shown"},
+    "chat_picker.select_none": {"ru": "Снять выбор", "en": "Select none"},
+    "chat_picker.nothing_matches": {"ru": "Ничего не найдено", "en": "Nothing matches"},
+    "chat_picker.nothing_matches_body": {
+        "ru": "Измените запрос или фильтры — например, включите архив.",
+        "en": "Change the search or the filters -- the archive, for instance.",
+    },
+    "chat_picker.selected_none": {"ru": "Ничего не выбрано", "en": "Nothing selected"},
+    "chat_picker.selected_summary": {"ru": "Выбрано: {count} ({parts})", "en": "Selected: {count} ({parts})"},
+    "chat_picker.selected_people": {"ru": "людей {count}", "en": "people {count}"},
+    "chat_picker.selected_bots": {"ru": "ботов {count}", "en": "bots {count}"},
+    "chat_picker.selected_chats": {"ru": "чатов {count}", "en": "chats {count}"},
+    "chat_picker.add_button": {"ru": "Добавить", "en": "Add"},
+    "chat_picker.already_added": {"ru": "уже в списке", "en": "already listed"},
+    "chat_picker.already_added_tooltip": {
+        "ru": "Этот получатель уже есть в списке получателей.",
+        "en": "This recipient is already in the recipients list.",
+    },
+    "chat_picker.empty_title": {"ru": "Диалогов нет", "en": "No dialogs"},
+    "chat_picker.empty": {
+        "ru": "У этого аккаунта пока нет диалогов, которые можно выбрать.",
+        "en": "This account has no dialogs to pick from yet.",
+    },
+    "chat_picker.added_status": {"ru": "Добавлено получателей: {count}", "en": "Recipients added: {count}"},
     "chat_picker.error.no_account": {"ru": "Сначала подключите аккаунт.", "en": "Connect an account first."},
+    "chat_picker.error.not_authorized": {
+        "ru": "Аккаунт не авторизован. Войдите в него заново на странице «Аккаунты».",
+        "en": "The account isn't signed in. Sign in again on the Accounts page.",
+    },
     "chat_picker.error.flood_wait": {
         "ru": "Telegram временно ограничил запросы. Повторите через {seconds} сек.",
         "en": "Telegram has temporarily limited requests. Try again in {seconds} sec.",
     },
-    "chat_picker.error.load_failed": {"ru": "Не удалось загрузить список чатов: {error}", "en": "Couldn't load the chat list: {error}"},
+    "chat_picker.error.load_failed": {"ru": "Не удалось загрузить список диалогов: {error}", "en": "Couldn't load the dialog list: {error}"},
     "dialogs.reset_settings.title": {"ru": "Сбросить настройки?", "en": "Reset settings?"},
     "dialogs.reset_settings.message": {
         "ru": "Все настройки приложения будут возвращены к значениям по умолчанию. Продолжить?",
@@ -796,6 +846,10 @@ STRINGS: Dict[str, Dict[str, str]] = {
     "settings.validation.interval_too_large": {
         "ru": "Слишком большой интервал. Максимально допустимое значение: {max} сек.",
         "en": "The interval is too large. The maximum allowed value is {max} sec.",
+    },
+    "settings.validation.large_campaign_threshold_out_of_range": {
+        "ru": "Порог большой рассылки должен быть от {min} до {max}.",
+        "en": "The large-campaign threshold must be between {min} and {max}.",
     },
     "settings.validation.retry_count_out_of_range": {
         "ru": "Количество повторов должно быть от {min} до {max}.",
@@ -876,6 +930,7 @@ STRINGS: Dict[str, Dict[str, str]] = {
     "chat_targets.type.supergroup": {"ru": "супергруппа", "en": "supergroup"},
     "chat_targets.type.forum": {"ru": "форум", "en": "forum"},
     "chat_targets.type.channel": {"ru": "канал", "en": "channel"},
+    "chat_targets.type.bot": {"ru": "бот", "en": "bot"},
     "chat_targets.reason.not_member": {
         "ru": "аккаунт не состоит в этом чате",
         "en": "the account is not a member of this chat",
@@ -1006,10 +1061,6 @@ STRINGS: Dict[str, Dict[str, str]] = {
 }
 
 PLURALS: Dict[str, Dict[str, Dict[str, str]]] = {
-    "chat_picker.selected_count": {
-        "ru": {"one": "Выбран {n} чат", "few": "Выбрано {n} чата", "many": "Выбрано {n} чатов"},
-        "en": {"one": "{n} chat selected", "other": "{n} chats selected"},
-    },
     "recipient_widget.recipient_count": {
         "ru": {"one": "{n} получатель", "few": "{n} получателя", "many": "{n} получателей"},
         "en": {"one": "{n} recipient", "other": "{n} recipients"},

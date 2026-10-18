@@ -27,6 +27,7 @@ from PySide6.QtGui import QIcon, QIconEngine, QImage, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 
 from app.config.paths import get_resource_path
+from app.ui.theme.tokens import parse_color
 
 DEFAULT_STROKE = 1.75
 
@@ -72,6 +73,8 @@ _ALIASES: Dict[str, str] = {
     "supergroup": "users-round",
     "forum": "messages-square",
     "user": "user",
+    "bot": "bot",
+    "archived": "archive",
     "export": "download",
     "save": "save",
     "copy": "copy",
@@ -136,10 +139,15 @@ def render_pixmap(name: str, color: str, size: QSize, scale: float = 1.0, stroke
     image.fill(Qt.GlobalColor.transparent)
     source = _svg_source(name)
     if source is not None:
-        svg = source.replace("currentColor", color).replace('stroke-width="2"', f'stroke-width="{stroke}"')
+        # SVG takes neither "rgba(...)" nor "transparent" as a stroke: the
+        # colour goes in as plain hex and its opacity as the painter's.
+        r, g, b, opacity = parse_color(color)
+        svg = source.replace("currentColor", f"#{r:02x}{g:02x}{b:02x}")
+        svg = svg.replace('stroke-width="2"', f'stroke-width="{stroke}"')
         renderer = QSvgRenderer(QByteArray(svg.encode("utf-8")))
         painter = QPainter(image)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setOpacity(opacity)
         renderer.render(painter, QRectF(0, 0, width, height))
         painter.end()
     pixmap = QPixmap.fromImage(image)

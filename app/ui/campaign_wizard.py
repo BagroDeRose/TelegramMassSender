@@ -117,7 +117,9 @@ class CampaignWizardDialog(QDialog):
         self._step_label.setObjectName("dialogTitle")
         root.addWidget(self._step_label)
 
-        self._recipient_widget = RecipientWidget(self)
+        # Same "From my chats…" button as the Campaign page; MainWindow
+        # wires it to the same picker and loading path.
+        self._recipient_widget = RecipientWidget(self, show_chat_picker=True)
         self._recipient_widget.recipients_changed.connect(self._update_nav_state)
         self._attachments_widget = AttachmentsWidget(self)
         self._preview_widget = MessagePreviewWidget(self)
@@ -329,6 +331,10 @@ class CampaignWizardDialog(QDialog):
         )
 
     # ---- result ----------------------------------------------------------------
+
+    @property
+    def recipient_widget(self) -> RecipientWidget:
+        return self._recipient_widget
 
     def result_state(self) -> WizardResult:
         return WizardResult(

@@ -124,7 +124,7 @@ Recorded as they were taken. Each is "decision — why".
   - `setStyleSheet` in `app/`: one call, `app/ui/theme/__init__.py` (`apply_theme`).
   - hex colours in `app/**/*.py` outside `app/ui/theme/tokens.py`: none.
   - emoji/symbol glyphs in `app/ui`: only the emoji palette (`message_editor._EMOJI_LIST`) and the journal-marker table (input parsing, never displayed).
-- Screenshots: `docs/redesign/before/` (34) and `docs/redesign/after/` (84: every page and dialog, both themes, RU and EN, plus `window_frame_*` showing the real title bar and `theme_switch_live_*` taken right after a live switch with the editor open).
+- Screenshots: `docs/redesign/before/` (34) and `docs/redesign/after/` (84 at the end of the redesign, 104 with the dialog picker's — section 7: every page and dialog, both themes, RU and EN, plus `window_frame_*` showing the real title bar and `theme_switch_live_*` taken right after a live switch with the editor open).
 - Checked by screenshot at 125 % and 150 % (`QT_SCALE_FACTOR`) and at the 900×600 minimum window.
 
 ## 6. Not done / deliberately left
@@ -134,3 +134,46 @@ Recorded as they were taken. Each is "decision — why".
 - **Attachments tile grid** keeps its existing structure (it has 100+ behavioural tests around drag-and-drop and selection); it got tokens, icons and the new colours, not a new layout.
 - **Text formatted as code** in the editor uses the monospace token; its background colour is not themed (it never was — only spoiler and link colours are tracked in the document).
 - Only the Campaign page has an explicit Tab chain; the other pages rely on Qt's creation order, which already matches their visual order after the redesign.
+
+## 7. "From my chats…" shows every dialog (branch `feature/dialog-picker`)
+
+The picker used to list only the groups/channels the account could post to. It now lists every dialog of the active account and lets the user choose whom to send to. Sending itself is unchanged — only how the Recipients box gets filled.
+
+Screens: `docs/redesign/after/dialog_chat_picker_*` (list, `_filters` with a folder + archive + People, `_loading`), `dialog_wizard_chat_picker_*` / `dialog_wizard_recipients_picked_*` (the same picker from the wizard), `theme_switch_live_picker_*` (taken right after a live theme switch with the picker open) — both themes, RU and EN.
+
+### Decisions
+
+25. **Service layer, not UI, talks to Telegram.** `chat_targets.list_dialogs(client)` returns a `DialogList` of `DialogTarget`s (type incl. bot, title, @username, peer id — positive for people, marked for chats —, archived, last-message date, unavailable reason, folder ids) plus the folder list. It never keeps an entity or access_hash; the Recipients box line is resolved again at send. It reads only `iter_dialogs(ignore_migrated=True)` and `GetDialogFiltersRequest` — no joining, no avatars, no per-dialog requests. Migrated basic groups are skipped because their supergroup is listed.
+26. **Excluded dialogs:** Saved Messages (`is_self`), deleted accounts, and 777000 (Telegram's service notifications).
+27. **Writable.** People and bots are writable by default (whether one has blocked the account isn't knowable without sending); chats go through the existing `check_send_rights` for a plain text message. The reason key becomes the row's tooltip.
+28. **Folders follow Telegram's own rule order:** explicitly added (pinned/included) peers are always in, explicitly excluded ones always out, then `exclude_archived/read/muted`, then the type flags (contacts, non-contacts, groups, channels, bots). Shared chat-list folders use their peers; the "All chats" default is skipped.
+29. **A folder failure — FloodWait included — hides the folder filter** instead of failing the list: folders only narrow the view, and the request is never repeated. A FloodWait on the dialog list itself is shown in the picker with the wait, never retried behind the user's back; "Refresh" is the user's choice.
+30. **Non-blocking.** The picker opens at once in a loading state (`open()`, window-modal, not `exec()` inside a coroutine) and MainWindow loads in `self._spawn(...)` under `_account_lock`, feeding the result in with `set_dialogs()` / `set_error()`. A result that arrives after the picker closed is dropped. One picker at a time across the page and the wizard.
+31. **Model/view for thousands.** `QAbstractListModel` sorted newest first once per load; `QSortFilterProxyModel` filters on plain fields precomputed per load (casefolded title+username), never on `data()` roles, and keeps the source order instead of re-sorting; one `dataChanged` per bulk tick. 5000 dialogs: each filter change well under 0.25 s (tested), building ~0.1 s.
+32. **Row.** Check box | initials circle (accent tint; muted grey for unavailable rows) | name (with an archive mark) over type icon + label + `@username` or ID in monospace | date over an "already listed" pill. Unavailable and already-listed rows have no check box and no hover. A click anywhere on a tickable row toggles it; Space works from the keyboard. The list never scrolls sideways.
+33. **"Already listed"** compares normalized recipient keys, so `@name`, `t.me/name` and the numeric ID of the same addressee all match, for people (`101`) and chats (`-100…`, `t.me/c/…`).
+34. **Counter** reads "Selected: N (people X, chats Y)"; bots get their own "bots Z" part only when one is ticked, rather than being counted as people.
+35. **IDs for people without a @username.** Such a person goes into the box as their positive ID. If the session has no access_hash for it at send time, `RecipientResolver` reads the dialogs once — the same lazy warm-up chat IDs already used — and takes the user from there (FloodWait propagates and pauses the campaign as before). Never a guessed access_hash.
+36. **Wizard.** Its recipients step shows the same button (`RecipientWidget(show_chat_picker=True)`), wired by MainWindow to the same picker and loading path, opened over the wizard, writing into the wizard's own box.
+37. **Tokens / icons.** New sizes live in `tokens.py` (`DIALOG_PICKER_*`); Lucide `bot` and `archive` were added to `assets/icons/lucide` (ISC, v0.469.0 like the rest). The list is a `QListView#dialogPickerList` with its own QSS block; no inline styles.
+38. **Demo Mode** got people (with and without a @username, contacts and not), two bots, archived dialogs, three folders and the three excluded dialogs, each with a date, so every part of the picker can be tried without an account.
+39. **Changed tests (old API only):** `test_chat_targets_ui` (the picker tests moved from `QListWidget` items / `_type_combo` / `list_writable_chats` to the model, segments and `list_dialogs` — same scenarios), `test_chat_targets_resolve` and `test_demo_mode_chats` (`list_writable_chats` → `list_dialogs`; the demo list gained "Demo Old Project"), `test_theme_switch_live` (new constructor; also checks the picker's list after a switch; its last MainWindow test became async so its refresh task no longer outlives the suite).
+
+### Verification
+
+- `pytest tests/` in one process: 1009 passed (913 before this branch); 1162 after the follow-up below, 1168 with the line-edit icon tests.
+- `scripts/check_ui_hygiene.py`: 0 findings.
+- Screenshots captured on the real Windows platform through the real qasync loop, including the wizard run via `exec()` from a Qt slot with the picker loading inside it.
+
+### Not done
+
+- **No avatars** (by design: nothing is downloaded); initials only.
+- **Dialogs are read in full each time** the picker opens or refreshes — there's no cache across opens, so a list that changed in Telegram is always current.
+- **Forum topics** stay out of scope: a forum is still posted to "General".
+
+### Follow-up on the same branch
+
+40. **Large-campaign guard.** More recipients than `large_campaign_threshold` (Settings → Sending, default 50, minimum 10) always asks before starting, whatever `confirm_before_start` says, on all three start paths through one `MainWindow._confirm_campaign_start` (so Retry now honours the optional confirmation too). The box lists people, bots, groups/channels and @usernames of not-yet-known type (known from the dialog cache where possible); Start is `danger`, Cancel is the default and escape button and has focus. Only one question is ever asked: above the threshold the large-campaign box replaces the optional one.
+41. **`theme.set_property` for buttons a QMessageBox already polished.** A box styles each button as it is added; a plain `setProperty("variant", "danger")` afterwards left Start unstyled (the old boxes only got away with it because their styled button was also the default, which re-polishes). Tested against the rendered colour.
+42. **Dialog cache.** Before: every picker open read all dialogs and folders again, and a campaign's resolver never saw that data (each campaign's first chat ID or unknown user ID read the dialogs again). Now `load_dialog_snapshot()` returns the list plus every dialog's entity by peer id; MainWindow keeps one `DialogSnapshot` for the active account for the session (`DialogCache`, keyed by account id + session name, cleared on switch, Demo Mode in/out, delete and Refresh). The resolver starts from it and reads the dialogs from Telegram again only for a missing ID, at most once per campaign. Trade-off: rights changed in Telegram since the last read are seen at send time (Telegram's own error), or after Refresh.
+43. **One path from token to QColor.** Translucent tokens are `rgba(...)` strings — QSS reads them, `QColor("rgba(...)")` is invalid (black) and SVG draws nothing. `parse_color()` / `theme.qcolor()` read every token form and raise on anything else; the icon renderer uses the same parser; every `QColor(token)` in `app/ui` was moved over, and `check_ui_hygiene.py` now flags any raw `QColor(...)` outside `theme/` (except `Qt.GlobalColor.transparent`). Every colour token of both themes is tested.

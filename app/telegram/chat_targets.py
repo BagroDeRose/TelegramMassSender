@@ -1,7 +1,7 @@
 """Group/supergroup/channel targets: type detection, pre-send permission
 checks ("preflight"), Telegram-error -> user-facing reason mapping, and
-the list of chats the active account can write to (the "From my chats…"
-picker).
+the account's own dialog list behind the "From my chats…" picker
+(list_dialogs: people, bots, groups and channels, with folders).
 
 Scope, deliberately narrow: this only ever reads what Telegram already
 says about a chat the account is *already* in -- it never joins a chat
@@ -22,7 +22,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, FrozenSet, List, Optional
+from typing import Any, Dict, FrozenSet, Hashable, List, Mapping, Optional, Tuple
 
 from telethon import utils as telethon_utils
 from telethon.errors import (
@@ -42,15 +42,28 @@ from telethon.errors import (
     TopicDeletedError,
     UserBannedInChannelError,
 )
-from telethon.tl.types import Channel, ChannelForbidden, Chat, ChatForbidden, User
+from telethon.errors import RPCError
+from telethon.tl.functions.messages import GetDialogFiltersRequest
+from telethon.tl.types import (
+    Channel,
+    ChannelForbidden,
+    Chat,
+    ChatForbidden,
+    DialogFilter,
+    DialogFilterChatlist,
+    User,
+)
 
 from app.i18n import tr
+from app.logging.logger import get_logger
 from app.telegram.media_sender import (
     CAPTION_MAX_LENGTH,
     Attachment,
     AttachmentKind,
     build_send_groups,
 )
+
+logger = get_logger()
 
 
 class TargetType(Enum):
@@ -283,46 +296,299 @@ def chat_error_reason(exc: BaseException) -> Optional[str]:
 
 # ---- "From my chats…" -----------------------------------------------------------
 
+# Telegram's own service-notifications account (login codes, notices): a
+# dialog every account has, never a recipient.
+SERVICE_NOTIFICATIONS_ID = 777000
+
+
+class DialogCategory(Enum):
+    """The picker's type filter: forums count as groups, bots apart from
+    people."""
+
+    PEOPLE = "people"
+    BOTS = "bots"
+    GROUPS = "groups"
+    CHANNELS = "channels"
+
 
 @dataclass(frozen=True)
-class ChatTarget:
-    peer_id: int  # marked id
+class DialogFolder:
+    folder_id: int
+    title: str
+
+
+@dataclass(frozen=True)
+class DialogTarget:
+    """One dialog of the account, as the picker shows it. Never holds the
+    entity itself (or an access_hash): only what's needed to show it and
+    write it into the Recipients box, which resolves it again at send."""
+
+    peer_id: int  # users: their positive id; chats: the marked id
     title: str
     username: Optional[str]
     target_type: TargetType
+    is_bot: bool = False
+    archived: bool = False
+    last_message_date: Optional[datetime] = None
+    # i18n key of why a plain text message can't be posted here, or None.
+    unavailable_reason_key: Optional[str] = None
+    folder_ids: FrozenSet[int] = frozenset()
+
+    @property
+    def writable(self) -> bool:
+        return self.unavailable_reason_key is None
+
+    @property
+    def category(self) -> DialogCategory:
+        if self.target_type is TargetType.USER:
+            return DialogCategory.BOTS if self.is_bot else DialogCategory.PEOPLE
+        if self.target_type is TargetType.CHANNEL:
+            return DialogCategory.CHANNELS
+        return DialogCategory.GROUPS
+
+    @property
+    def type_label(self) -> str:
+        return tr("chat_targets.type.bot") if self.is_bot else target_type_label(self.target_type)
 
     @property
     def recipient_line(self) -> str:
-        """What gets written into the Recipients box: @username when the
-        chat has one (stable, readable), else the marked numeric id."""
+        """What gets written into the Recipients box: @username when there
+        is one (stable, readable), else the numeric id -- positive for a
+        user, marked (-100…/-…) for a chat, exactly what the recipient
+        parser reads back as the same addressee."""
         return f"@{self.username}" if self.username else str(self.peer_id)
 
 
-async def list_writable_chats(client: Any) -> List[ChatTarget]:
-    """Every group/supergroup/channel among the account's own dialogs that
-    a plain text message could be posted to right now (per
-    check_send_rights). Users and chats the account can't write to are
-    left out. FloodWaitError propagates to the caller untouched."""
+@dataclass(frozen=True)
+class DialogList:
+    dialogs: Tuple[DialogTarget, ...]
+    # Empty when the account has no folders or they couldn't be read --
+    # the picker then hides its folder filter.
+    folders: Tuple[DialogFolder, ...] = ()
+
+
+@dataclass(frozen=True)
+class DialogSnapshot:
+    """One read of the account's dialogs: what the picker shows, plus the
+    entities the resolver's dialogs warm-up needs (marked chat id ->
+    Chat/Channel, user id -> User) -- every dialog's, including the ones
+    the picker leaves out. Kept in memory only, never persisted."""
+
+    dialogs: DialogList
+    chats: Mapping[int, Any]
+    users: Mapping[int, Any]
+
+
+class DialogCache:
+    """The active account's last DialogSnapshot, for this app session.
+    get() only answers for the account it was filled for, so a snapshot
+    can never be used against another account even if a clear() is
+    missed; MainWindow also clears it on every account change and on
+    the picker's Refresh."""
+
+    def __init__(self) -> None:
+        self._key: Optional[Hashable] = None
+        self._snapshot: Optional[DialogSnapshot] = None
+
+    def get(self, key: Hashable) -> Optional[DialogSnapshot]:
+        return self._snapshot if self._snapshot is not None and key == self._key else None
+
+    def put(self, key: Hashable, snapshot: DialogSnapshot) -> None:
+        self._key, self._snapshot = key, snapshot
+
+    def clear(self) -> None:
+        self._key, self._snapshot = None, None
+
+
+def _is_excluded_dialog(entity: Any) -> bool:
+    """Saved Messages (the account itself), deleted accounts and Telegram's
+    service notifications are dialogs, but nobody to send a campaign to."""
+    if not isinstance(entity, User):
+        return False
+    if getattr(entity, "is_self", False) or getattr(entity, "deleted", False):
+        return True
+    return getattr(entity, "id", None) == SERVICE_NOTIFICATIONS_ID
+
+
+def _is_muted(dialog: Any, now: datetime) -> bool:
+    settings = getattr(getattr(dialog, "dialog", None), "notify_settings", None)
+    until = getattr(settings, "mute_until", None)
+    if isinstance(until, datetime):
+        if until.tzinfo is None:
+            until = until.replace(tzinfo=timezone.utc)
+        return until > now
+    return isinstance(until, int) and until > now.timestamp()
+
+
+def _is_unread(dialog: Any) -> bool:
+    if getattr(dialog, "unread_count", 0):
+        return True
+    return bool(getattr(getattr(dialog, "dialog", None), "unread_mark", False))
+
+
+def _input_peer_ids(peers: Any) -> FrozenSet[int]:
+    ids = set()
+    for peer in peers or ():
+        try:
+            ids.add(telethon_utils.get_peer_id(peer))
+        except (TypeError, ValueError):  # InputPeerSelf/InputPeerEmpty: no id
+            continue
+    return frozenset(ids)
+
+
+@dataclass(frozen=True)
+class _FolderRule:
+    """A Telegram folder (DialogFilter) as a membership test, with the
+    precedence Telegram's own apps use: explicitly added chats are always
+    in, explicitly removed ones always out, then the exclusion flags
+    (archived/read/muted), then the chat-type flags."""
+
+    folder: DialogFolder
+    included: FrozenSet[int]
+    excluded: FrozenSet[int] = frozenset()
+    contacts: bool = False
+    non_contacts: bool = False
+    groups: bool = False
+    broadcasts: bool = False
+    bots: bool = False
+    exclude_archived: bool = False
+    exclude_read: bool = False
+    exclude_muted: bool = False
+
+    def contains(
+        self, peer_id: int, entity: Any, target_type: TargetType, archived: bool, unread: bool, muted: bool
+    ) -> bool:
+        if peer_id in self.included:
+            return True
+        if peer_id in self.excluded:
+            return False
+        if self.exclude_archived and archived:
+            return False
+        if self.exclude_read and not unread:
+            return False
+        if self.exclude_muted and muted:
+            return False
+        if target_type is TargetType.USER:
+            if getattr(entity, "bot", False):
+                return self.bots
+            return self.contacts if getattr(entity, "contact", False) else self.non_contacts
+        if target_type is TargetType.CHANNEL:
+            return self.broadcasts
+        return self.groups
+
+
+def _plain_title(title: Any) -> str:
+    # Newer layers wrap a folder title in TextWithEntities.
+    return str(getattr(title, "text", title) or "")
+
+
+async def _load_folder_rules(client: Any) -> List[_FolderRule]:
+    """The account's folders, or [] if it has none or they can't be read.
+    Folders only narrow the picker's view, so a failure -- FloodWait
+    included -- hides the folder filter instead of failing the whole
+    list; the request is never repeated."""
+    try:
+        response = await client(GetDialogFiltersRequest())
+    except (RPCError, ConnectionError, OSError) as exc:
+        logger.warning("Dialog folders unavailable: %s", type(exc).__name__)
+        return []
+    rules: List[_FolderRule] = []
+    for item in getattr(response, "filters", response) or ():
+        if isinstance(item, DialogFilter):
+            rules.append(
+                _FolderRule(
+                    folder=DialogFolder(item.id, _plain_title(item.title)),
+                    included=_input_peer_ids(item.pinned_peers) | _input_peer_ids(item.include_peers),
+                    excluded=_input_peer_ids(item.exclude_peers),
+                    contacts=bool(item.contacts),
+                    non_contacts=bool(item.non_contacts),
+                    groups=bool(item.groups),
+                    broadcasts=bool(item.broadcasts),
+                    bots=bool(item.bots),
+                    exclude_archived=bool(item.exclude_archived),
+                    exclude_read=bool(item.exclude_read),
+                    exclude_muted=bool(item.exclude_muted),
+                )
+            )
+        elif isinstance(item, DialogFilterChatlist):
+            rules.append(
+                _FolderRule(
+                    folder=DialogFolder(item.id, _plain_title(item.title)),
+                    included=_input_peer_ids(item.pinned_peers) | _input_peer_ids(item.include_peers),
+                )
+            )
+        # DialogFilterDefault is "All chats" -- the picker's own default.
+    return rules
+
+
+def _dialog_title(entity: Any, peer_id: int) -> str:
+    return telethon_utils.get_display_name(entity) or getattr(entity, "username", None) or str(peer_id)
+
+
+async def list_dialogs(client: Any, now: Optional[datetime] = None) -> DialogList:
+    return (await load_dialog_snapshot(client, now)).dialogs
+
+
+async def load_dialog_snapshot(client: Any, now: Optional[datetime] = None) -> DialogSnapshot:
+    """Every dialog of the account (archived ones included; migrated basic
+    groups left out of the list, since their supergroup is listed), in
+    Telegram's own order, with the folders each belongs to. People and
+    bots count as writable; a chat is writable if check_send_rights allows
+    a plain text message. Reads only the dialog list and the folder list
+    -- nothing is joined, resolved or downloaded (no avatars).
+    FloodWaitError from the dialog list propagates to the caller
+    untouched."""
+    now = now or datetime.now(timezone.utc)
     text_only = SendRequirements(has_plain_text_message=True, message_count=1)
-    targets: List[ChatTarget] = []
-    seen: set = set()
+    rows: List[Tuple[Any, Any, int, TargetType]] = []
+    seen: set = set()  # peer ids (ints) -- never the entities themselves
+    chats: Dict[int, Any] = {}
+    users: Dict[int, Any] = {}
     async for dialog in client.iter_dialogs():
         entity = dialog.entity
         target_type = target_type_of(entity)
-        if target_type is None or not target_type.is_chat:
+        if target_type is None:
             continue
-        if check_send_rights(entity, text_only) is not None:
+        peer_id = telethon_utils.get_peer_id(entity)
+        if target_type is TargetType.USER:
+            users[entity.id] = entity
+        else:
+            chats[peer_id] = entity
+        if _is_excluded_dialog(entity) or getattr(entity, "migrated_to", None) is not None:
             continue
-        peer_id = chat_peer_id(entity)
         if peer_id in seen:
             continue
         seen.add(peer_id)
+        rows.append((dialog, entity, peer_id, target_type))
+
+    rules = await _load_folder_rules(client) if rows else []
+    targets: List[DialogTarget] = []
+    for dialog, entity, peer_id, target_type in rows:
+        archived = bool(getattr(dialog, "archived", False))
+        folder_ids: FrozenSet[int] = frozenset()
+        if rules:
+            unread, muted = _is_unread(dialog), _is_muted(dialog, now)
+            folder_ids = frozenset(
+                rule.folder.folder_id
+                for rule in rules
+                if rule.contains(peer_id, entity, target_type, archived, unread, muted)
+            )
+        is_user = target_type is TargetType.USER
         targets.append(
-            ChatTarget(
+            DialogTarget(
                 peer_id=peer_id,
-                title=getattr(entity, "title", "") or "",
+                title=_dialog_title(entity, peer_id),
                 username=getattr(entity, "username", None) or None,
                 target_type=target_type,
+                is_bot=is_user and bool(getattr(entity, "bot", False)),
+                archived=archived,
+                last_message_date=getattr(dialog, "date", None),
+                unavailable_reason_key=None if is_user else check_send_rights(entity, text_only, now),
+                folder_ids=folder_ids,
             )
         )
-    return targets
+    return DialogSnapshot(
+        dialogs=DialogList(dialogs=tuple(targets), folders=tuple(rule.folder for rule in rules)),
+        chats=chats,
+        users=users,
+    )

@@ -1021,9 +1021,10 @@ an error.
       `CheckChatInviteRequest` (`ChatInviteAlready` → that chat, anything
       else → "not a member"). In the Recipients box, TXT and CSV import
       (one recognizer, `app/recipients/parser.py`) — `tests/test_parser_chat_targets.py`
-- [x] Resolving — one dialogs fetch per campaign, lazily, before the
-      first chat ID (no access_hash otherwise); FloodWait there pauses
-      the campaign like a send does. Type detection user / group /
+- [x] Resolving — at most one dialogs fetch per campaign, lazily, before
+      the first chat ID (no access_hash otherwise) — and none at all when
+      the session's dialog cache (see below) already has the ID;
+      FloodWait there pauses the campaign like a send does. Type detection user / group /
       supergroup / forum / channel (`app/telegram/chat_targets.py`,
       `app/telegram/recipient_resolver.py`) — `tests/test_chat_targets_resolve.py`
 - [x] Permission preflight before any send — channel: creator or admin
@@ -1046,10 +1047,10 @@ an error.
 - [x] `{name}` → chat title for chats; a CSV name still wins
 - [x] Forum supergroups — plain send, i.e. the "General" topic; a clear
       reason if that fails
-- [x] UI — "From my chats…" picker (type filter, title search,
-      checkboxes; only chats the account can post to), users vs
-      groups/channels in the start confirmation, chat type on the
-      Results list — `tests/test_chat_targets_ui.py`
+- [x] UI — "From my chats…" picker (since extended to every dialog, see
+      "Picking recipients from dialogs" below), users vs groups/channels
+      in the start confirmation, chat type on the Results list —
+      `tests/test_chat_targets_ui.py`
 - [x] Reports/Retry — "Тип" column says группа/супергруппа/канал; Retry
       skips chats already delivered to (also under another spelling)
       and resumes a partly delivered message after its last delivered
@@ -1063,6 +1064,57 @@ an error.
 - [ ] Verify against a real account (own test channel + own group) —
       see the manual checklist in the change summary; not something the
       automated suite can cover
+
+---
+
+# UI Redesign ("a quiet console")
+
+- [x] One theme system: every colour, size, font and duration as tokens
+      for both themes (`app/ui/theme/tokens.py`), one QSS template, one
+      `apply_theme()`; Inter, Lucide icons, dark Windows title bar —
+      decisions in `docs/design.md`
+- [x] Every page and dialog on it: collapsible sidebar, two-column
+      Campaign page with a chat-style preview and a launch panel that
+      becomes live progress, Results table, Settings, Journal, dialogs
+      and Campaign Wizard on one structure, toasts, empty states,
+      keyboard focus ring and Tab order, contrast checked
+- [x] Hygiene enforced by `scripts/check_ui_hygiene.py` (no colours,
+      sizes or glyphs outside the tokens; token colours only through
+      `theme.qcolor()`, which also reads translucent `rgba()` tokens)
+- [x] Before/after screenshots, both themes, RU and EN —
+      `docs/redesign/`
+
+# Picking recipients from dialogs
+
+- [x] "From my chats…" lists every dialog of the active account —
+      people, bots, groups, supergroups, forums, channels — newest first,
+      without Saved Messages, deleted accounts and 777000
+      (`chat_targets.list_dialogs`, model/proxy/delegate in
+      `app/ui/dialog_picker_model.py`)
+- [x] Filters: type segments, Telegram folders (incl. shared folders
+      from a link; hidden when there are none or they can't be read),
+      archive toggle (off by default), search by name/title/@username
+- [x] Unavailable dialogs muted with the reason, not selectable;
+      already-listed ones marked (by @username and by ID); select all
+      shown / none; people/bots/chats counter; no avatars downloaded
+- [x] Picked dialogs go in as @username, else the ID; a person added by
+      ID is found through the dialogs at send time
+- [x] Same picker in the Campaign Wizard's recipients step
+- [x] Read once per session per account (Refresh and account changes
+      read again); a campaign's dialogs warm-up starts from that read
+- [x] Demo Mode: people, bots, archive, folders, chats without rights
+- [x] 5000 dialogs filter well under a quarter second (tested)
+- [ ] Verify against a real account (many dialogs, archive, folders
+      incl. shared ones, a person without @username picked by ID)
+
+# Accidental mass-send guard
+
+- [x] More recipients than the "Large campaign" threshold (Settings →
+      Sending, default 50, minimum 10) always asks before starting,
+      whatever "Confirm before starting a campaign" says: people, bots,
+      chats listed; Start is the danger button, Cancel the default
+- [x] One confirmation gate for the Campaign page, the Campaign Wizard
+      and Retry (Retry now also honours the optional confirmation)
 
 ---
 

@@ -1,8 +1,8 @@
 """Demo Mode with group/channel targets: DemoTelegramClient's simulated
 chats produce each realistic outcome (posted, no admin rights, members
 can't write, no media, slow mode) through the unmodified CampaignManager,
-and the "From my chats…" listing only offers chats the demo account can
-post to."""
+and the "From my chats…" listing shows the demo account's people, bots,
+archive and folders, offering only what it can write to."""
 from __future__ import annotations
 
 import asyncio
@@ -16,7 +16,7 @@ from app.campaign.campaign_state import CampaignStatus
 from app.campaign.send_queue import SendItemStatus
 from app.i18n import tr
 from app.recipients.parser import parse_recipient_line
-from app.telegram.chat_targets import TargetType, list_writable_chats
+from app.telegram.chat_targets import TargetType, list_dialogs
 from app.telegram.demo_client import DEMO_INVITE_HASH, DemoTelegramClient
 from app.telegram.media_sender import Attachment
 
@@ -119,9 +119,9 @@ async def test_demo_never_joins_a_chat(qapp, monkeypatch):
     assert not any(isinstance(r, (ImportChatInviteRequest, JoinChannelRequest)) for r in requests)
 
 
-async def test_demo_chat_picker_lists_only_writable_chats():
-    chats = await list_writable_chats(DemoTelegramClient())
-    titles = [c.title for c in chats]
+async def test_demo_chat_picker_offers_only_writable_chats():
+    dialogs = (await list_dialogs(DemoTelegramClient())).dialogs
+    titles = [d.title for d in dialogs if d.target_type.is_chat and d.writable]
     assert titles == [
         "Demo News",
         "Demo Team Chat",
@@ -129,5 +129,108 @@ async def test_demo_chat_picker_lists_only_writable_chats():
         "Demo Forum",
         "Demo Text-Only Group",
         "Demo Slow Chat",
+        "Demo Old Project",
     ]
     assert "Demo Partner Channel" not in titles and "Demo Read-Only Group" not in titles
+
+
+# ---- "From my chats…" against the demo account's dialogs ---------------------------
+
+
+async def test_demo_dialogs_have_people_bots_archive_and_folders():
+    result = await list_dialogs(DemoTelegramClient())
+    by_title = {d.title: d for d in result.dialogs}
+    # Saved Messages, the deleted account and 777000 are never offered.
+    assert not any(d.peer_id in (700000000, 700000099, 777000) for d in result.dialogs)
+    people = [d.title for d in result.dialogs if d.category.value == "people"]
+    bots = [d.title for d in result.dialogs if d.category.value == "bots"]
+    assert people == ["Anna Smirnova", "Ivan Petrov", "Maria Orlova", "Pavel Kuznetsov", "Olga Sokolova"]
+    assert bots == ["Weather Bot", "Shop Bot"]
+    assert by_title["Ivan Petrov"].recipient_line == "700000002"  # no @username: by ID
+    assert {d.title for d in result.dialogs if d.archived} == {"Pavel Kuznetsov", "Shop Bot", "Demo Old Project"}
+    assert [f.title for f in result.folders] == ["Work", "Family", "Bots"]
+    assert 2 in by_title["Demo Team Chat"].folder_ids and 2 in by_title["Ivan Petrov"].folder_ids
+    assert 3 in by_title["Demo Family"].folder_ids and 3 in by_title["Anna Smirnova"].folder_ids
+    assert 3 not in by_title["Maria Orlova"].folder_ids  # not a contact
+    assert 4 in by_title["Weather Bot"].folder_ids
+    assert not by_title["Demo Partner Channel"].writable
+    assert by_title["Demo Partner Channel"].unavailable_reason_key == "chat_targets.reason.channel_admin_required"
+    assert all(d.last_message_date is not None for d in result.dialogs)
+
+
+async def test_demo_mixed_campaign_to_picked_people_and_chats(qapp, monkeypatch):
+    monkeypatch.setattr(demo_client_module, "FAILURE_RATE", 0.0)
+    client = DemoTelegramClient()
+    picked = [d for d in (await list_dialogs(client)).dialogs if d.writable and not d.archived]
+    lines = [d.recipient_line for d in picked if d.title in (
+        "Anna Smirnova", "Ivan Petrov", "Weather Bot", "Demo News", "Demo Family", "Demo Forum",
+    )]
+    assert lines == ["@demo_news", "@demo_friend", "700000002", "-900000003", "@demo_forum", "@demo_weather_bot"]
+    manager, status = await run_campaign(client, lines)
+    assert status == CampaignStatus.COMPLETED.value
+    assert [item.status for item in manager.items] == [SendItemStatus.SENT] * 6
+    greetings = {record[2] for record in client.sent_messages}
+    assert {"Hello Anna", "Hello Ivan", "Hello Demo News", "Hello Demo Family"} <= greetings
+
+
+async def test_demo_pick_people_and_chats_then_run_the_campaign(qapp, tmp_path, monkeypatch):
+    """The whole path in the window: open the picker, tick a person with a
+    @username, a person without one (added by ID), a bot and two chats,
+    add them, start -- every one is delivered."""
+    from PySide6.QtCore import Qt
+
+    import app.ui.main_window as main_window_module
+    from app.database.database import Database
+    from app.security.secure_storage import SecureStorage
+
+    class QuickRateLimiter:
+        min_delay_seconds = max_delay_seconds = 5
+
+        def __init__(self, *_a, **_k):
+            pass
+
+        def next_delay(self):
+            return 0.01
+
+    monkeypatch.setattr(main_window_module, "RateLimiter", QuickRateLimiter)
+    monkeypatch.setattr(demo_client_module, "FAILURE_RATE", 0.0)
+    window = main_window_module.MainWindow(
+        database=Database(tmp_path / "app.db"), secure_storage=SecureStorage(tmp_path / "s.dat")
+    )
+    settings = window._service.settings_repository.load_app_settings()
+    settings.confirm_before_start = False
+    window._service.settings_repository.save_app_settings(settings)
+
+    async def wait_until(predicate, timeout=10.0):
+        deadline = asyncio.get_event_loop().time() + timeout
+        while not predicate():
+            assert asyncio.get_event_loop().time() < deadline, "condition not reached"
+            await asyncio.sleep(0.02)
+
+    window._enter_demo_mode()
+    await wait_until(lambda: window._recipient_widget._pick_chats_button.isEnabled())
+    window._recipient_widget._pick_chats_button.click()
+    await wait_until(lambda: window._chat_picker is not None and window._chat_picker._loaded)
+    picker = window._chat_picker
+    model = picker._model
+    for row in range(model.rowCount()):
+        if model.dialog(row).title in ("Anna Smirnova", "Ivan Petrov", "Weather Bot", "Demo News", "Demo Family"):
+            model.setData(model.index(row), Qt.CheckState.Checked, Qt.ItemDataRole.CheckStateRole)
+    assert picker._selection_label.text() == tr("chat_picker.selected_summary", count=5, parts=", ".join([
+        tr("chat_picker.selected_people", count=2),
+        tr("chat_picker.selected_bots", count=1),
+        tr("chat_picker.selected_chats", count=2),
+    ]))
+    picker._add_button.click()
+    await wait_until(lambda: window._chat_picker is None)
+    assert window._recipient_widget.get_text().splitlines() == [
+        "@demo_news", "@demo_friend", "700000002", "-900000003", "@demo_weather_bot",
+    ]
+
+    window._message_text = "Hello {name}"
+    window._on_form_state_changed()
+    window._on_start_requested()
+    await wait_until(lambda: window._current_campaign is not None)
+    campaign = window._current_campaign
+    await wait_until(lambda: not campaign.is_active, timeout=20)
+    assert [item.status for item in campaign.items] == [SendItemStatus.SENT] * 5

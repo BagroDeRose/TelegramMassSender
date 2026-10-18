@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import List, Optional, Sequence
 
 from PySide6.QtCore import QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -199,7 +199,7 @@ class _AlbumGrid(QWidget):
             path.addRoundedRect(rect, RADIUS_SM, RADIUS_SM)
             painter.save()
             painter.setClipPath(path)
-            painter.fillRect(rect, QColor(tokens.thumbnail_bg))
+            painter.fillRect(rect, theme.qcolor(tokens.thumbnail_bg))
             if pixmap is not None and not pixmap.isNull():
                 painter.drawPixmap(rect.toRect(), _cover(pixmap, rect.size().toSize(), self.devicePixelRatioF()))
             else:
@@ -236,9 +236,9 @@ class _Bubble(QFrame):
         tail.lineTo(right - RADIUS_LG, bottom - RADIUS_LG)
         tail.closeSubpath()
         path = path.united(tail)
-        painter.fillPath(path, QColor(tokens.bubble))
+        painter.fillPath(path, theme.qcolor(tokens.bubble))
         if not tokens.is_dark:
-            painter.setPen(QPen(QColor(tokens.border), 1))
+            painter.setPen(QPen(theme.qcolor(tokens.border), 1))
             painter.drawPath(path)
         painter.end()
         super().paintEvent(event)

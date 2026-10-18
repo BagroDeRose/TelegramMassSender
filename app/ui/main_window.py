@@ -57,7 +57,9 @@ from app.campaign import report_library
 from app.config.paths import get_reports_dir, get_resource_path
 from app.config.settings import (
     MAX_ALLOWED_DELAY_SECONDS,
+    MAX_LARGE_CAMPAIGN_THRESHOLD,
     MIN_ALLOWED_DELAY_SECONDS,
+    MIN_LARGE_CAMPAIGN_THRESHOLD,
     AppSettings,
     SettingsValidationError,
 )
@@ -69,7 +71,14 @@ from app.database.repositories import PresetRepository, RecipientGroupRepository
 from app.i18n import LANGUAGE_LABELS, VALID_LANGUAGES, get_language, set_language, tr
 from app.logging.logger import get_logger
 from app.telegram.account_manager import Account, AccountStatus
-from app.telegram.chat_targets import CHAT_TARGET_TYPES, TargetType, list_writable_chats, target_type_label
+from app.telegram.chat_targets import (
+    CHAT_TARGET_TYPES,
+    DialogCache,
+    DialogCategory,
+    TargetType,
+    load_dialog_snapshot,
+    target_type_label,
+)
 from app.telegram.exceptions import AccountDeletionError, AccountSwitchBlockedError
 from app.security.secure_storage import SecureStorage
 from app.telegram.service import TelegramService
@@ -80,11 +89,14 @@ from app.ui.attachments_widget import AttachmentsWidget
 from app.ui.campaign_controls import CampaignControlsWidget, format_duration
 from app.ui.campaign_wizard import CampaignWizardDialog
 from app.ui.chat_picker_dialog import ChatPickerDialog
+from app.ui.dialog_picker_model import dialog_recipient_keys
 from app.ui.dialogs import (
     confirm_delete_account,
     confirm_delete_group,
     confirm_delete_preset,
     confirm_exit_during_campaign,
+    RecipientBreakdown,
+    confirm_large_campaign,
     confirm_reset_settings,
     confirm_start_campaign,
     show_error,
@@ -283,7 +295,15 @@ class MainWindow(QMainWindow):
         # so "From my chats…" is only offered for an account that is
         # actually connected and authorized.
         self._account_statuses: Dict[int, AccountStatus] = {}
-        self._chat_picker_loading = False
+        # The open "From my chats…" picker, if any (one at a time), and the
+        # open Campaign Wizard, whose recipients step has the same button.
+        self._chat_picker: Optional[ChatPickerDialog] = None
+        self._campaign_wizard: Optional[CampaignWizardDialog] = None
+        # The active account's dialogs as the picker last read them, kept
+        # for this session: reopening the picker shows them at once, and a
+        # campaign's dialogs warm-up starts from them. Cleared on every
+        # account change and by the picker's Refresh.
+        self._dialog_cache = DialogCache()
 
         self._database = database if database is not None else Database()
         self._service = TelegramService(self._database, secure_storage=secure_storage)
@@ -548,6 +568,10 @@ class MainWindow(QMainWindow):
         self._reset_settings_button.setText(tr("main_window.settings.reset_settings_button"))
         self._reset_hint_label.setText(tr("main_window.settings.reset_hint"))
         self._confirm_hint_label.setText(tr("main_window.settings.confirm_before_start_tooltip"))
+        self._large_campaign_section_label.setText(tr("main_window.settings.large_campaign_label"))
+        self._large_campaign_spin.setPrefix(tr("main_window.settings.large_campaign_prefix"))
+        self._large_campaign_spin.setSuffix(tr("main_window.settings.large_campaign_suffix"))
+        self._large_campaign_hint_label.setText(tr("main_window.settings.large_campaign_hint"))
 
         # Combo items themselves carry no translation-key state (their
         # itemData is the stable theme/language code, not display text),
@@ -1067,8 +1091,27 @@ class MainWindow(QMainWindow):
             lambda checked: self._save_setting_field("confirm_before_start", checked)
         )
         self._confirm_hint_label = QLabel(tr("main_window.settings.confirm_before_start_tooltip"), widget)
-        self._settings_row(grid, row, None, self._confirm_before_start_checkbox, self._confirm_hint_label)
+        row = self._settings_row(grid, row, None, self._confirm_before_start_checkbox, self._confirm_hint_label)
+
+        self._large_campaign_section_label = QLabel(tr("main_window.settings.large_campaign_label"), widget)
+        self._large_campaign_spin = QSpinBox(widget)
+        self._large_campaign_spin.setRange(MIN_LARGE_CAMPAIGN_THRESHOLD, MAX_LARGE_CAMPAIGN_THRESHOLD)
+        self._large_campaign_spin.setPrefix(tr("main_window.settings.large_campaign_prefix"))
+        self._large_campaign_spin.setSuffix(tr("main_window.settings.large_campaign_suffix"))
+        self._large_campaign_spin.editingFinished.connect(self._on_large_campaign_threshold_changed)
+        self._large_campaign_hint_label = QLabel(tr("main_window.settings.large_campaign_hint"), widget)
+        self._settings_row(
+            grid, row, self._large_campaign_section_label, self._large_campaign_spin, self._large_campaign_hint_label
+        )
         return widget
+
+    def _on_large_campaign_threshold_changed(self) -> None:
+        settings = self._service.settings_repository.load_app_settings()
+        settings.large_campaign_threshold = self._large_campaign_spin.value()
+        try:
+            self._service.settings_repository.save_app_settings(settings)
+        except SettingsValidationError as exc:  # the spin box range already keeps it valid
+            show_error(self, tr("main_window.settings.large_campaign_label"), str(exc))
 
     def _build_application_settings(self) -> QWidget:
         widget = QWidget()
@@ -1238,7 +1281,7 @@ class MainWindow(QMainWindow):
 
         self._recipient_widget.recipients_changed.connect(self._on_form_state_changed)
         self._recipient_widget.recipients_changed.connect(self._on_recipients_changed)
-        self._recipient_widget.pick_chats_requested.connect(self._on_pick_chats_requested)
+        self._recipient_widget.pick_chats_requested.connect(lambda: self._on_pick_chats_requested())
         self._attachments_widget.attachments_changed.connect(self._update_message_preview)
 
         self._campaign_controls.start_requested.connect(self._on_start_requested)
@@ -1285,6 +1328,9 @@ class MainWindow(QMainWindow):
         self._settings_max_spin.setValue(settings.max_delay_seconds)
         self._settings_min_spin.blockSignals(False)
         self._settings_max_spin.blockSignals(False)
+        self._large_campaign_spin.blockSignals(True)
+        self._large_campaign_spin.setValue(settings.large_campaign_threshold)
+        self._large_campaign_spin.blockSignals(False)
 
         for checkbox, value in (
             (self._confirm_before_start_checkbox, settings.confirm_before_start),
@@ -1531,9 +1577,23 @@ class MainWindow(QMainWindow):
 
     # ---- campaign wizard ---------------------------------------------------
 
-    def _on_open_campaign_wizard_clicked(self) -> None:
+    def _build_campaign_wizard(self) -> CampaignWizardDialog:
         dialog = CampaignWizardDialog(self._service.settings_repository, self)
-        if dialog.exec() != QDialog.DialogCode.Accepted:
+        wizard_recipients = dialog.recipient_widget
+        wizard_recipients.pick_chats_requested.connect(
+            lambda: self._on_pick_chats_requested(wizard_recipients, dialog)
+        )
+        self._campaign_wizard = dialog
+        self._update_pick_chats_enabled()
+        return dialog
+
+    def _on_open_campaign_wizard_clicked(self) -> None:
+        dialog = self._build_campaign_wizard()
+        try:
+            accepted = dialog.exec() == QDialog.DialogCode.Accepted
+        finally:
+            self._campaign_wizard = None
+        if not accepted:
             return
         result = dialog.result_state()
         # Write the wizard's collected state into the exact same live
@@ -1757,6 +1817,8 @@ class MainWindow(QMainWindow):
             return
 
         self._account_widget.refresh_active_state(account_id)
+        if account_id != previous_active_id:
+            self._dialog_cache.clear()
         self._persist_active_account(account_id)
         self._on_form_state_changed()
         self._update_connection_status()
@@ -1778,6 +1840,8 @@ class MainWindow(QMainWindow):
         if account_manager is None:
             return
         async with self._account_lock:
+            if self._is_active_account(account):
+                self._dialog_cache.clear()
             try:
                 await account_manager.delete_account(account)
             except AccountDeletionError as exc:
@@ -1857,6 +1921,7 @@ class MainWindow(QMainWindow):
             self._service.enter_demo_mode()
         else:
             self._service.exit_demo_mode()
+        self._dialog_cache.clear()
         self._demo_banner.setVisible(enter)
         # A half-finished switch belongs to the mode we just left.
         self._account_switch_in_progress = False
@@ -1917,58 +1982,95 @@ class MainWindow(QMainWindow):
         campaign_busy = self._campaign_starting or (
             self._current_campaign is not None and self._current_campaign.is_active
         )
-        self._recipient_widget.set_pick_chats_enabled(
-            self._active_account_connected() and not campaign_busy and not self._chat_picker_loading
-        )
+        enabled = self._active_account_connected() and not campaign_busy and self._chat_picker is None
+        self._recipient_widget.set_pick_chats_enabled(enabled)
+        if self._campaign_wizard is not None:
+            self._campaign_wizard.recipient_widget.set_pick_chats_enabled(enabled)
 
-    def _on_pick_chats_requested(self) -> None:
-        if self._chat_picker_loading or self._campaign_starting:
+    def _on_pick_chats_requested(
+        self, target: Optional[RecipientWidget] = None, parent: Optional[QWidget] = None
+    ) -> None:
+        """Open the picker over `parent` (the window, or the Campaign
+        Wizard) and fill `target` (the Campaign page's Recipients box, or
+        the wizard's). The dialog opens at once and loads in the
+        background, so a long dialog list never blocks the window."""
+        target = target or self._recipient_widget
+        parent = parent or self
+        if self._chat_picker is not None or self._campaign_starting:
             return
         if self._current_campaign is not None and self._current_campaign.is_active:
             return
         account = self._active_account()
         if account is None or not self._active_account_connected():
-            show_error(self, tr("chat_picker.title"), tr("chat_picker.error.no_account"))
+            show_error(parent, tr("chat_picker.title"), tr("chat_picker.error.no_account"))
             return
-        self._chat_picker_loading = True
+        target.flush()
+        dialog = ChatPickerDialog({r.normalized_key for r in target.valid_recipients()}, parent)
+        self._chat_picker = dialog
+        dialog.refresh_requested.connect(lambda: self._load_dialogs_into(dialog, account))
+        dialog.accepted.connect(lambda: self._add_picked_dialogs(dialog, target))
+        dialog.finished.connect(lambda _code: self._on_chat_picker_finished(dialog))
         self._update_pick_chats_enabled()
-        self._spawn(self._load_and_pick_chats(account), "загрузка списка чатов")
+        dialog.open()
+        cached = self._dialog_cache.get(self._dialog_cache_key(account))
+        if cached is not None:
+            dialog.set_dialogs(cached.dialogs)
+        else:
+            self._load_dialogs_into(dialog, account)
 
-    async def _load_and_pick_chats(self, account: Account) -> None:
+    @staticmethod
+    def _dialog_cache_key(account: Account):
+        return (account.id, account.session_name)
+
+    def _load_dialogs_into(self, dialog: ChatPickerDialog, account: Account) -> None:
+        """First open, or Refresh: always a fresh read, replacing the cache."""
+        self._dialog_cache.clear()
+        dialog.set_loading()
+        self._spawn(self._load_dialogs(dialog, account), "загрузка списка диалогов")
+
+    async def _load_dialogs(self, dialog: ChatPickerDialog, account: Account) -> None:
+        account_manager = self._service.account_manager
+        assert account_manager is not None
+        snapshot = None
         try:
-            account_manager = self._service.account_manager
-            assert account_manager is not None
-            try:
-                # Same lock as refresh/switch/delete: this reads through the
-                # account's live client and must not interleave with them.
-                async with self._account_lock:
-                    client = await account_manager.ensure_connected(account)
-                    authorized = await client.is_user_authorized()
-                    chats = await list_writable_chats(client) if authorized else []
-                if not authorized:
-                    show_error(self, tr("chat_picker.title"), tr("main_window.start_error.not_authorized"))
-                    return
-            except FloodWaitError as exc:
-                # Never retried behind the user's back: they're told how long
-                # Telegram wants them to wait and can try again afterwards.
-                show_error(self, tr("chat_picker.title"), tr("chat_picker.error.flood_wait", seconds=int(exc.seconds)))
-                return
-            except Exception as exc:  # noqa: BLE001 - surfaced to the user
-                self._logger.warning("Не удалось загрузить список чатов: %s", exc)
-                show_error(self, tr("chat_picker.title"), tr("chat_picker.error.load_failed", error=exc))
-                return
-        finally:
-            self._chat_picker_loading = False
-            self._update_pick_chats_enabled()
+            # Same lock as refresh/switch/delete: this reads through the
+            # account's live client and must not interleave with them.
+            async with self._account_lock:
+                client = await account_manager.ensure_connected(account)
+                authorized = await client.is_user_authorized()
+                if authorized:
+                    snapshot = await load_dialog_snapshot(client)
+            error = None if authorized else tr("chat_picker.error.not_authorized")
+        except FloodWaitError as exc:
+            # Never retried behind the user's back: they're told how long
+            # Telegram wants them to wait and can press Refresh afterwards.
+            error = tr("chat_picker.error.flood_wait", seconds=int(exc.seconds))
+        except Exception as exc:  # noqa: BLE001 - shown in the picker itself
+            self._logger.warning("Не удалось загрузить список диалогов: %s", exc)
+            error = tr("chat_picker.error.load_failed", error=exc)
+        if snapshot is not None and self._is_active_account(account):
+            self._dialog_cache.put(self._dialog_cache_key(account), snapshot)
+        if self._chat_picker is not dialog:
+            return  # closed while loading (the cache still keeps the result)
+        if error is not None:
+            dialog.set_error(error)
+        else:
+            dialog.set_dialogs(snapshot.dialogs)
 
-        if not chats:
-            show_info(self, tr("chat_picker.title"), tr("chat_picker.empty"))
-            return
-        dialog = ChatPickerDialog(chats, self)
-        if dialog.exec() != ChatPickerDialog.DialogCode.Accepted:
-            return
-        added = self._recipient_widget.append_lines([chat.recipient_line for chat in dialog.selected_targets()])
-        self._toast(tr("chat_picker.added_status", count=added))
+    def _is_active_account(self, account: Account) -> bool:
+        active = self._active_account()
+        return active is not None and self._dialog_cache_key(active) == self._dialog_cache_key(account)
+
+    def _add_picked_dialogs(self, dialog: ChatPickerDialog, target: RecipientWidget) -> None:
+        added = target.append_lines(dialog.selected_lines())
+        if target is self._recipient_widget:
+            self._toast(tr("chat_picker.added_status", count=added))
+
+    def _on_chat_picker_finished(self, dialog: ChatPickerDialog) -> None:
+        if self._chat_picker is dialog:
+            self._chat_picker = None
+        dialog.deleteLater()
+        self._update_pick_chats_enabled()
 
     # ---- campaign lifecycle ---------------------------------------------------
 
@@ -2012,11 +2114,8 @@ class MainWindow(QMainWindow):
             return
 
         settings = self._service.settings_repository.load_app_settings()
-        if settings.confirm_before_start:
-            chat_count = sum(1 for r in recipients if r.is_chat_target)
-            username_count = sum(1 for r in recipients if r.kind == RecipientKind.USERNAME)
-            if not confirm_start_campaign(self, len(recipients), chat_count, username_count):
-                return
+        if not self._confirm_campaign_start(recipients, settings):
+            return
 
         try:
             rate_limiter = RateLimiter(settings.min_delay_seconds, settings.max_delay_seconds)
@@ -2038,6 +2137,52 @@ class MainWindow(QMainWindow):
             ),
             "запуск рассылки",
         )
+
+    def _recipient_breakdown(self, recipients) -> RecipientBreakdown:
+        """People / bots / chats / not-yet-known -- from the cached dialogs
+        where a recipient is among them, else from its format alone.
+        Nothing is resolved before the user confirms."""
+        people = bots = chats = unknown = 0
+        known = self._cached_categories()
+        for recipient in recipients:
+            category = known.get(recipient.normalized_key)
+            if category is DialogCategory.BOTS:
+                bots += 1
+            elif category is DialogCategory.PEOPLE:
+                people += 1
+            elif category is not None or recipient.is_chat_target:
+                chats += 1
+            elif recipient.kind == RecipientKind.USERNAME:
+                unknown += 1
+            else:
+                people += 1
+        return RecipientBreakdown(people=people, bots=bots, chats=chats, unknown=unknown)
+
+    def _cached_categories(self) -> Dict[str, DialogCategory]:
+        """normalized recipient key -> category, for the active account's
+        cached dialogs: a @username picked there is known to be a person,
+        a bot or a chat before anything is resolved."""
+        account = self._active_account()
+        snapshot = self._dialog_cache.get(self._dialog_cache_key(account)) if account is not None else None
+        if snapshot is None:
+            return {}
+        return {key: dialog.category for dialog in snapshot.dialogs.dialogs for key in dialog_recipient_keys(dialog)}
+
+    def _confirm_campaign_start(self, recipients, settings) -> bool:
+        """The one pre-start confirmation for every start path (Campaign
+        page, Campaign Wizard, Retry). More recipients than the
+        large-campaign threshold always asks, with Cancel as the default,
+        whatever confirm_before_start says; otherwise the optional
+        confirmation asks only when it is switched on."""
+        if len(recipients) > settings.large_campaign_threshold:
+            return confirm_large_campaign(
+                self, self._recipient_breakdown(recipients), settings.large_campaign_threshold
+            )
+        if settings.confirm_before_start:
+            chat_count = sum(1 for r in recipients if r.is_chat_target)
+            username_count = sum(1 for r in recipients if r.kind == RecipientKind.USERNAME)
+            return confirm_start_campaign(self, len(recipients), chat_count, username_count)
+        return True
 
     async def _start_campaign(
         self,
@@ -2081,6 +2226,7 @@ class MainWindow(QMainWindow):
             # -- neither is ever sent a second time.
             delivered_chat_ids=delivered_chat_ids,
             resume_steps=resume_steps,
+            dialog_snapshot=self._dialog_cache.get(self._dialog_cache_key(account)),
             # No Qt parent on purpose: with parent=self, Qt's ownership
             # hierarchy would keep every past campaign alive forever as a
             # child of MainWindow. Plain Python refcounting reclaims it as
@@ -2349,6 +2495,8 @@ class MainWindow(QMainWindow):
             return
         account, text, entities, attachments, recipient_names = self._last_campaign_context
         settings = self._service.settings_repository.load_app_settings()
+        if not self._confirm_campaign_start(recipients, settings):
+            return
         try:
             rate_limiter = RateLimiter(settings.min_delay_seconds, settings.max_delay_seconds)
         except SettingsValidationError as exc:

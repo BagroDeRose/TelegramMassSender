@@ -19,6 +19,8 @@ unhashable, so they can't key `send_behavior` directly).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
+from types import SimpleNamespace
 from typing import Any, Dict, List, Optional, Tuple
 from unittest.mock import MagicMock
 
@@ -36,6 +38,7 @@ from telethon.errors import InviteHashExpiredError, InviteHashInvalidError
 from telethon.tl.functions.contacts import ResolvePhoneRequest
 from telethon.tl.functions.messages import (
     CheckChatInviteRequest,
+    GetDialogFiltersRequest,
     SendMultiMediaRequest,
     UploadMediaRequest,
 )
@@ -51,6 +54,7 @@ from telethon.tl.types import (
     Photo,
     User,
 )
+from telethon.tl.types.messages import DialogFilters
 
 PERMANENT_ERROR_FACTORIES = {
     "not_found": lambda: UsernameNotOccupiedError(request=None),
@@ -77,6 +81,32 @@ def make_fake_user(identifier: Any, first_name: Optional[str] = None, last_name:
     user.first_name = first_name
     user.last_name = last_name
     return user
+
+
+def make_user(
+    user_id: int,
+    first_name: Optional[str] = None,
+    last_name: Optional[str] = None,
+    *,
+    username: Optional[str] = None,
+    bot: bool = False,
+    deleted: bool = False,
+    is_self: bool = False,
+    contact: bool = False,
+) -> User:
+    """A real telethon User (unlike make_fake_user's MagicMock), for dialog
+    lists: bot/deleted/is_self/contact behave exactly as from Telegram."""
+    return User(
+        id=user_id,
+        first_name=first_name,
+        last_name=last_name,
+        username=username,
+        bot=bot or None,
+        deleted=deleted or None,
+        is_self=is_self or None,
+        contact=contact or None,
+        access_hash=user_id * 3 + 1,
+    )
 
 
 def make_fake_chat() -> Chat:
@@ -159,12 +189,34 @@ def _is_chat_entity(entity: Any) -> bool:
 
 
 class FakeDialog:
-    """The slice of telethon.tl.custom.Dialog this app reads."""
+    """The slice of telethon.tl.custom.Dialog this app reads. Put one in
+    MockTelegramClient.dialogs directly to set archive/date/unread/mute;
+    a bare entity there becomes FakeDialog(entity)."""
 
-    def __init__(self, entity: Any) -> None:
+    def __init__(
+        self,
+        entity: Any,
+        *,
+        archived: bool = False,
+        date: Optional[datetime] = None,
+        unread_count: int = 0,
+        muted: bool = False,
+    ) -> None:
         self.entity = entity
-        self.id = telethon_utils.get_peer_id(entity) if _is_chat_entity(entity) else getattr(entity, "id", None)
+        try:
+            self.id = telethon_utils.get_peer_id(entity)
+        except TypeError:  # make_fake_user's MagicMock
+            self.id = getattr(entity, "id", None)
         self.name = getattr(entity, "title", None) or getattr(entity, "first_name", None) or ""
+        # Real Telethon: folder_id 1 is the archive, archived = folder_id is not None.
+        self.folder_id = 1 if archived else None
+        self.archived = archived
+        self.date = date
+        self.unread_count = unread_count
+        self.dialog = SimpleNamespace(
+            unread_mark=None,
+            notify_settings=SimpleNamespace(mute_until=datetime(2038, 1, 1) if muted else None),
+        )
 
 
 @dataclass
@@ -205,6 +257,13 @@ class MockTelegramClient:
     # chat, or a list of exceptions/None consumed one per send call.
     chat_send_behavior: Dict[int, Any] = field(default_factory=dict)
     dialogs_cached: bool = False
+    # What GetDialogFiltersRequest returns: a list of DialogFilter /
+    # DialogFilterChatlist / DialogFilterDefault, or an exception to raise.
+    dialog_filters: Any = field(default_factory=list)
+    # Positive user ids the session has no access_hash for: get_entity
+    # raises ValueError for them until the dialogs were fetched (like a
+    # user picked by ID whose entity this session never stored).
+    uncached_user_ids: set = field(default_factory=set)
 
     async def connect(self) -> None:
         self.connected = True
@@ -226,6 +285,14 @@ class MockTelegramClient:
                 # the dialogs (or a message from that chat) were seen.
                 raise ValueError(f"Could not find the input entity for {identifier}")
             return self.chats[identifier]
+        if isinstance(identifier, int) and identifier in self.uncached_user_ids:
+            if not self.dialogs_cached:
+                raise ValueError(f"Could not find the input entity for PeerUser(user_id={identifier})")
+            for item in self.dialogs:
+                entity = item.entity if isinstance(item, FakeDialog) else item
+                if isinstance(entity, User) and entity.id == identifier:
+                    return entity
+            raise ValueError(f"Could not find the input entity for PeerUser(user_id={identifier})")
         if isinstance(identifier, int) and identifier < 0 and identifier not in self.entity_behavior:
             raise ValueError(f"Could not find the input entity for {identifier}")
         behavior = self.entity_behavior.get(identifier, "found")
@@ -245,8 +312,11 @@ class MockTelegramClient:
         if self.dialogs_errors:
             raise self.dialogs_errors.pop(0)
         self.dialogs_cached = True
-        for entity in self.dialogs:
-            yield FakeDialog(entity)
+        for item in self.dialogs:
+            dialog = item if isinstance(item, FakeDialog) else FakeDialog(item)
+            if kwargs.get("ignore_migrated") and getattr(dialog.entity, "migrated_to", None) is not None:
+                continue
+            yield dialog
 
     async def get_dialogs(self, *args, **kwargs):
         return [dialog async for dialog in self.iter_dialogs(*args, **kwargs)]
@@ -257,6 +327,9 @@ class MockTelegramClient:
             if isinstance(outcome, list):
                 outcome = outcome.pop(0) if outcome else None
             return outcome
+        if isinstance(entity, User) and not isinstance(entity, MagicMock):
+            # Real Telethon users (make_user) are unhashable: keyed by id.
+            return self.send_behavior.get(entity.id)
         return self.send_behavior.get(entity)
 
     async def send_message(self, entity, text, formatting_entities=None):
@@ -299,6 +372,10 @@ class MockTelegramClient:
             outcome = self._send_outcome(request.peer)
             if isinstance(outcome, BaseException):
                 raise outcome
+        if isinstance(request, GetDialogFiltersRequest):
+            if isinstance(self.dialog_filters, BaseException):
+                raise self.dialog_filters
+            return DialogFilters(filters=list(self.dialog_filters))
         if isinstance(request, CheckChatInviteRequest):
             behavior = self.invite_behavior.get(request.hash, "invalid")
             if isinstance(behavior, BaseException):

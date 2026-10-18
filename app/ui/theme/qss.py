@@ -534,6 +534,24 @@ QSpinBox[focusRing="true"], QComboBox[focusRing="true"], QListWidget[focusRing="
     border: ${focus_ring}px solid $focus_ring;
 }
 
+/* A QLineEdit's action icons (addAction: search, clear button) are
+   QToolButtons inside the field. Without this they inherit the regular
+   button rule above -- min-height, padding, border, background -- and
+   sit taller than the field itself, pushed down and over its frame. Qt
+   positions and sizes them; the QSS only has to stay out of the way. */
+QLineEdit QToolButton,
+QLineEdit QToolButton:hover,
+QLineEdit QToolButton:pressed,
+QLineEdit QToolButton:disabled,
+QLineEdit QToolButton[focusRing="true"] {
+    background: transparent;
+    border: none;
+    padding: 0px;
+    margin: 0px;
+    min-height: 0px;
+    min-width: 0px;
+}
+
 QLineEdit:disabled, QPlainTextEdit:disabled, QSpinBox:disabled, QComboBox:disabled {
     color: $disabled_text;
     background-color: $disabled_bg;
@@ -714,6 +732,49 @@ QLabel#tableHeader {
     color: $text_muted;
     font-size: ${font_caption}px;
     font-weight: 600;
+}
+
+QListView#dialogPickerList {
+    background-color: $input_bg;
+    border: 1px solid $border;
+    border-radius: ${radius_sm}px;
+    padding: 0px;
+    outline: none;
+}
+
+QListView#dialogPickerList[focusRing="true"] {
+    border: ${focus_ring}px solid $focus_ring;
+}
+
+QListView#dialogPickerList::item {
+    border-bottom: 1px solid $border_subtle;
+    padding: 0px ${space_xs}px;
+}
+
+QListView#dialogPickerList::item:hover {
+    background-color: $hover;
+}
+
+QListView#dialogPickerList::item:disabled:hover {
+    background-color: transparent;
+}
+
+QListView#dialogPickerList::indicator {
+    width: 16px;
+    height: 16px;
+    border: 1px solid $scrollbar_handle;
+    border-radius: 4px;
+    background-color: $input_bg;
+}
+
+QListView#dialogPickerList::indicator:hover {
+    border-color: $accent;
+}
+
+QListView#dialogPickerList::indicator:checked {
+    background-color: $accent;
+    border-color: $accent;
+    image: url($check_url);
 }
 
 QListWidget#resultsList {

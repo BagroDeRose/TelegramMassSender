@@ -16,6 +16,17 @@ runtime_data/
 *.dat
 *.log
 *.log.*
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-wal
+*.db-shm
+# Exported/saved CSV reports and diagnostic bundles (*.zip below)
+*.csv
+reports/
+# Scratch output and ad-hoc worktrees
+scratch/
+.worktrees/
 
 # PyInstaller
 build/

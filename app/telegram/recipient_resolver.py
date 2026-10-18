@@ -41,6 +41,7 @@ from app.i18n import tr
 from app.logging.logger import get_logger
 from app.recipients.parser import ParsedRecipient, RecipientKind
 from app.telegram.chat_targets import (
+    DialogSnapshot,
     TargetType,
     chat_error_reason_key,
     chat_peer_id,
@@ -116,12 +117,19 @@ class ResolvedRecipient:
 
 
 class RecipientResolver:
-    def __init__(self, client: TelegramClient) -> None:
+    def __init__(self, client: TelegramClient, dialogs: Optional[DialogSnapshot] = None) -> None:
+        """`dialogs`: the session's cached DialogSnapshot for this account
+        (the "From my chats…" picker's last read), if any. IDs found there
+        need no dialogs read of their own; one that isn't there makes the
+        resolver read the dialogs from Telegram once, as without a cache."""
         self._client = client
         self._cache: Dict[str, ResolvedRecipient] = {}
-        # Marked id -> chat entity, from the account's own dialogs; None
-        # until fetched (see ensure_dialogs_loaded).
-        self._dialog_chats: Optional[Dict[int, Any]] = None
+        # Marked id -> chat entity and user id -> User, from the account's
+        # own dialogs; None until known (see ensure_dialogs_loaded).
+        self._dialog_chats: Optional[Dict[int, Any]] = dict(dialogs.chats) if dialogs is not None else None
+        self._dialog_users: Dict[int, Any] = dict(dialogs.users) if dialogs is not None else {}
+        # True once this resolver read the dialogs from Telegram itself.
+        self._dialogs_fetched = False
 
     @property
     def dialogs_loaded(self) -> bool:
@@ -129,20 +137,39 @@ class RecipientResolver:
 
     async def ensure_dialogs_loaded(self) -> None:
         """Fetch the account's dialogs once, which is also what gives
-        Telethon the access_hash it needs for a bare marked chat id.
-        FloodWaitError propagates (the campaign pauses on it exactly like
-        on a send); nothing is cached on failure, so the next call retries
-        the fetch from scratch."""
+        Telethon the access_hash it needs for a bare marked chat id -- or
+        for a bare user id the session hasn't seen (e.g. a person picked
+        by ID in "From my chats…" on another day). FloodWaitError
+        propagates (the campaign pauses on it exactly like on a send);
+        nothing is cached on failure, so the next call retries the fetch
+        from scratch."""
         if self._dialog_chats is not None:
             return
+        await self._fetch_dialogs()
+
+    async def _refetch_dialogs_once(self) -> bool:
+        """An ID wasn't in the dialogs known so far (possibly a cached
+        snapshot): read them from Telegram, at most once per resolver.
+        False if they were already read fresh, so there's nothing new."""
+        if self._dialogs_fetched:
+            return False
+        await self._fetch_dialogs()
+        return True
+
+    async def _fetch_dialogs(self) -> None:
         chats: Dict[int, Any] = {}
+        users: Dict[int, Any] = {}
         async for dialog in self._client.iter_dialogs():
             entity = dialog.entity
             target_type = target_type_of(entity)
-            if target_type is not None and target_type.is_chat:
+            if target_type is TargetType.USER:
+                users[entity.id] = entity
+            elif target_type is not None:
                 chats[chat_peer_id(entity)] = entity
         self._dialog_chats = chats
-        logger.info("Загружены диалоги аккаунта: чатов %d", len(chats))
+        self._dialog_users = users
+        self._dialogs_fetched = True
+        logger.info("Загружены диалоги аккаунта: чатов %d, личных %d", len(chats), len(users))
 
     def _from_entity(self, parsed: ParsedRecipient, entity: Any) -> ResolvedRecipient:
         target_type = target_type_of(entity)
@@ -184,12 +211,19 @@ class RecipientResolver:
         if parsed.kind == RecipientKind.CHAT_ID:
             await self.ensure_dialogs_loaded()  # FloodWaitError propagates
             entity = self._dialog_chats.get(int(parsed.value))
+            if entity is None and await self._refetch_dialogs_once():
+                entity = self._dialog_chats.get(int(parsed.value))
             if entity is not None:
                 result = self._from_entity(parsed, entity)
                 self._cache[cache_key] = result
                 return result
 
         identifier = int(parsed.value) if parsed.kind in (RecipientKind.USER_ID, RecipientKind.CHAT_ID) else parsed.value
+
+        if parsed.kind == RecipientKind.USER_ID and identifier in self._dialog_users:
+            result = self._from_entity(parsed, self._dialog_users[identifier])
+            self._cache[cache_key] = result
+            return result
 
         try:
             entity = await self._client.get_entity(identifier)
@@ -215,6 +249,19 @@ class RecipientResolver:
                 # Not among the account's dialogs and unknown to the
                 # session: the account isn't in this chat.
                 result = self._failed(parsed, ResolveStatus.NOT_MEMBER)
+            elif parsed.kind == RecipientKind.USER_ID and not self._dialogs_fetched:
+                # A bare user id the session has no access_hash for, and not
+                # in the dialogs known so far: read the dialogs from
+                # Telegram once (FloodWaitError propagates) and take the
+                # user from there -- never a guessed access_hash.
+                await self._refetch_dialogs_once()
+                user = self._dialog_users.get(identifier)
+                if user is not None:
+                    result = self._from_entity(parsed, user)
+                else:
+                    result = ResolvedRecipient(
+                        parsed=parsed, status=ResolveStatus.NOT_FOUND, error=STATUS_LABELS[ResolveStatus.NOT_FOUND]
+                    )
             else:
                 result = ResolvedRecipient(
                     parsed=parsed, status=ResolveStatus.NOT_FOUND, error=STATUS_LABELS[ResolveStatus.NOT_FOUND]

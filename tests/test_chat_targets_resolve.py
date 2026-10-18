@@ -26,7 +26,7 @@ from app.telegram.chat_targets import (
     TargetType,
     chat_error_reason_key,
     check_send_rights,
-    list_writable_chats,
+    list_dialogs,
     send_requirements,
     target_type_of,
 )
@@ -40,6 +40,7 @@ from tests.mocks.mock_telegram_client import (
     make_fake_group,
     make_fake_user,
     make_flood_wait,
+    make_user,
 )
 
 TEXT = SendRequirements(has_plain_text_message=True, message_count=1)
@@ -333,10 +334,10 @@ def test_unrelated_error_is_not_mapped():
 # ---- "From my chats…" ------------------------------------------------------------
 
 
-async def test_list_writable_chats_filters_users_and_unwritable_chats():
+async def test_list_dialogs_marks_unwritable_chats_and_keeps_users():
     client = MockTelegramClient(
         dialogs=[
-            make_fake_user("friend"),
+            make_user(55, "Friend", username="friend"),
             make_fake_channel(1, "My channel", username="my_channel", broadcast=True, creator=True),
             make_fake_channel(2, "Read-only channel", broadcast=True),
             make_fake_channel(3, "Team", default_banned=None),
@@ -345,12 +346,19 @@ async def test_list_writable_chats_filters_users_and_unwritable_chats():
             make_fake_channel(6, "Forum", forum=True),
         ]
     )
-    chats = await list_writable_chats(client)
-    assert [(c.title, c.target_type) for c in chats] == [
-        ("My channel", TargetType.CHANNEL),
-        ("Team", TargetType.SUPERGROUP),
-        ("Family", TargetType.GROUP),
-        ("Forum", TargetType.FORUM),
+    dialogs = (await list_dialogs(client)).dialogs
+    assert dialogs[0].target_type is TargetType.USER and dialogs[0].writable
+    assert [(d.title, d.writable) for d in dialogs[1:]] == [
+        ("My channel", True),
+        ("Read-only channel", False),
+        ("Team", True),
+        ("Muted group", False),
+        ("Family", True),
+        ("Forum", True),
+    ]
+    chats = [d for d in dialogs if d.target_type.is_chat and d.writable]
+    assert [c.target_type for c in chats] == [
+        TargetType.CHANNEL, TargetType.SUPERGROUP, TargetType.GROUP, TargetType.FORUM,
     ]
     assert [c.recipient_line for c in chats] == ["@my_channel", "-1000000000003", "-5", "-1000000000006"]
     # Every line the picker writes back parses as a chat target again.
