@@ -9,6 +9,10 @@
    QColor/Qt.GlobalColor colours, setStyleSheet calls.
 3. Hard-coded pixel sizes outside the token module: numeric arguments to
    size / margin / spacing setters.
+4. QColor(...) built directly from a value outside the theme package:
+   token colours go through theme.qcolor(), the only path that also reads
+   translucent "rgba(...)" tokens (QColor's constructor paints those
+   black). QColor(Qt.GlobalColor.transparent) is the one exception.
 
 Prints every finding and exits non-zero if there is any.
 """
@@ -34,6 +38,7 @@ HEX = re.compile(r"#[0-9a-fA-F]{6}\b|#[0-9a-fA-F]{3}\b")
 RGB = re.compile(r"\brgba?\(")
 NAMED = re.compile(r"QColor\(\"|Qt\.GlobalColor\.(?!transparent)")
 STYLESHEET = re.compile(r"\.setStyleSheet\(")
+RAW_QCOLOR = re.compile(r"\bQColor\((?!Qt\.GlobalColor\.transparent\))")
 SIZE_CALL = re.compile(
     r"\.(setFixedWidth|setFixedHeight|setFixedSize|setMinimumWidth|setMinimumHeight|setMinimumSize|"
     r"setMaximumWidth|setMaximumHeight|setMaximumSize|resize|setContentsMargins|setSpacing|"
@@ -98,7 +103,13 @@ def main() -> int:
                 continue
             if rel.startswith("app/ui/theme/"):
                 continue  # qss template + theme runtime render tokens only
-            for pattern, label in ((HEX, "hex colour"), (RGB, "rgb()"), (NAMED, "named colour"), (STYLESHEET, "setStyleSheet")):
+            for pattern, label in (
+                (HEX, "hex colour"),
+                (RGB, "rgb()"),
+                (NAMED, "named colour"),
+                (STYLESHEET, "setStyleSheet"),
+                (RAW_QCOLOR, "QColor() instead of theme.qcolor()"),
+            ):
                 if pattern.search(line):
                     findings.append(f"{label}: {rel}:{number}: {stripped[:90]}")
             for match in SIZE_CALL.finditer(line):

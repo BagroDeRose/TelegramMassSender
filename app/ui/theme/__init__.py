@@ -35,6 +35,7 @@ from app.config.settings import DEFAULT_THEME
 from app.i18n import tr
 from app.ui import icons
 from app.ui.theme.qss import QSS_TEMPLATE
+from app.ui.theme.tokens import parse_color
 from app.ui.theme.tokens import (  # noqa: F401 - re-exported public API
     ACCOUNT_CARD_MAX_WIDTH,
     CONTENT_MAX_WIDTH,
@@ -237,6 +238,17 @@ def mono_font(size_px: int = FONT_SIZE_HELPER) -> QFont:
 # ---- palette ------------------------------------------------------------------------
 
 
+def qcolor(value: str) -> QColor:
+    """The one way a token colour becomes a QColor. QColor("rgba(...)")
+    -- the form alpha() tokens take, which QSS understands -- is an
+    invalid colour that paints black; this parses every token form,
+    translucent ones included, and raises on anything else."""
+    r, g, b, opacity = parse_color(value)
+    color = QColor(r, g, b)
+    color.setAlphaF(opacity)
+    return color
+
+
 def palette_for(theme: str) -> QPalette:
     """The QPalette matching the tokens. Native widgets the QSS doesn't
     reach (message-box text, context menus of text fields, tooltips' text,
@@ -266,15 +278,15 @@ def palette_for(theme: str) -> QPalette:
         QPalette.ColorRole.LinkVisited: t.link,
     }
     for role, color in roles.items():
-        palette.setColor(role, QColor(color))
+        palette.setColor(role, qcolor(color))
     for role in (
         QPalette.ColorRole.WindowText,
         QPalette.ColorRole.Text,
         QPalette.ColorRole.ButtonText,
     ):
-        palette.setColor(QPalette.ColorGroup.Disabled, role, QColor(t.disabled_text))
-    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Base, QColor(t.disabled_bg))
-    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Button, QColor(t.disabled_bg))
+        palette.setColor(QPalette.ColorGroup.Disabled, role, qcolor(t.disabled_text))
+    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Base, qcolor(t.disabled_bg))
+    palette.setColor(QPalette.ColorGroup.Disabled, QPalette.ColorRole.Button, qcolor(t.disabled_bg))
     return palette
 
 

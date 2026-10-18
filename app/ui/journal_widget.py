@@ -14,7 +14,7 @@ from datetime import datetime
 from typing import Optional
 
 from PySide6.QtCore import QRect, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFontMetrics, QPainter
+from PySide6.QtGui import QFontMetrics, QPainter
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -112,7 +112,7 @@ class JournalRowDelegate(QStyledItemDelegate):
         painter.save()
         mono = theme.mono_font(FONT_SIZE_CAPTION)
         painter.setFont(mono)
-        painter.setPen(QColor(tokens.text_muted))
+        painter.setPen(theme.qcolor(tokens.text_muted))
         time_rect = QRect(rect.left() + SPACE_SM, rect.top() + SPACE_XS, rect.width(), QFontMetrics(mono).height())
         painter.drawText(time_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, index.data(_TIME_ROLE) or "")
 
@@ -128,7 +128,7 @@ class JournalRowDelegate(QStyledItemDelegate):
             )
             icon.paint(painter, icon_rect)
         painter.setFont(theme.ui_font(FONT_SIZE_HELPER))
-        painter.setPen(QColor(tokens.text_primary))
+        painter.setPen(theme.qcolor(tokens.text_primary))
         painter.drawText(message_rect, Qt.TextFlag.TextWordWrap | Qt.AlignmentFlag.AlignTop, index.data(_MESSAGE_ROLE) or "")
         painter.restore()
 

@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import Any, List, Optional
 
 from PySide6.QtCore import QRect, QRectF, QSize, Qt, Signal
-from PySide6.QtGui import QColor, QFontMetrics, QPainter
+from PySide6.QtGui import QFontMetrics, QPainter
 from PySide6.QtWidgets import (
     QButtonGroup,
     QFrame,
@@ -230,18 +230,18 @@ class ResultsRowDelegate(QStyledItemDelegate):
         pill = QRectF(rects["status"].left() + SPACE_SM, rects["status"].center().y() - pill_h / 2, pill_w, pill_h)
         tint = {"success": tokens.success, "error": tokens.error}.get(status, tokens.text_secondary)
         fg = {"success": tokens.success_ink, "error": tokens.error_ink}.get(status, tokens.text_secondary)
-        bg = QColor(tint)
+        bg = theme.qcolor(tint)
         bg.setAlphaF(PILL_TINT_ALPHA)
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(bg)
         painter.drawRoundedRect(pill, pill_h / 2, pill_h / 2)
-        painter.setPen(QColor(fg))
+        painter.setPen(theme.qcolor(fg))
         painter.drawText(pill, Qt.AlignmentFlag.AlignCenter, label)
 
         # Recipient.
         body = theme.ui_font(FONT_SIZE_HELPER + 1)
         painter.setFont(body)
-        painter.setPen(QColor(tokens.text_primary))
+        painter.setPen(theme.qcolor(tokens.text_primary))
         self._draw_elided(painter, rects["recipient"], item.recipient.display_label)
 
         # Target type: icon + text.
@@ -259,17 +259,17 @@ class ResultsRowDelegate(QStyledItemDelegate):
             icons.themed(icon_name, "text_muted").paint(painter, icon_rect)
             type_rect.setLeft(icon_rect.right() + SPACE_XS + 1)
         painter.setFont(theme.ui_font(FONT_SIZE_HELPER))
-        painter.setPen(QColor(tokens.text_secondary))
+        painter.setPen(theme.qcolor(tokens.text_secondary))
         painter.drawText(type_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, type_text)
 
         # ID (monospace).
         painter.setFont(theme.mono_font(FONT_SIZE_HELPER))
-        painter.setPen(QColor(tokens.text_muted))
+        painter.setPen(theme.qcolor(tokens.text_muted))
         self._draw_elided(painter, rects["id"], str(item.resolved_id) if item.resolved_id is not None else "—")
 
         # Reason.
         painter.setFont(theme.ui_font(FONT_SIZE_HELPER))
-        painter.setPen(QColor(tokens.error if item.status == SendItemStatus.FAILED else tokens.text_muted))
+        painter.setPen(theme.qcolor(tokens.error if item.status == SendItemStatus.FAILED else tokens.text_muted))
         self._draw_elided(painter, rects["reason"], item.error or "")
         painter.restore()
 

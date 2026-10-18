@@ -26,7 +26,7 @@ from PySide6.QtCore import (
     QSortFilterProxyModel,
     Qt,
 )
-from PySide6.QtGui import QColor, QFontMetrics, QPainter
+from PySide6.QtGui import QFontMetrics, QPainter
 from PySide6.QtWidgets import QStyle, QStyledItemDelegate, QStyleOptionViewItem
 
 from app.i18n import get_language, tr
@@ -303,8 +303,8 @@ class DialogRowDelegate(QStyledItemDelegate):
         already = bool(index.data(ALREADY_ADDED_ROLE))
         muted = not dialog.writable
         rect = option.rect
-        primary = QColor(tokens.disabled_text if muted else tokens.text_primary)
-        secondary = QColor(tokens.disabled_text if muted else tokens.text_secondary)
+        primary = theme.qcolor(tokens.disabled_text if muted else tokens.text_primary)
+        secondary = theme.qcolor(tokens.disabled_text if muted else tokens.text_secondary)
 
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
@@ -317,13 +317,13 @@ class DialogRowDelegate(QStyledItemDelegate):
             AVATAR_SIZE,
         )
         painter.setPen(Qt.PenStyle.NoPen)
-        circle = QColor(tokens.disabled_bg if muted else tokens.accent)
+        circle = theme.qcolor(tokens.disabled_bg if muted else tokens.accent)
         if not muted:
             circle.setAlphaF(PILL_TINT_ALPHA)
         painter.setBrush(circle)
         painter.drawEllipse(avatar)
         painter.setFont(theme.ui_font(FONT_SIZE_HELPER, theme.FONT_WEIGHT_SEMIBOLD))
-        painter.setPen(QColor(tokens.disabled_text if muted else tokens.accent))
+        painter.setPen(theme.qcolor(tokens.disabled_text if muted else tokens.accent))
         painter.drawText(avatar, Qt.AlignmentFlag.AlignCenter, dialog_initials(dialog.title))
 
         left = int(avatar.right()) + SPACE_MD
@@ -358,7 +358,7 @@ class DialogRowDelegate(QStyledItemDelegate):
         x += type_width + SPACE_SM
         mono = theme.mono_font(FONT_SIZE_HELPER)
         painter.setFont(mono)
-        painter.setPen(QColor(tokens.disabled_text if muted else tokens.text_muted))
+        painter.setPen(theme.qcolor(tokens.disabled_text if muted else tokens.text_muted))
         id_rect = QRect(x, line_rect.top(), max(0, bottom_half.right() - x), line_rect.height())
         address = f"@{dialog.username}" if dialog.username else str(dialog.peer_id)
         painter.drawText(
@@ -369,7 +369,7 @@ class DialogRowDelegate(QStyledItemDelegate):
 
         # Date (secondary), and the "already listed" pill under it.
         painter.setFont(theme.ui_font(FONT_SIZE_CAPTION))
-        painter.setPen(QColor(tokens.text_muted))
+        painter.setPen(theme.qcolor(tokens.text_muted))
         date_rect = QRect(right_column.left(), top_half.top(), right_column.width(), top_half.height())
         painter.drawText(date_rect, Qt.AlignmentFlag.AlignBottom | Qt.AlignmentFlag.AlignRight, format_dialog_date(dialog.last_message_date))
         if already:
@@ -379,13 +379,13 @@ class DialogRowDelegate(QStyledItemDelegate):
             pill_w = min(right_column.width(), metrics.horizontalAdvance(label) + 2 * SPACE_SM)
             pill_h = metrics.height() + SPACE_XS // 2
             pill = QRectF(right_column.right() - pill_w, bottom_half.top() + 1, pill_w, pill_h)
-            tint = QColor(tokens.success)
+            tint = theme.qcolor(tokens.success)
             tint.setAlphaF(PILL_TINT_ALPHA)
             painter.setPen(Qt.PenStyle.NoPen)
             painter.setBrush(tint)
             painter.drawRoundedRect(pill, pill_h / 2, pill_h / 2)
             painter.setFont(pill_font)
-            painter.setPen(QColor(tokens.success_ink))
+            painter.setPen(theme.qcolor(tokens.success_ink))
             painter.drawText(pill, Qt.AlignmentFlag.AlignCenter, metrics.elidedText(label, Qt.TextElideMode.ElideRight, int(pill_w) - SPACE_XS))
         painter.restore()
 

@@ -10,8 +10,9 @@ departed from the brief's starting values are recorded in docs/design.md.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
-from typing import Dict
+from typing import Dict, Tuple
 
 from app.config.settings import DEFAULT_THEME
 
@@ -146,6 +147,33 @@ def mix(color_a: str, color_b: str, amount: float) -> str:
 def alpha(color: str, opacity: float) -> str:
     r, g, b = _rgb(color)
     return f"rgba({r}, {g}, {b}, {opacity:.2f})"
+
+
+_RGBA = re.compile(r"^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([0-9.]+)\s*)?\)$")
+
+
+def parse_color(value: str) -> Tuple[int, int, int, float]:
+    """(r, g, b, opacity 0..1) of a token colour, in every form tokens
+    use: "#rrggbb", "#rgb", "rgba(r, g, b, a)" / "rgb(...)" (from alpha(),
+    which QSS reads but QColor's constructor and SVG don't) and
+    "transparent". Anything else raises ValueError -- never a silent
+    black."""
+    text = value.strip()
+    if text == "transparent":
+        return 0, 0, 0, 0.0
+    if re.fullmatch(r"#[0-9a-fA-F]{6}", text):
+        r, g, b = _rgb(text)
+        return r, g, b, 1.0
+    if re.fullmatch(r"#[0-9a-fA-F]{3}", text):
+        r, g, b = (int(ch * 2, 16) for ch in text[1:])
+        return r, g, b, 1.0
+    match = _RGBA.match(text)
+    if match:
+        r, g, b = (int(match.group(i)) for i in (1, 2, 3))
+        opacity = float(match.group(4)) if match.group(4) is not None else 1.0
+        if max(r, g, b) <= 255 and 0.0 <= opacity <= 1.0:
+            return r, g, b, opacity
+    raise ValueError(f"not a token colour: {value!r}")
 
 
 @dataclass(frozen=True)

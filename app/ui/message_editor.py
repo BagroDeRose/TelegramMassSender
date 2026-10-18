@@ -199,7 +199,7 @@ def _format_for_kind(kind: str) -> QTextCharFormat:
         fmt.setFontFamilies(_MONO_FAMILIES)
     elif kind == "spoiler":
         fmt.setProperty(PROP_SPOILER, True)
-        fmt.setBackground(QColor(theme.spoiler_background()))
+        fmt.setBackground(theme.qcolor(theme.spoiler_background()))
     return fmt
 
 
@@ -208,8 +208,8 @@ def recolor_document(text_edit: QTextEdit) -> None:
     text that was formatted under the previous theme (QTextCharFormat
     colours are baked in when applied; QSS can't reach them)."""
     document = text_edit.document()
-    spoiler = QColor(theme.spoiler_background())
-    link = QColor(theme.link_color())
+    spoiler = theme.qcolor(theme.spoiler_background())
+    link = theme.qcolor(theme.link_color())
     cursor = QTextCursor(document)
     cursor.beginEditBlock()
     block = document.begin()
@@ -254,7 +254,7 @@ def apply_content_to_editor(text_edit: QTextEdit, text: str, entities: List[Type
             fmt = QTextCharFormat()
             fmt.setAnchor(True)
             fmt.setAnchorHref(entity.url)
-            fmt.setForeground(QColor(theme.link_color()))
+            fmt.setForeground(theme.qcolor(theme.link_color()))
             fmt.setFontUnderline(True)
         else:
             kind = _ENTITY_TO_KIND.get(type(entity))
@@ -393,7 +393,7 @@ class MessageEditorWidget(QWidget):
         fmt = QTextCharFormat()
         active = not bool(self._current_format().property(PROP_SPOILER))
         fmt.setProperty(PROP_SPOILER, active)
-        fmt.setBackground(QColor(theme.spoiler_background()) if active else QColor(Qt.GlobalColor.transparent))
+        fmt.setBackground(theme.qcolor(theme.spoiler_background()) if active else QColor(Qt.GlobalColor.transparent))
         self._text_edit.mergeCurrentCharFormat(fmt)
         self._sync_toolbar_state()
 
@@ -427,7 +427,7 @@ class MessageEditorWidget(QWidget):
         fmt = QTextCharFormat()
         fmt.setAnchor(True)
         fmt.setAnchorHref(url)
-        fmt.setForeground(QColor(theme.link_color()))
+        fmt.setForeground(theme.qcolor(theme.link_color()))
         fmt.setFontUnderline(True)
         self._text_edit.mergeCurrentCharFormat(fmt)
 
