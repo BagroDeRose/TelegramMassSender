@@ -6,11 +6,13 @@ there is no persistent widget to retranslate.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import List, Tuple
 
 from PySide6.QtWidgets import QDialog, QMessageBox, QPlainTextEdit, QPushButton, QWidget
 
 from app.i18n import tr, trn
+from app.ui import theme
 from app.ui.dialog_frame import build_dialog_frame
 from app.ui.theme import DIALOG_HEIGHT_SM, DIALOG_WIDTH
 
@@ -92,6 +94,57 @@ def confirm_start_campaign(
     box.setDefaultButton(yes_button)
     box.exec()
     return box.clickedButton() is yes_button
+
+
+@dataclass(frozen=True)
+class RecipientBreakdown:
+    """Who a campaign is about to reach, as far as is known before
+    anything is resolved: people, bots, groups/channels, and @usernames
+    whose type only resolving will tell."""
+
+    people: int = 0
+    bots: int = 0
+    chats: int = 0
+    unknown: int = 0
+
+    @property
+    def total(self) -> int:
+        return self.people + self.bots + self.chats + self.unknown
+
+
+def build_large_campaign_box(
+    parent: QWidget, breakdown: RecipientBreakdown, threshold: int
+) -> Tuple[QMessageBox, QPushButton, QPushButton]:
+    """The large-campaign guard: starting is the dangerous choice, so the
+    Start button is "danger" and Cancel is the default (Enter or Esc
+    cancels)."""
+    box = QMessageBox(parent)
+    box.setIcon(QMessageBox.Icon.Warning)
+    box.setWindowTitle(tr("dialogs.large_campaign.title"))
+    box.setText(tr("dialogs.large_campaign.message", count=breakdown.total, threshold=threshold))
+    lines = [
+        tr("dialogs.large_campaign.people_line", count=breakdown.people),
+        tr("dialogs.large_campaign.bots_line", count=breakdown.bots),
+        tr("dialogs.large_campaign.chats_line", count=breakdown.chats),
+    ]
+    if breakdown.unknown:
+        lines.append(tr("dialogs.large_campaign.unknown_line", count=breakdown.unknown))
+    box.setInformativeText("\n".join(lines))
+    start_button = box.addButton(tr("dialogs.large_campaign.start"), QMessageBox.ButtonRole.AcceptRole)
+    # set_property re-polishes: the box already styled the button when it
+    # was added, and (unlike a default button) nothing would restyle it later.
+    theme.set_property(start_button, "variant", "danger")
+    cancel_button = box.addButton(tr("dialogs.cancel"), QMessageBox.ButtonRole.RejectRole)
+    box.setDefaultButton(cancel_button)
+    box.setEscapeButton(cancel_button)
+    cancel_button.setFocus()
+    return box, start_button, cancel_button
+
+
+def confirm_large_campaign(parent: QWidget, breakdown: RecipientBreakdown, threshold: int) -> bool:
+    box, start_button, _cancel = build_large_campaign_box(parent, breakdown, threshold)
+    box.exec()
+    return box.clickedButton() is start_button
 
 
 def confirm_reset_settings(parent: QWidget) -> bool:

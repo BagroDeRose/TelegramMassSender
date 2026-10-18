@@ -34,6 +34,12 @@ DEFAULT_THEME = "dark"
 # with a raising check here -- a stray persisted value must never be able
 # to crash startup.
 DEFAULT_CONFIRM_BEFORE_START = False
+# A campaign with more recipients than this always asks before starting,
+# whatever confirm_before_start says -- a guard against sending to a
+# whole dialog list by accident.
+DEFAULT_LARGE_CAMPAIGN_THRESHOLD = 50
+MIN_LARGE_CAMPAIGN_THRESHOLD = 10
+MAX_LARGE_CAMPAIGN_THRESHOLD = 100000
 DEFAULT_REMEMBER_WINDOW_SIZE = True
 DEFAULT_WINDOW_WIDTH = 1180
 DEFAULT_WINDOW_HEIGHT = 860
@@ -60,6 +66,7 @@ SETTINGS_KEY_RETRY_COUNT = "retry_count"
 SETTINGS_KEY_LANGUAGE = "language"
 SETTINGS_KEY_THEME = "theme"
 SETTINGS_KEY_CONFIRM_BEFORE_START = "confirm_before_start"
+SETTINGS_KEY_LARGE_CAMPAIGN_THRESHOLD = "large_campaign_threshold"
 SETTINGS_KEY_REMEMBER_WINDOW_SIZE = "remember_window_size"
 SETTINGS_KEY_WINDOW_WIDTH = "window_width"
 SETTINGS_KEY_WINDOW_HEIGHT = "window_height"
@@ -101,6 +108,17 @@ def validate_retry_count(retry_count: int) -> None:
         )
 
 
+def validate_large_campaign_threshold(threshold: int) -> None:
+    if not (MIN_LARGE_CAMPAIGN_THRESHOLD <= threshold <= MAX_LARGE_CAMPAIGN_THRESHOLD):
+        raise SettingsValidationError(
+            tr(
+                "settings.validation.large_campaign_threshold_out_of_range",
+                min=MIN_LARGE_CAMPAIGN_THRESHOLD,
+                max=MAX_LARGE_CAMPAIGN_THRESHOLD,
+            )
+        )
+
+
 @dataclass
 class AppSettings:
     min_delay_seconds: int = DEFAULT_MIN_DELAY_SECONDS
@@ -109,6 +127,7 @@ class AppSettings:
     language: str = DEFAULT_LANGUAGE
     theme: str = DEFAULT_THEME
     confirm_before_start: bool = DEFAULT_CONFIRM_BEFORE_START
+    large_campaign_threshold: int = DEFAULT_LARGE_CAMPAIGN_THRESHOLD
     remember_window_size: bool = DEFAULT_REMEMBER_WINDOW_SIZE
     window_width: int = DEFAULT_WINDOW_WIDTH
     window_height: int = DEFAULT_WINDOW_HEIGHT
@@ -130,3 +149,4 @@ class AppSettings:
     def validate(self) -> None:
         validate_delay_range(self.min_delay_seconds, self.max_delay_seconds)
         validate_retry_count(self.retry_count)
+        validate_large_campaign_threshold(self.large_campaign_threshold)

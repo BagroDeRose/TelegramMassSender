@@ -145,6 +145,9 @@ class SettingsRepository:
             confirm_before_start=_bool(
                 settings_module.SETTINGS_KEY_CONFIRM_BEFORE_START, settings_module.DEFAULT_CONFIRM_BEFORE_START
             ),
+            large_campaign_threshold=_int(
+                settings_module.SETTINGS_KEY_LARGE_CAMPAIGN_THRESHOLD, settings_module.DEFAULT_LARGE_CAMPAIGN_THRESHOLD
+            ),
             remember_window_size=_bool(
                 settings_module.SETTINGS_KEY_REMEMBER_WINDOW_SIZE, settings_module.DEFAULT_REMEMBER_WINDOW_SIZE
             ),
@@ -186,6 +189,7 @@ class SettingsRepository:
         self.set(settings_module.SETTINGS_KEY_LANGUAGE, settings.language)
         self.set(settings_module.SETTINGS_KEY_THEME, settings.theme)
         self.set(settings_module.SETTINGS_KEY_CONFIRM_BEFORE_START, "1" if settings.confirm_before_start else "0")
+        self.set(settings_module.SETTINGS_KEY_LARGE_CAMPAIGN_THRESHOLD, str(settings.large_campaign_threshold))
         self.set(settings_module.SETTINGS_KEY_REMEMBER_WINDOW_SIZE, "1" if settings.remember_window_size else "0")
         self.set(settings_module.SETTINGS_KEY_WINDOW_WIDTH, str(settings.window_width))
         self.set(settings_module.SETTINGS_KEY_WINDOW_HEIGHT, str(settings.window_height))

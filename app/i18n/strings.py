@@ -260,6 +260,13 @@ STRINGS: Dict[str, Dict[str, str]] = {
         "ru": "Показывать диалог подтверждения перед стартом каждой рассылки",
         "en": "Show a confirmation dialog before every campaign start",
     },
+    "main_window.settings.large_campaign_label": {"ru": "Большая рассылка", "en": "Large campaign"},
+    "main_window.settings.large_campaign_suffix": {"ru": " получателей", "en": " recipients"},
+    "main_window.settings.large_campaign_prefix": {"ru": "больше ", "en": "more than "},
+    "main_window.settings.large_campaign_hint": {
+        "ru": "Если получателей больше этого числа, перед запуском всегда показывается отдельное подтверждение — даже когда «Подтверждать запуск рассылки» выключено. Не меньше 10.",
+        "en": "With more recipients than this, a separate confirmation is always shown before starting — even with \"Confirm before starting a campaign\" off. At least 10.",
+    },
     "main_window.settings.remember_window_size_checkbox": {"ru": "Запоминать размер окна", "en": "Remember window size"},
     "main_window.settings.remember_last_page_checkbox": {"ru": "Открывать последний раздел при запуске", "en": "Open the last-used page on launch"},
     "main_window.settings.reports_directory_label": {"ru": "Папка для отчётов", "en": "Reports folder"},
@@ -728,6 +735,19 @@ STRINGS: Dict[str, Dict[str, str]] = {
     "dialogs.close": {"ru": "Закрыть", "en": "Close"},
     "dialogs.exit": {"ru": "Выйти", "en": "Quit"},
     "dialogs.start_campaign.title": {"ru": "Начать рассылку?", "en": "Start the campaign?"},
+    "dialogs.large_campaign.title": {"ru": "Большая рассылка", "en": "Large campaign"},
+    "dialogs.large_campaign.start": {"ru": "Начать рассылку", "en": "Start campaign"},
+    "dialogs.large_campaign.message": {
+        "ru": "Сообщение уйдёт {count} получателям — это больше порога {threshold}. Проверьте список перед запуском.",
+        "en": "The message will go to {count} recipients — more than the threshold of {threshold}. Check the list before starting.",
+    },
+    "dialogs.large_campaign.people_line": {"ru": "Людей: {count}", "en": "People: {count}"},
+    "dialogs.large_campaign.bots_line": {"ru": "Ботов: {count}", "en": "Bots: {count}"},
+    "dialogs.large_campaign.chats_line": {"ru": "Групп и каналов: {count}", "en": "Groups and channels: {count}"},
+    "dialogs.large_campaign.unknown_line": {
+        "ru": "@username, тип которых станет известен при отправке: {count}",
+        "en": "@usernames whose type is known only when sending: {count}",
+    },
     "dialogs.start_campaign.start": {"ru": "Начать", "en": "Start"},
     "dialogs.start_campaign.users_line": {"ru": "Пользователи (ID, телефон): {count}", "en": "Users (ID, phone): {count}"},
     "dialogs.start_campaign.chats_line": {"ru": "Группы и каналы (ID, ссылка): {count}", "en": "Groups and channels (ID, link): {count}"},
@@ -826,6 +846,10 @@ STRINGS: Dict[str, Dict[str, str]] = {
     "settings.validation.interval_too_large": {
         "ru": "Слишком большой интервал. Максимально допустимое значение: {max} сек.",
         "en": "The interval is too large. The maximum allowed value is {max} sec.",
+    },
+    "settings.validation.large_campaign_threshold_out_of_range": {
+        "ru": "Порог большой рассылки должен быть от {min} до {max}.",
+        "en": "The large-campaign threshold must be between {min} and {max}.",
     },
     "settings.validation.retry_count_out_of_range": {
         "ru": "Количество повторов должно быть от {min} до {max}.",

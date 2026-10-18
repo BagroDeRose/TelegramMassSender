@@ -57,7 +57,9 @@ from app.campaign import report_library
 from app.config.paths import get_reports_dir, get_resource_path
 from app.config.settings import (
     MAX_ALLOWED_DELAY_SECONDS,
+    MAX_LARGE_CAMPAIGN_THRESHOLD,
     MIN_ALLOWED_DELAY_SECONDS,
+    MIN_LARGE_CAMPAIGN_THRESHOLD,
     AppSettings,
     SettingsValidationError,
 )
@@ -85,6 +87,8 @@ from app.ui.dialogs import (
     confirm_delete_group,
     confirm_delete_preset,
     confirm_exit_during_campaign,
+    RecipientBreakdown,
+    confirm_large_campaign,
     confirm_reset_settings,
     confirm_start_campaign,
     show_error,
@@ -551,6 +555,10 @@ class MainWindow(QMainWindow):
         self._reset_settings_button.setText(tr("main_window.settings.reset_settings_button"))
         self._reset_hint_label.setText(tr("main_window.settings.reset_hint"))
         self._confirm_hint_label.setText(tr("main_window.settings.confirm_before_start_tooltip"))
+        self._large_campaign_section_label.setText(tr("main_window.settings.large_campaign_label"))
+        self._large_campaign_spin.setPrefix(tr("main_window.settings.large_campaign_prefix"))
+        self._large_campaign_spin.setSuffix(tr("main_window.settings.large_campaign_suffix"))
+        self._large_campaign_hint_label.setText(tr("main_window.settings.large_campaign_hint"))
 
         # Combo items themselves carry no translation-key state (their
         # itemData is the stable theme/language code, not display text),
@@ -1070,8 +1078,27 @@ class MainWindow(QMainWindow):
             lambda checked: self._save_setting_field("confirm_before_start", checked)
         )
         self._confirm_hint_label = QLabel(tr("main_window.settings.confirm_before_start_tooltip"), widget)
-        self._settings_row(grid, row, None, self._confirm_before_start_checkbox, self._confirm_hint_label)
+        row = self._settings_row(grid, row, None, self._confirm_before_start_checkbox, self._confirm_hint_label)
+
+        self._large_campaign_section_label = QLabel(tr("main_window.settings.large_campaign_label"), widget)
+        self._large_campaign_spin = QSpinBox(widget)
+        self._large_campaign_spin.setRange(MIN_LARGE_CAMPAIGN_THRESHOLD, MAX_LARGE_CAMPAIGN_THRESHOLD)
+        self._large_campaign_spin.setPrefix(tr("main_window.settings.large_campaign_prefix"))
+        self._large_campaign_spin.setSuffix(tr("main_window.settings.large_campaign_suffix"))
+        self._large_campaign_spin.editingFinished.connect(self._on_large_campaign_threshold_changed)
+        self._large_campaign_hint_label = QLabel(tr("main_window.settings.large_campaign_hint"), widget)
+        self._settings_row(
+            grid, row, self._large_campaign_section_label, self._large_campaign_spin, self._large_campaign_hint_label
+        )
         return widget
+
+    def _on_large_campaign_threshold_changed(self) -> None:
+        settings = self._service.settings_repository.load_app_settings()
+        settings.large_campaign_threshold = self._large_campaign_spin.value()
+        try:
+            self._service.settings_repository.save_app_settings(settings)
+        except SettingsValidationError as exc:  # the spin box range already keeps it valid
+            show_error(self, tr("main_window.settings.large_campaign_label"), str(exc))
 
     def _build_application_settings(self) -> QWidget:
         widget = QWidget()
@@ -1288,6 +1315,9 @@ class MainWindow(QMainWindow):
         self._settings_max_spin.setValue(settings.max_delay_seconds)
         self._settings_min_spin.blockSignals(False)
         self._settings_max_spin.blockSignals(False)
+        self._large_campaign_spin.blockSignals(True)
+        self._large_campaign_spin.setValue(settings.large_campaign_threshold)
+        self._large_campaign_spin.blockSignals(False)
 
         for checkbox, value in (
             (self._confirm_before_start_checkbox, settings.confirm_before_start),
@@ -2050,11 +2080,8 @@ class MainWindow(QMainWindow):
             return
 
         settings = self._service.settings_repository.load_app_settings()
-        if settings.confirm_before_start:
-            chat_count = sum(1 for r in recipients if r.is_chat_target)
-            username_count = sum(1 for r in recipients if r.kind == RecipientKind.USERNAME)
-            if not confirm_start_campaign(self, len(recipients), chat_count, username_count):
-                return
+        if not self._confirm_campaign_start(recipients, settings):
+            return
 
         try:
             rate_limiter = RateLimiter(settings.min_delay_seconds, settings.max_delay_seconds)
@@ -2076,6 +2103,35 @@ class MainWindow(QMainWindow):
             ),
             "запуск рассылки",
         )
+
+    def _recipient_breakdown(self, recipients) -> RecipientBreakdown:
+        """People / bots / chats / not-yet-known, from the recipient
+        formats alone -- nothing is resolved before the user confirms."""
+        people = bots = chats = unknown = 0
+        for recipient in recipients:
+            if recipient.is_chat_target:
+                chats += 1
+            elif recipient.kind == RecipientKind.USERNAME:
+                unknown += 1
+            else:
+                people += 1
+        return RecipientBreakdown(people=people, bots=bots, chats=chats, unknown=unknown)
+
+    def _confirm_campaign_start(self, recipients, settings) -> bool:
+        """The one pre-start confirmation for every start path (Campaign
+        page, Campaign Wizard, Retry). More recipients than the
+        large-campaign threshold always asks, with Cancel as the default,
+        whatever confirm_before_start says; otherwise the optional
+        confirmation asks only when it is switched on."""
+        if len(recipients) > settings.large_campaign_threshold:
+            return confirm_large_campaign(
+                self, self._recipient_breakdown(recipients), settings.large_campaign_threshold
+            )
+        if settings.confirm_before_start:
+            chat_count = sum(1 for r in recipients if r.is_chat_target)
+            username_count = sum(1 for r in recipients if r.kind == RecipientKind.USERNAME)
+            return confirm_start_campaign(self, len(recipients), chat_count, username_count)
+        return True
 
     async def _start_campaign(
         self,
@@ -2387,6 +2443,8 @@ class MainWindow(QMainWindow):
             return
         account, text, entities, attachments, recipient_names = self._last_campaign_context
         settings = self._service.settings_repository.load_app_settings()
+        if not self._confirm_campaign_start(recipients, settings):
+            return
         try:
             rate_limiter = RateLimiter(settings.min_delay_seconds, settings.max_delay_seconds)
         except SettingsValidationError as exc:
