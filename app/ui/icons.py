@@ -72,6 +72,8 @@ _ALIASES: Dict[str, str] = {
     "supergroup": "users-round",
     "forum": "messages-square",
     "user": "user",
+    "bot": "bot",
+    "archived": "archive",
     "export": "download",
     "save": "save",
     "copy": "copy",

@@ -752,6 +752,11 @@ STRINGS: Dict[str, Dict[str, str]] = {
     "chat_picker.select_none": {"ru": "Снять выбор", "en": "Select none"},
     "chat_picker.nothing_matches": {"ru": "Ничего не найдено.", "en": "Nothing matches."},
     "chat_picker.add_button": {"ru": "Добавить", "en": "Add"},
+    "chat_picker.already_added": {"ru": "уже в списке", "en": "already listed"},
+    "chat_picker.already_added_tooltip": {
+        "ru": "Этот получатель уже есть в списке получателей.",
+        "en": "This recipient is already in the recipients list.",
+    },
     "chat_picker.empty": {
         "ru": "У этого аккаунта нет групп или каналов, в которые он может писать.",
         "en": "This account has no groups or channels it can post to.",
