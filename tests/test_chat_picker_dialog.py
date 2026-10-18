@@ -310,3 +310,73 @@ def test_both_languages(qapp):
         assert dialog._archive_toggle.text() == tr("chat_picker.show_archive")
         assert dialog._select_all_button.text() == tr("chat_picker.select_visible")
         assert dialog._folder_combo.itemText(0) == tr("chat_picker.folder_all")
+
+
+# ---- shared folders (chat lists joined by link) --------------------------------------
+
+
+async def test_shared_folder_from_a_link_appears_and_filters(qapp):
+    """A DialogFilterChatlist (a folder added through a t.me/addlist link)
+    sits in the folder combo next to the ordinary folders, in Telegram's
+    order, and narrows the list to its own chats."""
+    from telethon.tl.types import (
+        DialogFilter,
+        DialogFilterChatlist,
+        DialogFilterDefault,
+        InputPeerChannel,
+        InputPeerUser,
+    )
+
+    from app.telegram.chat_targets import list_dialogs
+    from tests.mocks.mock_telegram_client import MockTelegramClient, make_fake_channel, make_user
+
+    news = make_fake_channel(301, "Shared News", username="shared_news", broadcast=True, creator=True)
+    club = make_fake_channel(302, "Club Chat")
+    other = make_fake_channel(303, "Other Group")
+    anna = make_user(401, "Anna", contact=True)
+    client = MockTelegramClient(
+        dialogs=[news, club, other, anna],
+        dialog_filters=[
+            DialogFilterDefault(),
+            DialogFilter(id=2, title="Contacts", pinned_peers=[], include_peers=[], exclude_peers=[], contacts=True),
+            DialogFilterChatlist(
+                id=5,
+                title="Club (shared)",
+                pinned_peers=[InputPeerChannel(channel_id=302, access_hash=1)],
+                include_peers=[InputPeerChannel(channel_id=301, access_hash=1), InputPeerUser(user_id=401, access_hash=1)],
+                has_my_invites=True,
+                emoticon="📚",
+            ),
+        ],
+    )
+    dialog = ChatPickerDialog()
+    dialog.set_dialogs(await list_dialogs(client))
+    combo = dialog._folder_combo
+    assert not combo.isHidden()
+    assert [combo.itemText(i) for i in range(combo.count())] == ["All folders", "Contacts", "Club (shared)"]
+    combo.setCurrentIndex(combo.findData(5))
+    assert sorted(_visible(dialog)) == ["Anna", "Club Chat", "Shared News"]
+    combo.setCurrentIndex(combo.findData(2))
+    assert _visible(dialog) == ["Anna"]
+
+
+async def test_only_a_shared_folder_still_shows_the_folder_filter(qapp):
+    from telethon.tl.types import DialogFilterChatlist, InputPeerChannel
+
+    from app.telegram.chat_targets import list_dialogs
+    from tests.mocks.mock_telegram_client import MockTelegramClient, make_fake_channel
+
+    club = make_fake_channel(302, "Club Chat")
+    client = MockTelegramClient(
+        dialogs=[club, make_fake_channel(303, "Other Group")],
+        dialog_filters=[
+            DialogFilterChatlist(
+                id=9, title="Club", pinned_peers=[], include_peers=[InputPeerChannel(channel_id=302, access_hash=1)]
+            )
+        ],
+    )
+    dialog = ChatPickerDialog()
+    dialog.set_dialogs(await list_dialogs(client))
+    assert not dialog._folder_combo.isHidden()
+    dialog._folder_combo.setCurrentIndex(dialog._folder_combo.findData(9))
+    assert _visible(dialog) == ["Club Chat"]
