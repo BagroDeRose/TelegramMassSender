@@ -283,8 +283,10 @@ class MainWindow(QMainWindow):
         # so "From my chats…" is only offered for an account that is
         # actually connected and authorized.
         self._account_statuses: Dict[int, AccountStatus] = {}
-        # The open "From my chats…" picker, if any (one at a time).
+        # The open "From my chats…" picker, if any (one at a time), and the
+        # open Campaign Wizard, whose recipients step has the same button.
         self._chat_picker: Optional[ChatPickerDialog] = None
+        self._campaign_wizard: Optional[CampaignWizardDialog] = None
 
         self._database = database if database is not None else Database()
         self._service = TelegramService(self._database, secure_storage=secure_storage)
@@ -1532,9 +1534,23 @@ class MainWindow(QMainWindow):
 
     # ---- campaign wizard ---------------------------------------------------
 
-    def _on_open_campaign_wizard_clicked(self) -> None:
+    def _build_campaign_wizard(self) -> CampaignWizardDialog:
         dialog = CampaignWizardDialog(self._service.settings_repository, self)
-        if dialog.exec() != QDialog.DialogCode.Accepted:
+        wizard_recipients = dialog.recipient_widget
+        wizard_recipients.pick_chats_requested.connect(
+            lambda: self._on_pick_chats_requested(wizard_recipients, dialog)
+        )
+        self._campaign_wizard = dialog
+        self._update_pick_chats_enabled()
+        return dialog
+
+    def _on_open_campaign_wizard_clicked(self) -> None:
+        dialog = self._build_campaign_wizard()
+        try:
+            accepted = dialog.exec() == QDialog.DialogCode.Accepted
+        finally:
+            self._campaign_wizard = None
+        if not accepted:
             return
         result = dialog.result_state()
         # Write the wizard's collected state into the exact same live
@@ -1918,9 +1934,10 @@ class MainWindow(QMainWindow):
         campaign_busy = self._campaign_starting or (
             self._current_campaign is not None and self._current_campaign.is_active
         )
-        self._recipient_widget.set_pick_chats_enabled(
-            self._active_account_connected() and not campaign_busy and self._chat_picker is None
-        )
+        enabled = self._active_account_connected() and not campaign_busy and self._chat_picker is None
+        self._recipient_widget.set_pick_chats_enabled(enabled)
+        if self._campaign_wizard is not None:
+            self._campaign_wizard.recipient_widget.set_pick_chats_enabled(enabled)
 
     def _on_pick_chats_requested(
         self, target: Optional[RecipientWidget] = None, parent: Optional[QWidget] = None

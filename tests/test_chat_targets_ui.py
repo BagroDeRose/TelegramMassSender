@@ -95,7 +95,7 @@ def test_picker_select_shown_and_selected_targets(qapp):
 
 
 def test_pick_chats_button_only_on_the_main_campaign_page_widget(qapp):
-    assert RecipientWidget()._pick_chats_button.isHidden() is True  # e.g. the Campaign Wizard's
+    assert RecipientWidget()._pick_chats_button.isHidden() is True  # off unless asked for
     widget = RecipientWidget(show_chat_picker=True)
     assert widget._pick_chats_button.isHidden() is False
     assert widget._pick_chats_button.isEnabled() is False
