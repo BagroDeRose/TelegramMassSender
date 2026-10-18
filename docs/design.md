@@ -161,7 +161,7 @@ Screens: `docs/redesign/after/dialog_chat_picker_*` (list, `_filters` with a fol
 
 ### Verification
 
-- `pytest tests/` in one process: 1009 passed (913 before this branch).
+- `pytest tests/` in one process: 1009 passed (913 before this branch); 1162 after the follow-up below.
 - `scripts/check_ui_hygiene.py`: 0 findings.
 - Screenshots captured on the real Windows platform through the real qasync loop, including the wizard run via `exec()` from a Qt slot with the picker loading inside it.
 
@@ -170,3 +170,10 @@ Screens: `docs/redesign/after/dialog_chat_picker_*` (list, `_filters` with a fol
 - **No avatars** (by design: nothing is downloaded); initials only.
 - **Dialogs are read in full each time** the picker opens or refreshes — there's no cache across opens, so a list that changed in Telegram is always current.
 - **Forum topics** stay out of scope: a forum is still posted to "General".
+
+### Follow-up on the same branch
+
+40. **Large-campaign guard.** More recipients than `large_campaign_threshold` (Settings → Sending, default 50, minimum 10) always asks before starting, whatever `confirm_before_start` says, on all three start paths through one `MainWindow._confirm_campaign_start` (so Retry now honours the optional confirmation too). The box lists people, bots, groups/channels and @usernames of not-yet-known type (known from the dialog cache where possible); Start is `danger`, Cancel is the default and escape button and has focus. Only one question is ever asked: above the threshold the large-campaign box replaces the optional one.
+41. **`theme.set_property` for buttons a QMessageBox already polished.** A box styles each button as it is added; a plain `setProperty("variant", "danger")` afterwards left Start unstyled (the old boxes only got away with it because their styled button was also the default, which re-polishes). Tested against the rendered colour.
+42. **Dialog cache.** Before: every picker open read all dialogs and folders again, and a campaign's resolver never saw that data (each campaign's first chat ID or unknown user ID read the dialogs again). Now `load_dialog_snapshot()` returns the list plus every dialog's entity by peer id; MainWindow keeps one `DialogSnapshot` for the active account for the session (`DialogCache`, keyed by account id + session name, cleared on switch, Demo Mode in/out, delete and Refresh). The resolver starts from it and reads the dialogs from Telegram again only for a missing ID, at most once per campaign. Trade-off: rights changed in Telegram since the last read are seen at send time (Telegram's own error), or after Refresh.
+43. **One path from token to QColor.** Translucent tokens are `rgba(...)` strings — QSS reads them, `QColor("rgba(...)")` is invalid (black) and SVG draws nothing. `parse_color()` / `theme.qcolor()` read every token form and raise on anything else; the icon renderer uses the same parser; every `QColor(token)` in `app/ui` was moved over, and `check_ui_hygiene.py` now flags any raw `QColor(...)` outside `theme/` (except `Qt.GlobalColor.transparent`). Every colour token of both themes is tested.

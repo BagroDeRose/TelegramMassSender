@@ -56,6 +56,11 @@ described below.
     explicitly in `campaign_tab_chain()`. Quick successes go to
     `self._toast()` (`motion.ToastHost`), not modal boxes; file exports
     and errors stay modal.
+    Every start path (Campaign page, Campaign Wizard, Retry) asks through
+    the one `_confirm_campaign_start`: more recipients than the
+    `large_campaign_threshold` setting (default 50, min 10) always gets
+    `dialogs.confirm_large_campaign` (people/bots/chats, danger Start,
+    Cancel default), otherwise the opt-in `confirm_before_start` box.
     The Results page's recipient-results list (v1.6 Retry, v1.7 Filter
     results) shows `_report_source`'s items filtered by a segmented control
     (`results_view.SegmentedControl`, QComboBox-compatible API; default:
@@ -137,7 +142,12 @@ described below.
     loads through `chat_targets.list_dialogs` in `self._spawn(...)` under
     `_account_lock`, feeds `set_dialogs()`/`set_error()` (FloodWait shown,
     never retried), drops a result that arrives after it closed, and
-    writes picked dialogs back via `RecipientWidget.append_lines()` (as
+    keeps what it read in `MainWindow._dialog_cache` (`chat_targets.
+    DialogCache`, one `DialogSnapshot` for the active account for the
+    session; reopening shows it at once, Refresh and every account change
+    — switch, Demo Mode in/out, delete — drop it, and `get()` only
+    answers for the account it was filled for), and writes picked
+    dialogs back via `RecipientWidget.append_lines()` (as
     `@username`, else the ID: positive for people, marked for chats). One
     picker at a time (`MainWindow._chat_picker`). The button is on the
     Campaign page's `RecipientWidget` and the Campaign Wizard's
@@ -174,7 +184,11 @@ described below.
     focus-ring event filter, and `notifier.theme_changed` for colours QSS
     can't reach (preview HTML, editor char formats, pixmap labels).
     Variants are dynamic properties (`variant`, `status`) changed via
-    `theme.set_property()`, never per-widget `setStyleSheet`. The stored
+    `theme.set_property()`, never per-widget `setStyleSheet`. A token
+    colour becomes a QColor only through `theme.qcolor()` (translucent
+    tokens are `rgba(...)` strings, which QColor's constructor reads as
+    invalid and paints black; icons parse them the same way); the hygiene
+    check flags any other `QColor(...)` in `app/ui` outside `theme/`. The stored
     choice (settings key `theme`, values `dark`/`light`) is unchanged.
   - `icons.py` — Lucide SVGs (assets/icons/lucide, ISC) rendered by a
     `QIconEngine`; `icons.themed(name, role, checked_role, active_role)`
@@ -225,6 +239,10 @@ described below.
     has no access_hash for (`get_entity` → ValueError — e.g. a person
     picked by ID) triggers the same one-time dialogs read, and the user is
     taken from there; users already in loaded dialogs need no lookup.
+    `RecipientResolver(client, dialogs=snapshot)` (passed through
+    `CampaignManager(dialog_snapshot=...)` from the session cache) starts
+    from the picker's last read and reads the dialogs from Telegram again
+    only for an ID missing there — at most once per campaign.
   - `chat_targets.py` — `TargetType` (user/group/supergroup/forum/
     channel), the pure permission preflight `check_send_rights()`
     (channel: creator or `post_messages` admin; group: left/banned/
@@ -233,7 +251,9 @@ described below.
     ignored, multi-part messages refused in slow mode), the send-error →
     reason mapping (by Telethon error class, and by RPC message code for
     errors newer than Telethon 1.36's list), and `list_dialogs()` behind
-    the "From my chats…" picker: `DialogList` of `DialogTarget`s (type
+    the "From my chats…" picker (`load_dialog_snapshot()` returns the
+    same list plus every dialog's entity by peer id, for the cache and the
+    resolver warm-up): `DialogList` of `DialogTarget`s (type
     incl. bot, title, @username, peer id, archived, last-message date,
     unavailable reason — people/bots writable by default, chats through
     `check_send_rights` for plain text —, folder ids) plus folders from
@@ -322,7 +342,7 @@ described below.
   `MainWindow.retranslate_ui()` the same way theme switching already
   dispatches `apply_theme()`. Deliberately not gettext or Qt Linguist
   (.ts/.qm + lupdate/lrelease) — this app has no other use for either.
-- `tests/` — pytest + pytest-asyncio (`asyncio_mode = auto`), 1009 tests,
+- `tests/` — pytest + pytest-asyncio (`asyncio_mode = auto`), 1162 tests,
   using `tests/mocks/mock_telegram_client.py` and
   `tests/mocks/fake_client_manager.py` instead of a real Telegram
   connection. `tests/conftest.py` has two autouse fixtures: an
@@ -361,7 +381,7 @@ reproduced with a failing test first, then fixed.
 
 **Tests.** After any code change, run the targeted test file, then the
 full suite (`pytest tests/ -v`). Don't delete or weaken existing tests just
-to make the suite pass. The current baseline is 1009 passed, 0 failures —
+to make the suite pass. The current baseline is 1162 passed, 0 failures —
 if that number changes, know exactly why before saying the change is done.
 
 **GUI.** Never block the Qt event loop or the asyncio event loop.

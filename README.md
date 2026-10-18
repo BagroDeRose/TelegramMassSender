@@ -16,14 +16,15 @@ A Windows desktop application that sends personal Telegram messages to a list of
 
 TelegramMassSender sends the *same message, personally, to each recipient in a list* — one Telegram message per recipient, from the user's own account, the way you'd write to each of them individually. Recipients are people, and optionally groups, supergroups and channels **the account is already a member of and allowed to post in** — it never joins a chat on its own, and Telegram's restrictions (permissions, slow mode, FloodWait) are respected, never worked around. It is not a bot and not a bulk-marketing tool. It integrates directly with Telegram's native **MTProto** protocol via **Telethon** — not the Bot API — and runs a real async event loop (**qasync**) bridging Qt's UI thread with `asyncio` network I/O.
 
-It supports multiple Telegram accounts, rich text formatting, media/album attachments, per-recipient `{name}` personalization (including from a CSV column), phone-number recipient resolution, a Telegram-style live message preview, named message presets and recipient groups, an optional step-by-step Campaign Wizard, failed-recipient retry, structured diagnostics, a full Russian/English UI, and campaign reporting — all backed by an 1009-test automated regression suite and a real Windows-packaged build (PyInstaller).
+It supports multiple Telegram accounts, rich text formatting, media/album attachments, per-recipient `{name}` personalization (including from a CSV column), phone-number recipient resolution, a Telegram-style live message preview, named message presets and recipient groups, an optional step-by-step Campaign Wizard, failed-recipient retry, structured diagnostics, a full Russian/English UI, and campaign reporting — all backed by an 1162-test automated regression suite and a real Windows-packaged build (PyInstaller).
 
 ## Key Features
 
 - Personal, one-by-one messages from your own Telegram account — no bots.
 - Recipients by `@username`, numeric Telegram ID, `t.me` link, or E.164 phone number — pasted directly, imported from a TXT file, or imported from a CSV file (columns detected automatically, including an optional name column mapped to `{name}`).
 - Groups, supergroups (including forums — posted to "General") and channels the account is already in and may post to: by `@username` / `t.me/username`, by chat ID (`-100…` / `-…`), by `t.me/c/…` link, or by an invite link the account has already joined (`t.me/+…`, only checked — never joined). Mixed lists of people and chats work, and each chat is pre-checked against its permissions (admin rights for channels, member restrictions and media rights for groups) before anything is sent.
-- A **From my chats…** picker (Campaign page and Campaign Wizard) lists every dialog of the active account — people, bots, groups, supergroups, forums, channels — newest first, with type segments, a Telegram-folder filter, an archive toggle and search by name/title/@username. Dialogs it can't write to are shown muted with the reason; ones already in the list are marked and not added twice. Picked dialogs go in as `@username`, or as their ID when there is none (a person added by ID is found through the account's dialogs at send time). It only reads the dialog and folder lists — no joining, no avatars downloaded.
+- A guard against an accidental mass send: more recipients than a configurable threshold (Settings → Sending, default 50, minimum 10) always asks before starting — people, bots and chats listed, Cancel as the default — on every start path (Campaign page, Campaign Wizard, Retry).
+- A **From my chats…** picker (Campaign page and Campaign Wizard) lists every dialog of the active account — people, bots, groups, supergroups, forums, channels — newest first, with type segments, a Telegram-folder filter, an archive toggle and search by name/title/@username. Dialogs it can't write to are shown muted with the reason; ones already in the list are marked and not added twice. Picked dialogs go in as `@username`, or as their ID when there is none (a person added by ID is found through the account's dialogs at send time). It only reads the dialog and folder lists — no joining, no avatars downloaded — once per session per account (Refresh and account changes read them again), and a campaign's dialogs warm-up starts from that same list.
 - Per-recipient name personalization via a `{name}` placeholder, including inside rich-text formatting; for a group/channel it becomes the chat's title; a CSV-supplied name takes priority over Telegram's own name for that recipient.
 - Rich text editor (bold/italic/underline/strikethrough/spoiler/monospace/code block/links/emoji) with a live Telegram-style message preview, including a personalization preview against an example name.
 - Named message presets (text, formatting, attachments, optionally the sending interval) and named local recipient groups — save and reload a recipient list or a message template by name.
@@ -134,7 +135,7 @@ Ordinary parts — not oversold: the settings page is a straightforward form bou
 pytest tests/ -v
 ```
 
-**1009 automated tests, 0 failures** (pytest + pytest-asyncio), run against a hand-built mock Telegram client (`tests/mocks/mock_telegram_client.py`) — no real Telegram account or network access needed. Coverage includes:
+**1162 automated tests, 0 failures** (pytest + pytest-asyncio), run against a hand-built mock Telegram client (`tests/mocks/mock_telegram_client.py`) — no real Telegram account or network access needed. Coverage includes:
 
 - Recipient parsing and import (all supported formats including phone numbers and malformed input, TXT import, and content-based CSV column/name detection).
 - Rich-text formatting and UTF-16 entity offset correctness, including the `{name}` placeholder (typed, CSV-supplied, and at message lengths well past Telegram's own text limit).
@@ -162,7 +163,7 @@ This is distinct from **manual packaged-build validation**: before each release,
 
 This project's requirements, architecture, and scope were defined and directed by the developer (BagroDeRose). Implementation was done with extensive AI assistance — primarily **Claude Code** — used for writing code, debugging, writing tests, code review, and documentation, always under human direction and verification rather than as unsupervised generation:
 
-- Every change is covered by the automated test suite (1009 tests, pytest/pytest-asyncio, mocked Telegram client).
+- Every change is covered by the automated test suite (1162 tests, pytest/pytest-asyncio, mocked Telegram client).
 - Bug fixes follow a reproduce → understand root cause → write a failing test → fix → regression test cycle, not guesswork.
 - A dedicated code review and security/privacy audit was performed before each public release (secret storage, log contents, session handling, git history sanitization).
 - The packaged Windows `.exe` is manually launched and validated before release — a successful build is not treated as sufficient on its own.
@@ -477,6 +478,8 @@ https://t.me/user3
 - Если получатель **уже есть в поле** (как `@username` или как ID — неважно), строка помечена «уже в списке» и второй раз не добавится.
 - **«Выбрать все показанные»** отмечает только то, что сейчас видно с учётом фильтров; **«Снять выбор»** — тоже только среди показанных. Внизу — счётчик «Выбрано: N (людей X, чатов Y)».
 
+Список диалогов загружается один раз за сеанс работы программы и при следующем открытии окна показывается сразу; заново он загружается по кнопке **«Обновить»** и после смены аккаунта (или входа/выхода из демо-режима). Этот же загруженный список используется перед стартом рассылки: если нужный ID чата или человека в нём есть, программа не загружает диалоги ещё раз, а если нет (например, вы вступили в чат уже после открытия окна) — один раз загружает их заново.
+
 По кнопке **«Добавить»** выбранные диалоги дописываются в поле получателей: как `@username`, если он есть, иначе как ID (у людей — обычное положительное число, у групп и каналов — `-100…` / `-…`). Человек, добавленный по ID, будет найден при отправке: если в сохранённой сессии нет данных о нём, программа один раз заново загружает список диалогов и берёт его оттуда. Выбор из диалогов **ничего не меняет в самой рассылке** — это просто другой способ заполнить список получателей. Программа при этом только читает список диалогов и папок: никуда не вступает и ничего не скачивает. Кнопка доступна только при подключённом аккаунте и неактивна во время рассылки.
 
 
@@ -667,6 +670,7 @@ https://t.me/user3
 - **«Остановить»** — полностью останавливает рассылку.
 - Построчный ход рассылки по каждому получателю виден в **журнале** (см. следующий раздел), а сводная статистика — на странице **«Результаты»**.
 - Если включена настройка «Подтверждать запуск рассылки» (страница «Настройки»), перед стартом программа переспросит, скольким получателям будет отправлено сообщение.
+- **Защита от случайной большой рассылки:** если получателей больше порога «Большая рассылка» (Настройки → Отправка, по умолчанию 50, не меньше 10), перед стартом **всегда** показывается отдельное подтверждение — даже когда «Подтверждать запуск рассылки» выключено. В нём видно, сколько среди получателей людей, ботов и групп/каналов (и сколько `@username`, чей тип станет известен только при отправке); кнопка запуска выделена красным, а по умолчанию выбрана «Отмена» — Enter или Esc отменяют запуск. Это касается всех способов запуска: страницы «Кампания», Мастера кампании и «Повторить ошибки».
 
 #### Если Telegram временно ограничивает отправку (FloodWait)
 
@@ -752,7 +756,7 @@ https://t.me/user3
 Страница **«Настройки»** (боковое меню) собирает все параметры программы в карточки:
 
 - **Внешний вид** — тема оформления и язык интерфейса (см. выше).
-- **Отправка** — интервал отправки (минимум/максимум в секундах, 5–3600) и переключатель «Подтверждать запуск рассылки» (показывать диалог подтверждения перед стартом каждой рассылки; по умолчанию выключен).
+- **Отправка** — интервал отправки (минимум/максимум в секундах, 5–3600), переключатель «Подтверждать запуск рассылки» (показывать диалог подтверждения перед стартом каждой рассылки, в том числе повтора ошибок; по умолчанию выключен) и порог «Большая рассылка» (по умолчанию 50, не меньше 10): при большем числе получателей подтверждение показывается всегда.
 - **Приложение** — «Запоминать размер окна» и «Открывать последний раздел при запуске» (программа откроется на той же странице, где вы её закрыли).
 - **Отчёты** — папка, в которую сохраняются CSV-отчёты (кнопки «Обзор…» и «По умолчанию»), и переключатель «Автоматически сохранять отчёт после рассылки».
 - **Дополнительно** — «Расширенное логирование» (более подробный технический лог для диагностики проблем) и кнопка **«Сбросить настройки приложения»** — возвращает все перечисленные выше настройки к значениям по умолчанию (кроме выбранной темы оформления и языка) после подтверждения в диалоге.
@@ -879,7 +883,7 @@ build_windows.bat
 .venv\Scripts\python -m pytest tests/ -v
 ```
 
-На момент подготовки этой версии README полный набор тестов проходит целиком: **1009 тестов, 0 ошибок** (pytest + pytest-asyncio). Тесты используют собственный мок Telegram-клиента (`tests/mocks/mock_telegram_client.py`) вместо настоящего сервера Telegram, поэтому для их запуска не нужен ни интернет, ни реальный Telegram-аккаунт. Тесты также запускаются автоматически в GitHub Actions при каждом push/PR — см. значок «Tests» в начале README.
+На момент подготовки этой версии README полный набор тестов проходит целиком: **1162 тестов, 0 ошибок** (pytest + pytest-asyncio). Тесты используют собственный мок Telegram-клиента (`tests/mocks/mock_telegram_client.py`) вместо настоящего сервера Telegram, поэтому для их запуска не нужен ни интернет, ни реальный Telegram-аккаунт. Тесты также запускаются автоматически в GitHub Actions при каждом push/PR — см. значок «Tests» в начале README.
 
 #### Технологический стек
 
@@ -905,7 +909,7 @@ Windows-приложение на **Python + PySide6** (Qt для интерфе
 
 #### Как разрабатывался этот проект
 
-Требования, архитектуру и объём функциональности этого проекта определял автор репозитория. AI-инструменты (Claude Code) активно использовались в реализации, отладке, написании тестов, ревью кода и подготовке документации — но под его руководством и с его проверкой на каждом шаге, а не как автономная генерация без контроля. Это не означает, что код не проверялся: каждое изменение сопровождается автоматическими тестами (сейчас это упомянутые выше 1009 тестов на pytest/pytest-asyncio с мок-клиентом Telegram), а исправление ошибок в проекте ведётся по принципу «сначала воспроизвести проблему → понять причину → написать тест → исправить → прогнать регрессионные тесты», а не «на глаз». Перед публикацией репозитория отдельно проведены обзор кода и проверка безопасности/приватности (хранение секретов, содержимое логов, работа с сессиями), а собранный Windows-EXE запускался и проверялся вручную, а не считался готовым сразу по факту успешной сборки.
+Требования, архитектуру и объём функциональности этого проекта определял автор репозитория. AI-инструменты (Claude Code) активно использовались в реализации, отладке, написании тестов, ревью кода и подготовке документации — но под его руководством и с его проверкой на каждом шаге, а не как автономная генерация без контроля. Это не означает, что код не проверялся: каждое изменение сопровождается автоматическими тестами (сейчас это упомянутые выше 1162 тестов на pytest/pytest-asyncio с мок-клиентом Telegram), а исправление ошибок в проекте ведётся по принципу «сначала воспроизвести проблему → понять причину → написать тест → исправить → прогнать регрессионные тесты», а не «на глаз». Перед публикацией репозитория отдельно проведены обзор кода и проверка безопасности/приватности (хранение секретов, содержимое логов, работа с сессиями), а собранный Windows-EXE запускался и проверялся вручную, а не считался готовым сразу по факту успешной сборки.
 
 #### Где на диске хранятся данные пользователя
 
