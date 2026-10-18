@@ -45,11 +45,21 @@ from telethon.tl.types import (
 )
 
 from app.i18n import tr
-from app.ui import theme
+from app.ui import icons, theme
+from app.ui.theme import (
+    EDITOR_COMPACT_HEIGHT,
+    FONT_FAMILY_MONO,
+    FONT_FAMILY_MONO_FALLBACK,
+    ICON_SIZE,
+    SPACE_XS,
+    icon_qsize,
+)
 
 PROP_SPOILER = QTextFormat.Property.UserProperty + 1
 PROP_CODE = QTextFormat.Property.UserProperty + 2
 PROP_PRE = QTextFormat.Property.UserProperty + 3
+
+_MONO_FAMILIES = [FONT_FAMILY_MONO, FONT_FAMILY_MONO_FALLBACK]
 
 _BOOLEAN_KINDS = ("bold", "italic", "underline", "strike", "code", "pre", "spoiler")
 
@@ -183,14 +193,46 @@ def _format_for_kind(kind: str) -> QTextCharFormat:
         fmt.setFontStrikeOut(True)
     elif kind == "code":
         fmt.setProperty(PROP_CODE, True)
-        fmt.setFontFamilies(["Consolas"])
+        fmt.setFontFamilies(_MONO_FAMILIES)
     elif kind == "pre":
         fmt.setProperty(PROP_PRE, True)
-        fmt.setFontFamilies(["Consolas"])
+        fmt.setFontFamilies(_MONO_FAMILIES)
     elif kind == "spoiler":
         fmt.setProperty(PROP_SPOILER, True)
         fmt.setBackground(QColor(theme.spoiler_background()))
     return fmt
+
+
+def recolor_document(text_edit: QTextEdit) -> None:
+    """Re-apply the active theme's spoiler background and link colour to
+    text that was formatted under the previous theme (QTextCharFormat
+    colours are baked in when applied; QSS can't reach them)."""
+    document = text_edit.document()
+    spoiler = QColor(theme.spoiler_background())
+    link = QColor(theme.link_color())
+    cursor = QTextCursor(document)
+    cursor.beginEditBlock()
+    block = document.begin()
+    while block.isValid():
+        iterator = block.begin()
+        while not iterator.atEnd():
+            fragment = iterator.fragment()
+            fmt = fragment.charFormat()
+            update = QTextCharFormat()
+            changed = False
+            if fmt.property(PROP_SPOILER):
+                update.setBackground(spoiler)
+                changed = True
+            if fmt.isAnchor():
+                update.setForeground(link)
+                changed = True
+            if changed:
+                cursor.setPosition(fragment.position())
+                cursor.setPosition(fragment.position() + fragment.length(), QTextCursor.MoveMode.KeepAnchor)
+                cursor.mergeCharFormat(update)
+            iterator += 1
+        block = block.next()
+    cursor.endEditBlock()
 
 
 def apply_content_to_editor(text_edit: QTextEdit, text: str, entities: List[TypeMessageEntity]) -> None:
@@ -235,16 +277,19 @@ class MessageEditorWidget(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
 
         toolbar = QHBoxLayout()
-        toolbar.addWidget(self._make_toggle_button("bold", "B", "message_editor.bold_tooltip", self._toggle_bold))
-        toolbar.addWidget(self._make_toggle_button("italic", "I", "message_editor.italic_tooltip", self._toggle_italic))
+        toolbar.setSpacing(SPACE_XS)
+        toolbar.addWidget(self._make_toggle_button("bold", "bold", "message_editor.bold_tooltip", self._toggle_bold))
+        toolbar.addWidget(self._make_toggle_button("italic", "italic", "message_editor.italic_tooltip", self._toggle_italic))
         toolbar.addWidget(
-            self._make_toggle_button("underline", "U", "message_editor.underline_tooltip", self._toggle_underline)
+            self._make_toggle_button("underline", "underline", "message_editor.underline_tooltip", self._toggle_underline)
         )
-        toolbar.addWidget(self._make_toggle_button("strike", "S", "message_editor.strike_tooltip", self._toggle_strike))
-        toolbar.addWidget(self._make_toggle_button("spoiler", "🙈", "message_editor.spoiler_tooltip", self._toggle_spoiler))
-        toolbar.addWidget(self._make_toggle_button("code", "<>", "message_editor.code_tooltip", self._toggle_code))
-        toolbar.addWidget(self._make_toggle_button("pre", "{ }", "message_editor.pre_tooltip", self._toggle_pre))
-        self._link_button = self._make_button("🔗", "message_editor.link_tooltip", self._insert_link)
+        toolbar.addWidget(
+            self._make_toggle_button("strike", "strikethrough", "message_editor.strike_tooltip", self._toggle_strike)
+        )
+        toolbar.addWidget(self._make_toggle_button("spoiler", "spoiler", "message_editor.spoiler_tooltip", self._toggle_spoiler))
+        toolbar.addWidget(self._make_toggle_button("code", "code", "message_editor.code_tooltip", self._toggle_code))
+        toolbar.addWidget(self._make_toggle_button("pre", "code_block", "message_editor.pre_tooltip", self._toggle_pre))
+        self._link_button = self._make_button("link", "message_editor.link_tooltip", self._insert_link)
         toolbar.addWidget(self._link_button)
         self._emoji_button = self._make_emoji_button()
         toolbar.addWidget(self._emoji_button)
@@ -255,40 +300,41 @@ class MessageEditorWidget(QWidget):
         self._text_edit.setPlaceholderText(tr("message_editor.placeholder"))
         self._text_edit.setAcceptRichText(False)
         if compact:
-            self._text_edit.setFixedHeight(90)
+            self._text_edit.setFixedHeight(EDITOR_COMPACT_HEIGHT)
         layout.addWidget(self._text_edit)
 
         self._text_edit.cursorPositionChanged.connect(self._sync_toolbar_state)
         self._text_edit.selectionChanged.connect(self._sync_toolbar_state)
+        theme.on_theme_changed(self, lambda *_args: recolor_document(self._text_edit))
 
         QShortcut(QKeySequence("Ctrl+B"), self._text_edit, activated=self._toggle_bold)
         QShortcut(QKeySequence("Ctrl+I"), self._text_edit, activated=self._toggle_italic)
         QShortcut(QKeySequence("Ctrl+U"), self._text_edit, activated=self._toggle_underline)
 
-    def _make_button(self, label: str, tooltip_key: str, handler) -> QToolButton:
+    def _make_button(self, icon_name: str, tooltip_key: str, handler) -> QToolButton:
         button = QToolButton(self)
         button.setObjectName("toolbarButton")
-        button.setText(label)
+        button.setIcon(icons.themed(icon_name, "text_secondary", checked_role="accent"))
+        button.setIconSize(icon_qsize(ICON_SIZE))
         button.setToolTip(tr(tooltip_key))
+        # Icon-only: the tooltip text is also the accessible name.
+        button.setAccessibleName(tr(tooltip_key))
         button.setProperty("tooltipKey", tooltip_key)
         button.clicked.connect(handler)
         return button
 
-    def _make_toggle_button(self, kind: str, label: str, tooltip_key: str, handler) -> QToolButton:
-        button = QToolButton(self)
-        button.setObjectName("toolbarButton")
-        button.setText(label)
-        button.setToolTip(tr(tooltip_key))
-        button.setProperty("tooltipKey", tooltip_key)
+    def _make_toggle_button(self, kind: str, icon_name: str, tooltip_key: str, handler) -> QToolButton:
+        button = self._make_button(icon_name, tooltip_key, handler)
         button.setCheckable(True)
-        button.clicked.connect(handler)
         self._toggle_buttons[kind] = button
         return button
 
     def _make_emoji_button(self) -> QToolButton:
         button = QToolButton(self)
         button.setObjectName("toolbarButton")
-        button.setText("🙂")
+        button.setIcon(icons.themed("emoji"))
+        button.setIconSize(icon_qsize(ICON_SIZE))
+        button.setAccessibleName(tr("message_editor.emoji_tooltip"))
         button.setToolTip(tr("message_editor.emoji_tooltip"))
         button.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         menu = QMenu(button)
@@ -355,7 +401,7 @@ class MessageEditorWidget(QWidget):
         fmt = QTextCharFormat()
         active = not bool(self._current_format().property(PROP_CODE))
         fmt.setProperty(PROP_CODE, active)
-        fmt.setFontFamilies(["Consolas"] if active else [self._text_edit.document().defaultFont().family()])
+        fmt.setFontFamilies(_MONO_FAMILIES if active else [self._text_edit.document().defaultFont().family()])
         self._text_edit.mergeCurrentCharFormat(fmt)
         self._sync_toolbar_state()
 
@@ -363,7 +409,7 @@ class MessageEditorWidget(QWidget):
         fmt = QTextCharFormat()
         active = not bool(self._current_format().property(PROP_PRE))
         fmt.setProperty(PROP_PRE, active)
-        fmt.setFontFamilies(["Consolas"] if active else [self._text_edit.document().defaultFont().family()])
+        fmt.setFontFamilies(_MONO_FAMILIES if active else [self._text_edit.document().defaultFont().family()])
         self._text_edit.mergeCurrentCharFormat(fmt)
         self._sync_toolbar_state()
 

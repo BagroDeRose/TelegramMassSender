@@ -8,9 +8,11 @@ from __future__ import annotations
 
 from typing import List, Tuple
 
-from PySide6.QtWidgets import QDialog, QMessageBox, QPlainTextEdit, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QDialog, QMessageBox, QPlainTextEdit, QPushButton, QWidget
 
 from app.i18n import tr, trn
+from app.ui.dialog_frame import build_dialog_frame
+from app.ui.theme import DIALOG_HEIGHT_SM, DIALOG_WIDTH
 
 
 def confirm_delete_account(parent: QWidget, phone: str) -> bool:
@@ -19,10 +21,11 @@ def confirm_delete_account(parent: QWidget, phone: str) -> bool:
     # Qt's own bundled translations pick unless a Qt translator is loaded,
     # which this app does not do.
     box = QMessageBox(parent)
-    box.setIcon(QMessageBox.Icon.Question)
+    box.setIcon(QMessageBox.Icon.Warning)  # destructive: warn, don't just ask
     box.setWindowTitle(tr("dialogs.delete_account.title"))
     box.setText(tr("dialogs.delete_account.message", phone=phone))
     yes_button = box.addButton(tr("dialogs.yes"), QMessageBox.ButtonRole.YesRole)
+    yes_button.setProperty("variant", "danger")
     box.addButton(tr("dialogs.no"), QMessageBox.ButtonRole.NoRole)
     box.setDefaultButton(yes_button)
     box.exec()
@@ -38,6 +41,7 @@ def confirm_exit_during_campaign(parent: QWidget) -> bool:
     box.setText(tr("dialogs.exit_during_campaign.message"))
     box.addButton(tr("dialogs.cancel"), QMessageBox.ButtonRole.RejectRole)
     exit_button = box.addButton(tr("dialogs.exit"), QMessageBox.ButtonRole.DestructiveRole)
+    exit_button.setProperty("variant", "danger")
     box.setDefaultButton(exit_button)
     box.exec()
     return box.clickedButton() is exit_button
@@ -83,6 +87,7 @@ def confirm_start_campaign(
     user_count = max(0, recipient_count - chat_count - username_count)
     box.setInformativeText(start_campaign_breakdown(user_count, chat_count, username_count))
     yes_button = box.addButton(tr("dialogs.start_campaign.start"), QMessageBox.ButtonRole.YesRole)
+    yes_button.setProperty("variant", "primary")
     box.addButton(tr("dialogs.cancel"), QMessageBox.ButtonRole.RejectRole)
     box.setDefaultButton(yes_button)
     box.exec()
@@ -95,6 +100,7 @@ def confirm_reset_settings(parent: QWidget) -> bool:
     box.setWindowTitle(tr("dialogs.reset_settings.title"))
     box.setText(tr("dialogs.reset_settings.message"))
     yes_button = box.addButton(tr("dialogs.reset_settings.reset"), QMessageBox.ButtonRole.YesRole)
+    yes_button.setProperty("variant", "danger")
     box.addButton(tr("dialogs.cancel"), QMessageBox.ButtonRole.RejectRole)
     box.setDefaultButton(yes_button)
     box.exec()
@@ -109,15 +115,15 @@ def show_invalid_rows(parent: QWidget, title: str, rows: List[Tuple[str, str]]) 
     scrollable/selectable the way this needs to be."""
     dialog = QDialog(parent)
     dialog.setWindowTitle(title)
-    dialog.resize(520, 360)
-    layout = QVBoxLayout(dialog)
+    dialog.resize(DIALOG_WIDTH, DIALOG_HEIGHT_SM)
+    frame = build_dialog_frame(dialog, title)
     text_view = QPlainTextEdit(dialog)
+    text_view.setObjectName("monoText")
     text_view.setReadOnly(True)
     text_view.setPlainText("\n".join(f"{raw}  —  {reason}" for raw, reason in rows))
-    layout.addWidget(text_view)
-    close_button = QPushButton(tr("dialogs.close"), dialog)
+    frame.content.addWidget(text_view, 1)
+    close_button = frame.add_button(QPushButton(tr("dialogs.close"), dialog), "primary")
     close_button.clicked.connect(dialog.accept)
-    layout.addWidget(close_button)
     dialog.exec()
 
 
@@ -127,6 +133,7 @@ def confirm_delete_preset(parent: QWidget, name: str) -> bool:
     box.setWindowTitle(tr("main_window.dialogs.delete_preset_title"))
     box.setText(tr("main_window.dialogs.delete_preset_message", name=name))
     yes_button = box.addButton(tr("main_window.presets.delete_button"), QMessageBox.ButtonRole.YesRole)
+    yes_button.setProperty("variant", "danger")
     box.addButton(tr("dialogs.cancel"), QMessageBox.ButtonRole.RejectRole)
     box.setDefaultButton(yes_button)
     box.exec()
@@ -139,6 +146,7 @@ def confirm_delete_group(parent: QWidget, name: str) -> bool:
     box.setWindowTitle(tr("main_window.dialogs.delete_group_title"))
     box.setText(tr("main_window.dialogs.delete_group_message", name=name))
     yes_button = box.addButton(tr("main_window.groups.delete_button"), QMessageBox.ButtonRole.YesRole)
+    yes_button.setProperty("variant", "danger")
     box.addButton(tr("dialogs.cancel"), QMessageBox.ButtonRole.RejectRole)
     box.setDefaultButton(yes_button)
     box.exec()

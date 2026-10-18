@@ -29,6 +29,9 @@ block_cipher = None
 # tl.types/tl.functions submodules; collect all of them explicitly rather
 # than relying on static analysis to catch every one.
 hidden_imports = collect_submodules("telethon")
+# The icon provider renders Lucide SVGs with QSvgRenderer (app/ui/icons.py);
+# listed explicitly so the QtSvg module and its plugin are always bundled.
+hidden_imports += ["PySide6.QtSvg"]
 
 a = Analysis(
     ["app/main.py"],

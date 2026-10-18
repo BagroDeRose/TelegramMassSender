@@ -698,7 +698,7 @@ async def test_language_combo_switches_active_language_and_retranslates(qapp, tm
         assert reloaded.language == LANGUAGE_EN
         # Immediate switch, not "restart required" -- an already-built,
         # persistent widget's text actually changes.
-        assert window._campaign_controls._start_button.text() == "▶  Start campaign"
+        assert window._campaign_controls._start_button.text() == "Start campaign"
         assert window._sidebar._buttons[0].text() == "  Campaign"
     finally:
         set_language(LANGUAGE_RU)  # restore module-global state for other tests

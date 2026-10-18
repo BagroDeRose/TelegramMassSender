@@ -122,30 +122,18 @@ def test_muted_text_meets_a_reasonable_de_emphasis_floor(theme_name):
     assert contrast_ratio(t.text_muted, t.bg) >= _AA_LARGE_TEXT_OR_UI
 
 
-# ---- known, tracked gap -- NOT silently accepted -----------------------
+# ---- primary button text -----------------------------------------------
 #
-# QPushButton#primaryButton uses white ($on_accent) text on $accent at
-# 14px bold, which is neither large text (needs >=14pt/18.66px bold --
-# 14px falls just short) nor close to the 4.5:1 normal-text minimum in
-# dark theme specifically (measured 2.70:1). Fixing this by darkening
-# $accent was investigated and rejected here: $accent is a shared token
-# also used as *text* color against dark backgrounds elsewhere (links,
-# checked nav state, card counts, currently 5.7-6.6:1) -- darkening it
-# enough to fix the button would drop every one of those from a
-# comfortable AA pass to a new, worse near-3:1 failure, trading one gap
-# for several others rather than fixing anything. A real fix needs a
-# second, purpose-built token (e.g. a distinct "button text" color) design
-# pass, which is out of scope here -- tracked honestly via xfail (and in
-# ROADMAP.md) rather than silently ignored or forced through.
+# QPushButton[variant="primary"] draws $on_accent text on $accent at the
+# 13 px body size -- normal text, so full AA (4.5:1). This used to be a
+# tracked known gap in the dark theme (white on the old accent, 2.70:1);
+# the redesign gave $on_accent its own value per theme (dark text on the
+# dark theme's light-blue accent) instead of darkening $accent, which is
+# also used as text and borders elsewhere.
 
 
-def test_primary_button_text_contrast_dark_theme_known_gap():
-    t = theme.tokens_for(theme.THEME_DARK)
-    ratio = contrast_ratio(t.on_accent, t.accent)
-    if ratio >= _AA_LARGE_TEXT_OR_UI:
-        pytest.fail(
-            f"Dark theme's primary-button text contrast improved to {ratio:.2f}:1 -- "
-            "if this was a deliberate fix, update this test (and the known-gap note "
-            "in ROADMAP.md) to assert the new passing value instead of xfailing it."
-        )
-    assert ratio < _AA_LARGE_TEXT_OR_UI
+@pytest.mark.parametrize("theme_name", [theme.THEME_DARK, theme.THEME_LIGHT])
+def test_primary_button_text_meets_aa(theme_name):
+    t = theme.tokens_for(theme_name)
+    assert contrast_ratio(t.on_accent, t.accent) >= _AA_NORMAL_TEXT
+    assert contrast_ratio(t.on_accent, t.accent_hover) >= _AA_NORMAL_TEXT

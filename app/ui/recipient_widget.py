@@ -24,7 +24,9 @@ from app.i18n import tr, trn
 from app.recipients.csv_importer import CsvImportError, import_recipients_from_csv
 from app.recipients.importer import import_recipients_from_txt
 from app.recipients.parser import ParsedRecipient, ParseSummary, parse_recipient_line, parse_recipient_lines
+from app.ui import icons
 from app.ui.dialogs import show_invalid_rows
+from app.ui.theme import SPACE_SM, SPACE_XS
 
 _DEBOUNCE_MS = 300
 
@@ -48,17 +50,21 @@ class RecipientWidget(QWidget):
         layout.addWidget(self._text_edit)
 
         buttons = QHBoxLayout()
+        buttons.setSpacing(SPACE_SM)
         self._import_button = QPushButton(tr("recipient_widget.import_txt_button"), self)
+        self._import_button.setIcon(icons.themed("import"))
         self._import_button.clicked.connect(self._on_import_clicked)
         self._import_csv_button = QPushButton(tr("recipient_widget.import_csv_button"), self)
+        self._import_csv_button.setIcon(icons.themed("import"))
         self._import_csv_button.clicked.connect(self._on_import_csv_clicked)
         self._pick_chats_button = QPushButton(tr("recipient_widget.pick_chats_button"), self)
         self._pick_chats_button.setToolTip(tr("recipient_widget.pick_chats_tooltip"))
+        self._pick_chats_button.setIcon(icons.themed("chats"))
         self._pick_chats_button.clicked.connect(self.pick_chats_requested.emit)
         self._pick_chats_button.setVisible(show_chat_picker)
         self._pick_chats_button.setEnabled(False)  # until an account is connected
         self._clear_button = QPushButton(tr("recipient_widget.clear_button"), self)
-        self._clear_button.setObjectName("ghostButton")
+        self._clear_button.setProperty("variant", "ghost")
         self._clear_button.clicked.connect(self._on_clear_clicked)
         buttons.addWidget(self._import_button)
         buttons.addWidget(self._import_csv_button)
@@ -68,12 +74,24 @@ class RecipientWidget(QWidget):
         layout.addLayout(buttons)
 
         summary_row = QHBoxLayout()
+        summary_row.setSpacing(SPACE_XS)
+        # Shown only while the box is empty (a hint); otherwise the counts
+        # are pills and this keeps the full sentence for screen readers.
         self._summary_label = QLabel(self)
         self._summary_label.setWordWrap(True)
         self._summary_label.setObjectName("summaryLabel")
         summary_row.addWidget(self._summary_label, 1)
+        self._pills = {}
+        for key, status in (("valid", ""), ("chats", "info"), ("invalid", "error"), ("duplicates", "")):
+            pill = QLabel(self)
+            pill.setObjectName("pill")
+            pill.setProperty("status", status)
+            pill.setVisible(False)
+            summary_row.addWidget(pill)
+            self._pills[key] = pill
+        summary_row.addStretch(1)
         self._review_invalid_button = QPushButton(tr("recipient_widget.review_invalid_button"), self)
-        self._review_invalid_button.setObjectName("ghostButton")
+        self._review_invalid_button.setProperty("variant", "ghost")
         self._review_invalid_button.clicked.connect(self._on_review_invalid_clicked)
         self._review_invalid_button.setVisible(False)
         summary_row.addWidget(self._review_invalid_button)
@@ -123,12 +141,32 @@ class RecipientWidget(QWidget):
                 details.insert(0, tr("recipient_widget.summary_chat_count", count=chat_count))
             suffix = f"  ({', '.join(details)})" if details else ""
             self._summary_label.setText(f"{trn('recipient_widget.recipient_count', valid_count)}{suffix}")
+        self._update_pills(summary)
         self._review_invalid_button.setVisible(summary.invalid_count > 0)
 
         surviving_keys = {p.normalized_key for p in summary.valid_recipients}
         self._name_overrides = {k: v for k, v in self._name_overrides.items() if k in surviving_keys}
 
         self.recipients_changed.emit(summary)
+
+    def _update_pills(self, summary: ParseSummary) -> None:
+        empty = summary.total_recipients == 0
+        self._summary_label.setVisible(empty)
+        chat_count = sum(1 for p in summary.valid_recipients if p.is_chat_target)
+        values = {
+            "valid": (len(summary.valid_recipients), trn("recipient_widget.recipient_count", len(summary.valid_recipients))),
+            "chats": (chat_count, tr("recipient_widget.pill_chats", count=chat_count)),
+            "invalid": (summary.invalid_count, tr("recipient_widget.summary_invalid_count", count=summary.invalid_count)),
+            "duplicates": (
+                summary.duplicates_removed,
+                tr("recipient_widget.summary_duplicates_removed", count=summary.duplicates_removed),
+            ),
+        }
+        for key, pill in self._pills.items():
+            count, text = values[key]
+            pill.setText(text)
+            pill.setVisible(not empty and (count > 0 or key == "valid"))
+        self.setAccessibleDescription(self._summary_label.text())
 
     def _on_import_clicked(self) -> None:
         file_path, _ = QFileDialog.getOpenFileName(

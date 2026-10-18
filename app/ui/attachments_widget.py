@@ -33,16 +33,26 @@ from app.i18n import tr
 from app.telegram.media_sender import Attachment, AttachmentKind, kind_for_path
 from app.ui import icons, theme
 from app.ui.empty_state import build_empty_state, retranslate_empty_state
-from app.ui.theme import SPACE_SM, SPACE_XS
+from app.ui.theme import (
+    ATTACHMENT_FILE_ICON,
+    ATTACHMENT_REMOVE_ICON,
+    ATTACHMENT_THUMBNAIL,
+    ATTACHMENT_THUMBNAIL_INSET,
+    ATTACHMENT_TILE,
+    ATTACHMENT_TILE_PADDING,
+    SPACE_SM,
+    SPACE_XS,
+    icon_qsize,
+)
 from app.ui.thumbnails import format_file_size, is_image, make_thumbnail
 
-_TILE_SIZE = 108
-_THUMBNAIL_SIZE = 84
+_TILE_SIZE = ATTACHMENT_TILE
+_THUMBNAIL_SIZE = ATTACHMENT_THUMBNAIL
 # Inset between the tile's edge (where its selection background and focus
 # ring are painted) and its contents.
-_TILE_PADDING = 5
-_REMOVE_ICON_SIZE = 11
-_FILE_ICON_SIZE = 30
+_TILE_PADDING = ATTACHMENT_TILE_PADDING
+_REMOVE_ICON_SIZE = ATTACHMENT_REMOVE_ICON
+_FILE_ICON_SIZE = ATTACHMENT_FILE_ICON
 
 # Which icons.py glyph represents each AttachmentKind in a tile that isn't
 # showing a real decoded thumbnail. PHOTO/ANIMATION/IMAGE_OTHER are omitted
@@ -405,7 +415,7 @@ class AttachmentsWidget(QWidget):
         layout.setSpacing(SPACE_SM)
 
         self._empty_label = build_empty_state(
-            tr("attachments_widget.empty_title"), tr("attachments_widget.empty_body"), self
+            tr("attachments_widget.empty_title"), tr("attachments_widget.empty_body"), self, icon_name="attachment"
         )
         layout.addWidget(self._empty_label)
 
@@ -419,6 +429,8 @@ class AttachmentsWidget(QWidget):
         # _AttachmentTile / #attachmentTile[selected] and
         # _on_selection_changed below).
         self._list.setObjectName("attachmentsList")
+        # File-type glyphs are pixmaps; repaint them in the new theme's colours.
+        theme.on_theme_changed(self, lambda *_args: self.apply_theme())
         self._list.setViewMode(QListView.ViewMode.IconMode)
         self._list.setFlow(QListView.Flow.LeftToRight)
         self._list.setWrapping(True)
@@ -447,13 +459,15 @@ class AttachmentsWidget(QWidget):
 
         buttons = QHBoxLayout()
         self._move_earlier_button = QPushButton(tr("attachments_widget.move_earlier_button"), self)
-        self._move_earlier_button.setObjectName("ghostButton")
+        self._move_earlier_button.setProperty("variant", "ghost")
+        self._move_earlier_button.setIcon(icons.themed("chevron_left"))
         self._move_earlier_button.setToolTip(tr("attachments_widget.move_earlier_tooltip"))
         self._move_earlier_button.setAccessibleName(tr("attachments_widget.move_earlier_tooltip"))
         self._move_earlier_button.setEnabled(False)
         self._move_earlier_button.clicked.connect(lambda: self._move_selected(-1))
         self._move_later_button = QPushButton(tr("attachments_widget.move_later_button"), self)
-        self._move_later_button.setObjectName("ghostButton")
+        self._move_later_button.setProperty("variant", "ghost")
+        self._move_later_button.setIcon(icons.themed("chevron_right"))
         self._move_later_button.setToolTip(tr("attachments_widget.move_later_tooltip"))
         self._move_later_button.setAccessibleName(tr("attachments_widget.move_later_tooltip"))
         self._move_later_button.setEnabled(False)
@@ -462,11 +476,13 @@ class AttachmentsWidget(QWidget):
         buttons.addWidget(self._move_later_button)
 
         self._add_button = QPushButton(tr("attachments_widget.add_button"), self)
+        self._add_button.setIcon(icons.themed("plus"))
         self._add_button.clicked.connect(self._on_add_clicked)
         self._remove_selected_button = QPushButton(tr("attachments_widget.remove_selected_button"), self)
+        self._remove_selected_button.setProperty("variant", "ghost")
         self._remove_selected_button.clicked.connect(self._on_remove_clicked)
         self._clear_button = QPushButton(tr("attachments_widget.clear_button"), self)
-        self._clear_button.setObjectName("ghostButton")
+        self._clear_button.setProperty("variant", "ghost")
         self._clear_button.clicked.connect(self._on_clear_clicked)
         buttons.addWidget(self._add_button)
         buttons.addWidget(self._remove_selected_button)
@@ -682,8 +698,10 @@ class AttachmentsWidget(QWidget):
             style.unpolish(tile.widget)
             style.polish(tile.widget)
 
+    def _file_icon_pixmap(self, icon_name: str):
+        return icons.themed_pixmap(icon_name, "text_muted", _FILE_ICON_SIZE, self.devicePixelRatioF())
+
     def _build_tile(self, item: QListWidgetItem, path: Path) -> _AttachmentTile:
-        tokens = theme.current_tokens()
         tile = _AttachmentTile(item, self._list)
         tile.setObjectName("attachmentTile")
         # A plain QWidget doesn't paint QSS background-color/border on its
@@ -705,7 +723,7 @@ class AttachmentsWidget(QWidget):
         # effectively invisible, which matters now that selecting a tile is
         # how the ordering controls are aimed.
         column.setContentsMargins(_TILE_PADDING, _TILE_PADDING, _TILE_PADDING, _TILE_PADDING)
-        column.setSpacing(4)
+        column.setSpacing(SPACE_XS)
 
         frame = QLabel(tile)
         frame.setObjectName("thumbnailTile")
@@ -717,14 +735,16 @@ class AttachmentsWidget(QWidget):
         # tile) actually reaches _AttachmentTile's own mouse handlers.
         frame.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         if path not in self._thumbnail_cache:
-            self._thumbnail_cache[path] = make_thumbnail(path, _THUMBNAIL_SIZE - 8) if is_image(path) else None
+            self._thumbnail_cache[path] = (
+                make_thumbnail(path, _THUMBNAIL_SIZE - ATTACHMENT_THUMBNAIL_INSET) if is_image(path) else None
+            )
         thumbnail = self._thumbnail_cache[path]
         image_is_thumbnail = thumbnail is not None
         icon_name = _icon_name_for(path)
         if thumbnail is not None:
             frame.setPixmap(thumbnail)
         else:
-            frame.setPixmap(icons.icon(icon_name, tokens.text_muted, _FILE_ICON_SIZE).pixmap(_FILE_ICON_SIZE, _FILE_ICON_SIZE))
+            frame.setPixmap(self._file_icon_pixmap(icon_name))
         column.addWidget(frame)
 
         name_label = QLabel(_elide(path.name), tile)
@@ -747,7 +767,8 @@ class AttachmentsWidget(QWidget):
 
         remove_button = QToolButton(tile)
         remove_button.setObjectName("chipRemoveButton")
-        remove_button.setIcon(icons.icon("close", tokens.text_muted, _REMOVE_ICON_SIZE))
+        remove_button.setIcon(icons.themed("close", "text_muted", active_role=None))
+        remove_button.setIconSize(icon_qsize(_REMOVE_ICON_SIZE))
         remove_button.setText(tr("attachments_widget.remove_tile_button"))
         remove_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         remove_button.setToolTip(tr("attachments_widget.remove_tile_tooltip"))
@@ -793,11 +814,10 @@ class AttachmentsWidget(QWidget):
         colors regardless of theme. Each tile remembers which glyph it
         was built with (icon_name) so re-tinting doesn't collapse every
         non-image tile back to the generic document icon."""
-        color = theme.current_tokens().text_muted
         for tile in self._tiles.values():
             if not tile.is_image:
-                tile.image_label.setPixmap(icons.icon(tile.icon_name, color, _FILE_ICON_SIZE).pixmap(_FILE_ICON_SIZE, _FILE_ICON_SIZE))
-            tile.remove_button.setIcon(icons.icon("close", color, _REMOVE_ICON_SIZE))
+                tile.image_label.setPixmap(self._file_icon_pixmap(tile.icon_name))
+            tile.remove_button.update()
 
     def retranslate_ui(self) -> None:
         retranslate_empty_state(

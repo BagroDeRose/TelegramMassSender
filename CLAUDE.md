@@ -48,9 +48,19 @@ described below.
     campaign-ending critical error, alongside the existing status-bar
     text/modal dialog respectively -- "Exit" in the tray menu always goes
     through the normal `closeEvent`, never a separate shutdown path.
+    Layout (UI redesign): the shell is sidebar | page stack | journal
+    (right); the Campaign page is two columns via `layouts.
+    ResponsiveColumns` (Recipients/Message/Attachments scroll left; the
+    preview card and `CampaignControlsWidget` are pinned right, and fold
+    under the left column below `CAMPAIGN_FOLD_WIDTH`); Tab order is set
+    explicitly in `campaign_tab_chain()`. Quick successes go to
+    `self._toast()` (`motion.ToastHost`), not modal boxes; file exports
+    and errors stay modal.
     The Results page's recipient-results list (v1.6 Retry, v1.7 Filter
-    results) shows `_report_source`'s items filtered by a combo (default:
-    Failed, preserving Retry's original behavior) -- only FAILED rows are
+    results) shows `_report_source`'s items filtered by a segmented control
+    (`results_view.SegmentedControl`, QComboBox-compatible API; default:
+    Failed, preserving Retry's original behavior), painted as table rows
+    by `results_view.ResultsRowDelegate` -- only FAILED rows are
     ever checkable, regardless of the active filter. Retry relaunches
     through the exact same `_start_campaign` every other start path (fast
     workflow, Campaign Wizard) already shares, reusing the message/
@@ -60,8 +70,14 @@ described below.
     independent of the filter. Duration is frozen once at completion
     (`_last_campaign_duration_seconds`) since `CampaignControlsWidget.
     elapsed_seconds()` keeps counting up and can't be re-read later.
-  - `sidebar.py`, `recipient_widget.py`, `journal_widget.py`,
-    `stat_card.py`, `empty_state.py` — page/widget components.
+  - `sidebar.py` (collapsible to an icon rail, state in the
+    `sidebar_collapsed` setting; active-account block at the bottom),
+    `recipient_widget.py` (count pills), `journal_widget.py` (rows painted
+    by a delegate: monospace time, status icon from the campaign layer's
+    marker glyph), `stat_card.py`, `empty_state.py` (icon + sentence +
+    optional single action), `results_view.py`, `layouts.py`, `motion.py`
+    (toasts, page fade), `dialog_frame.py` (title / content / footer with
+    the primary action rightmost) — page/widget components.
   - `attachments_widget.py` — the attachment tile grid. `move_attachment(
     from_index, to_index)` is the single canonical ordering operation:
     `to_index` is the *final* index, which is what makes it
@@ -90,7 +106,12 @@ described below.
     button/`QInputDialog`) over Telegram's own profile name, which wins
     over the phone number; the phone is otherwise always shown on the
     card unless it would just repeat the title.
-  - `campaign_controls.py` — Start/Pause/Stop, progress, and (v1.6) the
+  - `campaign_controls.py` — the launch/progress panel: a summary (users,
+    groups/channels, attachments, interval, estimate) above the page's one
+    primary button, turning into progress while running (state pill,
+    progress bar, counters, Pause/Resume, Stop) with a FloodWait block
+    (countdown; Continue enabled only once the campaign has paused).
+    Also Start/Pause/Stop, progress, and (v1.6) the
     pre-start duration estimate (recipient count × average configured
     interval) plus the live elapsed-time/remaining-time display (a
     1-second `QTimer` owned by the widget itself, started once by
@@ -121,12 +142,27 @@ described below.
     into the same live Campaign-page widgets the fast single-page workflow
     uses and calls the same `_on_start_requested` — both workflows share
     one validation/start path and one live-progress UI.
-  - `theme.py` — light/dark theme tokens and QSS stylesheet generation
-    (generated at runtime, not shipped as static `.qss` files).
-  - `icons.py`, `thumbnails.py` — hand-drawn `QPainter` icon set (including
-    per-attachment-type glyphs: video/audio/archive/document, selected in
-    `attachments_widget.py` from `AttachmentKind`) and image-attachment
-    thumbnail generation.
+  - `theme/` — the one theme system (see docs/design.md). `tokens.py`:
+    every colour, size, font name and motion duration for both themes,
+    the only place literals like these may live (enforced by
+    `scripts/check_ui_hygiene.py` / `tests/test_ui_hygiene.py`). `qss.py`:
+    the single QSS template. `__init__.py`: the public API every caller
+    already used (`tokens_for`, `current_tokens`, `stylesheet_for`, scale
+    constants, ...) plus `apply_theme(app, name)` — the only place a
+    theme is applied: QPalette, Inter registration, exactly one
+    `QApplication.setStyleSheet` per switch, a `QProxyStyle` (themed
+    message-box icons, primary-right button order), Windows dark/light
+    title bars (DwmSetWindowAttribute, silent on failure), a keyboard-only
+    focus-ring event filter, and `notifier.theme_changed` for colours QSS
+    can't reach (preview HTML, editor char formats, pixmap labels).
+    Variants are dynamic properties (`variant`, `status`) changed via
+    `theme.set_property()`, never per-widget `setStyleSheet`. The stored
+    choice (settings key `theme`, values `dark`/`light`) is unchanged.
+  - `icons.py` — Lucide SVGs (assets/icons/lucide, ISC) rendered by a
+    `QIconEngine`; `icons.themed(name, role, checked_role, active_role)`
+    resolves token roles at paint time, so icons follow a theme switch by
+    themselves. The old glyph names (`campaign`, `close`, ...) are aliases.
+  - `thumbnails.py` — image-attachment thumbnail generation.
 - `app/telegram/` — Telethon (MTProto) integration:
   - `client_manager.py`, `account_manager.py`, `authentication.py` — client
     lifecycle, multi-account session management/switching. (v1.8)
@@ -245,7 +281,7 @@ described below.
   human-readable journal messages, never message text/credentials).
 - `app/i18n/` — Russian/English translation catalog and lookup:
   `translator.py` (`tr()`/`trn()`, active-language state following the
-  same pattern as `app/ui/theme.py`'s active-theme state), `strings.py`
+  same pattern as `app/ui/theme/`'s active-theme state), `strings.py`
   (the catalog itself). A top-level package, not under `app/ui/`, because
   `app/config/settings.py`'s validation-error messages and other non-UI
   layers need it too. Language switches immediately (no restart): every
@@ -253,7 +289,7 @@ described below.
   `MainWindow.retranslate_ui()` the same way theme switching already
   dispatches `apply_theme()`. Deliberately not gettext or Qt Linguist
   (.ts/.qm + lupdate/lrelease) — this app has no other use for either.
-- `tests/` — pytest + pytest-asyncio (`asyncio_mode = auto`), 883 tests,
+- `tests/` — pytest + pytest-asyncio (`asyncio_mode = auto`), 913 tests,
   using `tests/mocks/mock_telegram_client.py` and
   `tests/mocks/fake_client_manager.py` instead of a real Telegram
   connection. `tests/conftest.py` has two autouse fixtures: an
@@ -292,7 +328,7 @@ reproduced with a failing test first, then fixed.
 
 **Tests.** After any code change, run the targeted test file, then the
 full suite (`pytest tests/ -v`). Don't delete or weaken existing tests just
-to make the suite pass. The current baseline is 883 passed, 0 failures —
+to make the suite pass. The current baseline is 913 passed, 0 failures —
 if that number changes, know exactly why before saying the change is done.
 
 **GUI.** Never block the Qt event loop or the asyncio event loop.
