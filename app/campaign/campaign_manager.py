@@ -53,6 +53,7 @@ from app.logging.events import EventType, log_event
 from app.logging.logger import get_logger
 from app.recipients.parser import ParsedRecipient
 from app.telegram.chat_targets import (
+    DialogSnapshot,
     chat_error_reason,
     chat_peer_id,
     check_send_rights,
@@ -127,6 +128,7 @@ class CampaignManager(QObject):
         recipient_names: Optional[Dict[str, str]] = None,
         delivered_chat_ids: Optional[Iterable[int]] = None,
         resume_steps: Optional[Dict[str, int]] = None,
+        dialog_snapshot: Optional[DialogSnapshot] = None,
         parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)
@@ -143,7 +145,9 @@ class CampaignManager(QObject):
         # it's the sender's own, deliberately supplied data for that
         # specific recipient. See _attempt_send.
         self._recipient_names = recipient_names or {}
-        self._resolver = RecipientResolver(client)
+        # The session's cached dialogs (if the picker already read them)
+        # spare the resolver its own dialogs read for IDs found there.
+        self._resolver = RecipientResolver(client, dialog_snapshot)
         # Marked ids of chats this campaign (or, for a Retry, the campaign
         # it retries) already delivered to.
         self._delivered_chat_ids = set(delivered_chat_ids or ())

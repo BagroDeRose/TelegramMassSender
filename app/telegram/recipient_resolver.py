@@ -41,6 +41,7 @@ from app.i18n import tr
 from app.logging.logger import get_logger
 from app.recipients.parser import ParsedRecipient, RecipientKind
 from app.telegram.chat_targets import (
+    DialogSnapshot,
     TargetType,
     chat_error_reason_key,
     chat_peer_id,
@@ -116,13 +117,19 @@ class ResolvedRecipient:
 
 
 class RecipientResolver:
-    def __init__(self, client: TelegramClient) -> None:
+    def __init__(self, client: TelegramClient, dialogs: Optional[DialogSnapshot] = None) -> None:
+        """`dialogs`: the session's cached DialogSnapshot for this account
+        (the "From my chats…" picker's last read), if any. IDs found there
+        need no dialogs read of their own; one that isn't there makes the
+        resolver read the dialogs from Telegram once, as without a cache."""
         self._client = client
         self._cache: Dict[str, ResolvedRecipient] = {}
         # Marked id -> chat entity and user id -> User, from the account's
-        # own dialogs; None until fetched (see ensure_dialogs_loaded).
-        self._dialog_chats: Optional[Dict[int, Any]] = None
-        self._dialog_users: Dict[int, Any] = {}
+        # own dialogs; None until known (see ensure_dialogs_loaded).
+        self._dialog_chats: Optional[Dict[int, Any]] = dict(dialogs.chats) if dialogs is not None else None
+        self._dialog_users: Dict[int, Any] = dict(dialogs.users) if dialogs is not None else {}
+        # True once this resolver read the dialogs from Telegram itself.
+        self._dialogs_fetched = False
 
     @property
     def dialogs_loaded(self) -> bool:
@@ -138,6 +145,18 @@ class RecipientResolver:
         from scratch."""
         if self._dialog_chats is not None:
             return
+        await self._fetch_dialogs()
+
+    async def _refetch_dialogs_once(self) -> bool:
+        """An ID wasn't in the dialogs known so far (possibly a cached
+        snapshot): read them from Telegram, at most once per resolver.
+        False if they were already read fresh, so there's nothing new."""
+        if self._dialogs_fetched:
+            return False
+        await self._fetch_dialogs()
+        return True
+
+    async def _fetch_dialogs(self) -> None:
         chats: Dict[int, Any] = {}
         users: Dict[int, Any] = {}
         async for dialog in self._client.iter_dialogs():
@@ -149,6 +168,7 @@ class RecipientResolver:
                 chats[chat_peer_id(entity)] = entity
         self._dialog_chats = chats
         self._dialog_users = users
+        self._dialogs_fetched = True
         logger.info("Загружены диалоги аккаунта: чатов %d, личных %d", len(chats), len(users))
 
     def _from_entity(self, parsed: ParsedRecipient, entity: Any) -> ResolvedRecipient:
@@ -191,6 +211,8 @@ class RecipientResolver:
         if parsed.kind == RecipientKind.CHAT_ID:
             await self.ensure_dialogs_loaded()  # FloodWaitError propagates
             entity = self._dialog_chats.get(int(parsed.value))
+            if entity is None and await self._refetch_dialogs_once():
+                entity = self._dialog_chats.get(int(parsed.value))
             if entity is not None:
                 result = self._from_entity(parsed, entity)
                 self._cache[cache_key] = result
@@ -227,11 +249,12 @@ class RecipientResolver:
                 # Not among the account's dialogs and unknown to the
                 # session: the account isn't in this chat.
                 result = self._failed(parsed, ResolveStatus.NOT_MEMBER)
-            elif parsed.kind == RecipientKind.USER_ID and not self.dialogs_loaded:
-                # A bare user id the session has no access_hash for: read
-                # the dialogs once (FloodWaitError propagates) and take the
+            elif parsed.kind == RecipientKind.USER_ID and not self._dialogs_fetched:
+                # A bare user id the session has no access_hash for, and not
+                # in the dialogs known so far: read the dialogs from
+                # Telegram once (FloodWaitError propagates) and take the
                 # user from there -- never a guessed access_hash.
-                await self.ensure_dialogs_loaded()
+                await self._refetch_dialogs_once()
                 user = self._dialog_users.get(identifier)
                 if user is not None:
                     result = self._from_entity(parsed, user)

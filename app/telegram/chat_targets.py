@@ -22,7 +22,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any, FrozenSet, List, Optional, Tuple
+from typing import Any, Dict, FrozenSet, Hashable, List, Mapping, Optional, Tuple
 
 from telethon import utils as telethon_utils
 from telethon.errors import (
@@ -367,6 +367,39 @@ class DialogList:
     folders: Tuple[DialogFolder, ...] = ()
 
 
+@dataclass(frozen=True)
+class DialogSnapshot:
+    """One read of the account's dialogs: what the picker shows, plus the
+    entities the resolver's dialogs warm-up needs (marked chat id ->
+    Chat/Channel, user id -> User) -- every dialog's, including the ones
+    the picker leaves out. Kept in memory only, never persisted."""
+
+    dialogs: DialogList
+    chats: Mapping[int, Any]
+    users: Mapping[int, Any]
+
+
+class DialogCache:
+    """The active account's last DialogSnapshot, for this app session.
+    get() only answers for the account it was filled for, so a snapshot
+    can never be used against another account even if a clear() is
+    missed; MainWindow also clears it on every account change and on
+    the picker's Refresh."""
+
+    def __init__(self) -> None:
+        self._key: Optional[Hashable] = None
+        self._snapshot: Optional[DialogSnapshot] = None
+
+    def get(self, key: Hashable) -> Optional[DialogSnapshot]:
+        return self._snapshot if self._snapshot is not None and key == self._key else None
+
+    def put(self, key: Hashable, snapshot: DialogSnapshot) -> None:
+        self._key, self._snapshot = key, snapshot
+
+    def clear(self) -> None:
+        self._key, self._snapshot = None, None
+
+
 def _is_excluded_dialog(entity: Any) -> bool:
     """Saved Messages (the account itself), deleted accounts and Telegram's
     service notifications are dialogs, but nobody to send a campaign to."""
@@ -493,23 +526,36 @@ def _dialog_title(entity: Any, peer_id: int) -> str:
 
 
 async def list_dialogs(client: Any, now: Optional[datetime] = None) -> DialogList:
+    return (await load_dialog_snapshot(client, now)).dialogs
+
+
+async def load_dialog_snapshot(client: Any, now: Optional[datetime] = None) -> DialogSnapshot:
     """Every dialog of the account (archived ones included; migrated basic
-    groups left out, since their supergroup is listed), in Telegram's own
-    order, with the folders each belongs to. People and bots count as
-    writable; a chat is writable if check_send_rights allows a plain text
-    message. Reads only the dialog list and the folder list -- nothing is
-    joined, resolved or downloaded (no avatars). FloodWaitError from the
-    dialog list propagates to the caller untouched."""
+    groups left out of the list, since their supergroup is listed), in
+    Telegram's own order, with the folders each belongs to. People and
+    bots count as writable; a chat is writable if check_send_rights allows
+    a plain text message. Reads only the dialog list and the folder list
+    -- nothing is joined, resolved or downloaded (no avatars).
+    FloodWaitError from the dialog list propagates to the caller
+    untouched."""
     now = now or datetime.now(timezone.utc)
     text_only = SendRequirements(has_plain_text_message=True, message_count=1)
     rows: List[Tuple[Any, Any, int, TargetType]] = []
-    seen: set = set()
-    async for dialog in client.iter_dialogs(ignore_migrated=True):
+    seen: set = set()  # peer ids (ints) -- never the entities themselves
+    chats: Dict[int, Any] = {}
+    users: Dict[int, Any] = {}
+    async for dialog in client.iter_dialogs():
         entity = dialog.entity
         target_type = target_type_of(entity)
-        if target_type is None or _is_excluded_dialog(entity):
+        if target_type is None:
             continue
         peer_id = telethon_utils.get_peer_id(entity)
+        if target_type is TargetType.USER:
+            users[entity.id] = entity
+        else:
+            chats[peer_id] = entity
+        if _is_excluded_dialog(entity) or getattr(entity, "migrated_to", None) is not None:
+            continue
         if peer_id in seen:
             continue
         seen.add(peer_id)
@@ -541,4 +587,8 @@ async def list_dialogs(client: Any, now: Optional[datetime] = None) -> DialogLis
                 folder_ids=folder_ids,
             )
         )
-    return DialogList(dialogs=tuple(targets), folders=tuple(rule.folder for rule in rules))
+    return DialogSnapshot(
+        dialogs=DialogList(dialogs=tuple(targets), folders=tuple(rule.folder for rule in rules)),
+        chats=chats,
+        users=users,
+    )

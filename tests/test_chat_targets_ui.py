@@ -211,7 +211,7 @@ async def test_pick_chats_flood_wait_is_reported_not_retried(qapp, tmp_path):
     await _wait_until(lambda: window._recipient_widget._pick_chats_button.isEnabled())
 
     flood = AsyncMock(side_effect=make_flood_wait(120))
-    with patch("app.ui.main_window.list_dialogs", new=flood):
+    with patch("app.ui.main_window.load_dialog_snapshot", new=flood):
         window._on_pick_chats_requested()
         dialog = window._chat_picker
         await _wait_until(lambda: dialog._pages.currentWidget() is dialog._message_state)

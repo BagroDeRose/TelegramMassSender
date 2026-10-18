@@ -71,7 +71,14 @@ from app.database.repositories import PresetRepository, RecipientGroupRepository
 from app.i18n import LANGUAGE_LABELS, VALID_LANGUAGES, get_language, set_language, tr
 from app.logging.logger import get_logger
 from app.telegram.account_manager import Account, AccountStatus
-from app.telegram.chat_targets import CHAT_TARGET_TYPES, TargetType, list_dialogs, target_type_label
+from app.telegram.chat_targets import (
+    CHAT_TARGET_TYPES,
+    DialogCache,
+    DialogCategory,
+    TargetType,
+    load_dialog_snapshot,
+    target_type_label,
+)
 from app.telegram.exceptions import AccountDeletionError, AccountSwitchBlockedError
 from app.security.secure_storage import SecureStorage
 from app.telegram.service import TelegramService
@@ -82,6 +89,7 @@ from app.ui.attachments_widget import AttachmentsWidget
 from app.ui.campaign_controls import CampaignControlsWidget, format_duration
 from app.ui.campaign_wizard import CampaignWizardDialog
 from app.ui.chat_picker_dialog import ChatPickerDialog
+from app.ui.dialog_picker_model import dialog_recipient_keys
 from app.ui.dialogs import (
     confirm_delete_account,
     confirm_delete_group,
@@ -291,6 +299,11 @@ class MainWindow(QMainWindow):
         # open Campaign Wizard, whose recipients step has the same button.
         self._chat_picker: Optional[ChatPickerDialog] = None
         self._campaign_wizard: Optional[CampaignWizardDialog] = None
+        # The active account's dialogs as the picker last read them, kept
+        # for this session: reopening the picker shows them at once, and a
+        # campaign's dialogs warm-up starts from them. Cleared on every
+        # account change and by the picker's Refresh.
+        self._dialog_cache = DialogCache()
 
         self._database = database if database is not None else Database()
         self._service = TelegramService(self._database, secure_storage=secure_storage)
@@ -1804,6 +1817,8 @@ class MainWindow(QMainWindow):
             return
 
         self._account_widget.refresh_active_state(account_id)
+        if account_id != previous_active_id:
+            self._dialog_cache.clear()
         self._persist_active_account(account_id)
         self._on_form_state_changed()
         self._update_connection_status()
@@ -1825,6 +1840,8 @@ class MainWindow(QMainWindow):
         if account_manager is None:
             return
         async with self._account_lock:
+            if self._is_active_account(account):
+                self._dialog_cache.clear()
             try:
                 await account_manager.delete_account(account)
             except AccountDeletionError as exc:
@@ -1904,6 +1921,7 @@ class MainWindow(QMainWindow):
             self._service.enter_demo_mode()
         else:
             self._service.exit_demo_mode()
+        self._dialog_cache.clear()
         self._demo_banner.setVisible(enter)
         # A half-finished switch belongs to the mode we just left.
         self._account_switch_in_progress = False
@@ -1994,16 +2012,26 @@ class MainWindow(QMainWindow):
         dialog.finished.connect(lambda _code: self._on_chat_picker_finished(dialog))
         self._update_pick_chats_enabled()
         dialog.open()
-        self._load_dialogs_into(dialog, account)
+        cached = self._dialog_cache.get(self._dialog_cache_key(account))
+        if cached is not None:
+            dialog.set_dialogs(cached.dialogs)
+        else:
+            self._load_dialogs_into(dialog, account)
+
+    @staticmethod
+    def _dialog_cache_key(account: Account):
+        return (account.id, account.session_name)
 
     def _load_dialogs_into(self, dialog: ChatPickerDialog, account: Account) -> None:
+        """First open, or Refresh: always a fresh read, replacing the cache."""
+        self._dialog_cache.clear()
         dialog.set_loading()
         self._spawn(self._load_dialogs(dialog, account), "загрузка списка диалогов")
 
     async def _load_dialogs(self, dialog: ChatPickerDialog, account: Account) -> None:
         account_manager = self._service.account_manager
         assert account_manager is not None
-        result = None
+        snapshot = None
         try:
             # Same lock as refresh/switch/delete: this reads through the
             # account's live client and must not interleave with them.
@@ -2011,7 +2039,7 @@ class MainWindow(QMainWindow):
                 client = await account_manager.ensure_connected(account)
                 authorized = await client.is_user_authorized()
                 if authorized:
-                    result = await list_dialogs(client)
+                    snapshot = await load_dialog_snapshot(client)
             error = None if authorized else tr("chat_picker.error.not_authorized")
         except FloodWaitError as exc:
             # Never retried behind the user's back: they're told how long
@@ -2020,12 +2048,18 @@ class MainWindow(QMainWindow):
         except Exception as exc:  # noqa: BLE001 - shown in the picker itself
             self._logger.warning("Не удалось загрузить список диалогов: %s", exc)
             error = tr("chat_picker.error.load_failed", error=exc)
+        if snapshot is not None and self._is_active_account(account):
+            self._dialog_cache.put(self._dialog_cache_key(account), snapshot)
         if self._chat_picker is not dialog:
-            return  # closed while loading
+            return  # closed while loading (the cache still keeps the result)
         if error is not None:
             dialog.set_error(error)
         else:
-            dialog.set_dialogs(result)
+            dialog.set_dialogs(snapshot.dialogs)
+
+    def _is_active_account(self, account: Account) -> bool:
+        active = self._active_account()
+        return active is not None and self._dialog_cache_key(active) == self._dialog_cache_key(account)
 
     def _add_picked_dialogs(self, dialog: ChatPickerDialog, target: RecipientWidget) -> None:
         added = target.append_lines(dialog.selected_lines())
@@ -2105,17 +2139,34 @@ class MainWindow(QMainWindow):
         )
 
     def _recipient_breakdown(self, recipients) -> RecipientBreakdown:
-        """People / bots / chats / not-yet-known, from the recipient
-        formats alone -- nothing is resolved before the user confirms."""
+        """People / bots / chats / not-yet-known -- from the cached dialogs
+        where a recipient is among them, else from its format alone.
+        Nothing is resolved before the user confirms."""
         people = bots = chats = unknown = 0
+        known = self._cached_categories()
         for recipient in recipients:
-            if recipient.is_chat_target:
+            category = known.get(recipient.normalized_key)
+            if category is DialogCategory.BOTS:
+                bots += 1
+            elif category is DialogCategory.PEOPLE:
+                people += 1
+            elif category is not None or recipient.is_chat_target:
                 chats += 1
             elif recipient.kind == RecipientKind.USERNAME:
                 unknown += 1
             else:
                 people += 1
         return RecipientBreakdown(people=people, bots=bots, chats=chats, unknown=unknown)
+
+    def _cached_categories(self) -> Dict[str, DialogCategory]:
+        """normalized recipient key -> category, for the active account's
+        cached dialogs: a @username picked there is known to be a person,
+        a bot or a chat before anything is resolved."""
+        account = self._active_account()
+        snapshot = self._dialog_cache.get(self._dialog_cache_key(account)) if account is not None else None
+        if snapshot is None:
+            return {}
+        return {key: dialog.category for dialog in snapshot.dialogs.dialogs for key in dialog_recipient_keys(dialog)}
 
     def _confirm_campaign_start(self, recipients, settings) -> bool:
         """The one pre-start confirmation for every start path (Campaign
@@ -2175,6 +2226,7 @@ class MainWindow(QMainWindow):
             # -- neither is ever sent a second time.
             delivered_chat_ids=delivered_chat_ids,
             resume_steps=resume_steps,
+            dialog_snapshot=self._dialog_cache.get(self._dialog_cache_key(account)),
             # No Qt parent on purpose: with parent=self, Qt's ownership
             # hierarchy would keep every past campaign alive forever as a
             # child of MainWindow. Plain Python refcounting reclaims it as
