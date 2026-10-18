@@ -69,7 +69,7 @@ from app.database.repositories import PresetRepository, RecipientGroupRepository
 from app.i18n import LANGUAGE_LABELS, VALID_LANGUAGES, get_language, set_language, tr
 from app.logging.logger import get_logger
 from app.telegram.account_manager import Account, AccountStatus
-from app.telegram.chat_targets import CHAT_TARGET_TYPES, TargetType, list_writable_chats, target_type_label
+from app.telegram.chat_targets import CHAT_TARGET_TYPES, TargetType, list_dialogs, target_type_label
 from app.telegram.exceptions import AccountDeletionError, AccountSwitchBlockedError
 from app.security.secure_storage import SecureStorage
 from app.telegram.service import TelegramService
@@ -283,7 +283,8 @@ class MainWindow(QMainWindow):
         # so "From my chats…" is only offered for an account that is
         # actually connected and authorized.
         self._account_statuses: Dict[int, AccountStatus] = {}
-        self._chat_picker_loading = False
+        # The open "From my chats…" picker, if any (one at a time).
+        self._chat_picker: Optional[ChatPickerDialog] = None
 
         self._database = database if database is not None else Database()
         self._service = TelegramService(self._database, secure_storage=secure_storage)
@@ -1238,7 +1239,7 @@ class MainWindow(QMainWindow):
 
         self._recipient_widget.recipients_changed.connect(self._on_form_state_changed)
         self._recipient_widget.recipients_changed.connect(self._on_recipients_changed)
-        self._recipient_widget.pick_chats_requested.connect(self._on_pick_chats_requested)
+        self._recipient_widget.pick_chats_requested.connect(lambda: self._on_pick_chats_requested())
         self._attachments_widget.attachments_changed.connect(self._update_message_preview)
 
         self._campaign_controls.start_requested.connect(self._on_start_requested)
@@ -1918,57 +1919,77 @@ class MainWindow(QMainWindow):
             self._current_campaign is not None and self._current_campaign.is_active
         )
         self._recipient_widget.set_pick_chats_enabled(
-            self._active_account_connected() and not campaign_busy and not self._chat_picker_loading
+            self._active_account_connected() and not campaign_busy and self._chat_picker is None
         )
 
-    def _on_pick_chats_requested(self) -> None:
-        if self._chat_picker_loading or self._campaign_starting:
+    def _on_pick_chats_requested(
+        self, target: Optional[RecipientWidget] = None, parent: Optional[QWidget] = None
+    ) -> None:
+        """Open the picker over `parent` (the window, or the Campaign
+        Wizard) and fill `target` (the Campaign page's Recipients box, or
+        the wizard's). The dialog opens at once and loads in the
+        background, so a long dialog list never blocks the window."""
+        target = target or self._recipient_widget
+        parent = parent or self
+        if self._chat_picker is not None or self._campaign_starting:
             return
         if self._current_campaign is not None and self._current_campaign.is_active:
             return
         account = self._active_account()
         if account is None or not self._active_account_connected():
-            show_error(self, tr("chat_picker.title"), tr("chat_picker.error.no_account"))
+            show_error(parent, tr("chat_picker.title"), tr("chat_picker.error.no_account"))
             return
-        self._chat_picker_loading = True
+        target.flush()
+        dialog = ChatPickerDialog({r.normalized_key for r in target.valid_recipients()}, parent)
+        self._chat_picker = dialog
+        dialog.refresh_requested.connect(lambda: self._load_dialogs_into(dialog, account))
+        dialog.accepted.connect(lambda: self._add_picked_dialogs(dialog, target))
+        dialog.finished.connect(lambda _code: self._on_chat_picker_finished(dialog))
         self._update_pick_chats_enabled()
-        self._spawn(self._load_and_pick_chats(account), "загрузка списка чатов")
+        dialog.open()
+        self._load_dialogs_into(dialog, account)
 
-    async def _load_and_pick_chats(self, account: Account) -> None:
+    def _load_dialogs_into(self, dialog: ChatPickerDialog, account: Account) -> None:
+        dialog.set_loading()
+        self._spawn(self._load_dialogs(dialog, account), "загрузка списка диалогов")
+
+    async def _load_dialogs(self, dialog: ChatPickerDialog, account: Account) -> None:
+        account_manager = self._service.account_manager
+        assert account_manager is not None
+        result = None
         try:
-            account_manager = self._service.account_manager
-            assert account_manager is not None
-            try:
-                # Same lock as refresh/switch/delete: this reads through the
-                # account's live client and must not interleave with them.
-                async with self._account_lock:
-                    client = await account_manager.ensure_connected(account)
-                    authorized = await client.is_user_authorized()
-                    chats = await list_writable_chats(client) if authorized else []
-                if not authorized:
-                    show_error(self, tr("chat_picker.title"), tr("main_window.start_error.not_authorized"))
-                    return
-            except FloodWaitError as exc:
-                # Never retried behind the user's back: they're told how long
-                # Telegram wants them to wait and can try again afterwards.
-                show_error(self, tr("chat_picker.title"), tr("chat_picker.error.flood_wait", seconds=int(exc.seconds)))
-                return
-            except Exception as exc:  # noqa: BLE001 - surfaced to the user
-                self._logger.warning("Не удалось загрузить список чатов: %s", exc)
-                show_error(self, tr("chat_picker.title"), tr("chat_picker.error.load_failed", error=exc))
-                return
-        finally:
-            self._chat_picker_loading = False
-            self._update_pick_chats_enabled()
+            # Same lock as refresh/switch/delete: this reads through the
+            # account's live client and must not interleave with them.
+            async with self._account_lock:
+                client = await account_manager.ensure_connected(account)
+                authorized = await client.is_user_authorized()
+                if authorized:
+                    result = await list_dialogs(client)
+            error = None if authorized else tr("chat_picker.error.not_authorized")
+        except FloodWaitError as exc:
+            # Never retried behind the user's back: they're told how long
+            # Telegram wants them to wait and can press Refresh afterwards.
+            error = tr("chat_picker.error.flood_wait", seconds=int(exc.seconds))
+        except Exception as exc:  # noqa: BLE001 - shown in the picker itself
+            self._logger.warning("Не удалось загрузить список диалогов: %s", exc)
+            error = tr("chat_picker.error.load_failed", error=exc)
+        if self._chat_picker is not dialog:
+            return  # closed while loading
+        if error is not None:
+            dialog.set_error(error)
+        else:
+            dialog.set_dialogs(result)
 
-        if not chats:
-            show_info(self, tr("chat_picker.title"), tr("chat_picker.empty"))
-            return
-        dialog = ChatPickerDialog(chats, self)
-        if dialog.exec() != ChatPickerDialog.DialogCode.Accepted:
-            return
-        added = self._recipient_widget.append_lines([chat.recipient_line for chat in dialog.selected_targets()])
-        self._toast(tr("chat_picker.added_status", count=added))
+    def _add_picked_dialogs(self, dialog: ChatPickerDialog, target: RecipientWidget) -> None:
+        added = target.append_lines(dialog.selected_lines())
+        if target is self._recipient_widget:
+            self._toast(tr("chat_picker.added_status", count=added))
+
+    def _on_chat_picker_finished(self, dialog: ChatPickerDialog) -> None:
+        if self._chat_picker is dialog:
+            self._chat_picker = None
+        dialog.deleteLater()
+        self._update_pick_chats_enabled()
 
     # ---- campaign lifecycle ---------------------------------------------------
 

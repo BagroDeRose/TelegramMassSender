@@ -48,7 +48,7 @@ import app.ui.main_window as main_window_module  # noqa: E402
 from app.database.database import Database  # noqa: E402
 from app.database.repositories import SettingsRepository  # noqa: E402
 from app.security.secure_storage import SecureStorage  # noqa: E402
-from app.telegram.chat_targets import list_writable_chats  # noqa: E402
+from app.telegram.chat_targets import list_dialogs  # noqa: E402
 from app.telegram.demo_client import DemoTelegramClient  # noqa: E402
 
 
@@ -249,11 +249,15 @@ async def scenario() -> None:
 
     await show_dialog(MessageEditorDialog(text, entities, window), "dialog_editor")
 
-    chats = await list_writable_chats(DemoTelegramClient())
-    picker = ChatPickerDialog(chats, window)
-    await show_dialog(
-        picker, "dialog_chat_picker", lambda: picker._list.item(0).setCheckState(Qt.CheckState.Checked)
-    )
+    picker = ChatPickerDialog({r.normalized_key for r in window._recipient_widget.valid_recipients()}, window)
+    picker.set_dialogs(await list_dialogs(DemoTelegramClient()))
+
+    def tick_two() -> None:
+        model = picker._model
+        ticked = [row for row in range(model.rowCount()) if model.is_selectable(row)][:2]
+        model.set_rows_checked(ticked, True)
+
+    await show_dialog(picker, "dialog_chat_picker", tick_two)
 
     wizard = CampaignWizardDialog(window._service.settings_repository, window)
     wizard._recipient_widget.set_text(RECIPIENTS)

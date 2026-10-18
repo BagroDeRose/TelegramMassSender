@@ -16,18 +16,27 @@ from app.database.database import Database
 from app.i18n import get_language, set_language, tr
 from app.recipients.parser import parse_recipient_line
 from app.security.secure_storage import SecureStorage
-from app.telegram.chat_targets import ChatTarget, TargetType
+from app.telegram.chat_targets import DialogCategory, DialogList, DialogTarget, TargetType
 from app.ui.chat_picker_dialog import ChatPickerDialog
+from app.ui.dialog_picker_model import TARGET_ROLE
 from app.ui.dialogs import start_campaign_breakdown
 from app.ui.main_window import MainWindow
 from app.ui.recipient_widget import RecipientWidget
 
-CHATS = [
-    ChatTarget(peer_id=-1000000000001, title="Daily News", username="daily_news", target_type=TargetType.CHANNEL),
-    ChatTarget(peer_id=-1000000000002, title="Team Room", username=None, target_type=TargetType.SUPERGROUP),
-    ChatTarget(peer_id=-3, title="Family", username=None, target_type=TargetType.GROUP),
-    ChatTarget(peer_id=-1000000000004, title="Help Forum", username="help_forum", target_type=TargetType.FORUM),
-]
+CHATS = DialogList(
+    dialogs=(
+        DialogTarget(peer_id=-1000000000001, title="Daily News", username="daily_news", target_type=TargetType.CHANNEL),
+        DialogTarget(peer_id=-1000000000002, title="Team Room", username=None, target_type=TargetType.SUPERGROUP),
+        DialogTarget(peer_id=-3, title="Family", username=None, target_type=TargetType.GROUP),
+        DialogTarget(peer_id=-1000000000004, title="Help Forum", username="help_forum", target_type=TargetType.FORUM),
+    )
+)
+
+
+def _picker(dialogs=CHATS, existing=()):
+    dialog = ChatPickerDialog(existing)
+    dialog.set_dialogs(dialogs)
+    return dialog
 
 
 def _make_window(tmp_path: Path) -> MainWindow:
@@ -48,35 +57,32 @@ async def _wait_until(predicate, timeout=5.0):
 
 
 def _visible_titles(dialog: ChatPickerDialog):
-    return [
-        dialog._list.item(i).data(Qt.ItemDataRole.UserRole).title
-        for i in range(dialog._list.count())
-        if not dialog._list.item(i).isHidden()
-    ]
+    proxy = dialog._proxy
+    return [proxy.index(row, 0).data(TARGET_ROLE).title for row in range(proxy.rowCount())]
 
 
 def test_picker_type_filter_and_search(qapp):
-    dialog = ChatPickerDialog(CHATS)
+    dialog = _picker()
     assert _visible_titles(dialog) == ["Daily News", "Team Room", "Family", "Help Forum"]
 
-    dialog._type_combo.setCurrentIndex(dialog._type_combo.findData(TargetType.CHANNEL.value))
+    dialog._type_filter.setCurrentIndex(dialog._type_filter.findData(DialogCategory.CHANNELS))
     assert _visible_titles(dialog) == ["Daily News"]
 
-    dialog._type_combo.setCurrentIndex(0)
+    dialog._type_filter.setCurrentIndex(0)
     dialog._search_edit.setText("team")
     assert _visible_titles(dialog) == ["Team Room"]
 
     dialog._search_edit.setText("nothing like this")
     assert _visible_titles(dialog) == []
-    assert dialog._empty_label.isHidden() is False
+    assert dialog._pages.currentWidget() is dialog._message_state
 
 
 def test_picker_select_shown_and_selected_targets(qapp):
-    dialog = ChatPickerDialog(CHATS)
+    dialog = _picker()
     assert dialog._add_button.isEnabled() is False
-    dialog._type_combo.setCurrentIndex(dialog._type_combo.findData(TargetType.SUPERGROUP.value))
+    dialog._search_edit.setText("team")
     dialog._select_all_button.click()
-    dialog._type_combo.setCurrentIndex(dialog._type_combo.findData(TargetType.GROUP.value))
+    dialog._search_edit.setText("family")
     dialog._select_all_button.click()
     # Ticked rows hidden by the current filter still count.
     assert [c.title for c in dialog.selected_targets()] == ["Team Room", "Family"]
@@ -164,28 +170,35 @@ async def test_pick_chats_button_follows_connection_and_campaign_state(qapp, tmp
     assert button.isEnabled() is True
 
 
+async def _open_loaded_picker(window: MainWindow) -> ChatPickerDialog:
+    window._recipient_widget._pick_chats_button.click()
+    await _wait_until(lambda: window._chat_picker is not None and window._chat_picker._loaded)
+    return window._chat_picker
+
+
+def _tick(dialog: ChatPickerDialog, *titles: str) -> None:
+    model = dialog._model
+    for row in range(model.rowCount()):
+        if model.dialog(row).title in titles:
+            model.setData(model.index(row), Qt.CheckState.Checked, Qt.ItemDataRole.CheckStateRole)
+
+
 async def test_pick_chats_in_demo_mode_adds_the_ticked_chats(qapp, tmp_path):
     window = _make_window(tmp_path)
     window._enter_demo_mode()
     await _wait_until(lambda: window._recipient_widget._pick_chats_button.isEnabled())
     window._recipient_widget.set_text("@ivan_petrov")
 
-    shown = {}
+    dialog = await _open_loaded_picker(window)
+    assert window._recipient_widget._pick_chats_button.isEnabled() is False  # one picker at a time
+    model = dialog._model
+    titles = [model.dialog(row).title for row in range(model.rowCount())]
+    partner = titles.index("Demo Partner Channel")
+    assert not model.is_selectable(partner)  # listed, but can't post there
+    _tick(dialog, "Demo News", "Demo Family", "Demo Partner Channel")
+    dialog._add_button.click()
+    await _wait_until(lambda: window._chat_picker is None)
 
-    def fake_exec(dialog):
-        shown["titles"] = [dialog._list.item(i).data(Qt.ItemDataRole.UserRole).title for i in range(dialog._list.count())]
-        for i in range(dialog._list.count()):
-            chat = dialog._list.item(i).data(Qt.ItemDataRole.UserRole)
-            if chat.title in ("Demo News", "Demo Family"):
-                dialog._list.item(i).setCheckState(Qt.CheckState.Checked)
-        return ChatPickerDialog.DialogCode.Accepted
-
-    with patch.object(ChatPickerDialog, "exec", fake_exec):
-        window._recipient_widget._pick_chats_button.click()
-        await _wait_until(lambda: "Demo Family" in str(shown) and not window._chat_picker_loading)
-        await asyncio.sleep(0.05)
-
-    assert "Demo Partner Channel" not in shown["titles"]  # can't post there
     assert window._recipient_widget.get_text() == "@ivan_petrov\n@demo_news\n-900000003"
     assert window._recipient_widget._pick_chats_button.isEnabled() is True
 
@@ -197,13 +210,17 @@ async def test_pick_chats_flood_wait_is_reported_not_retried(qapp, tmp_path):
     window._enter_demo_mode()
     await _wait_until(lambda: window._recipient_widget._pick_chats_button.isEnabled())
 
-    async def flood(_client):
-        raise make_flood_wait(120)
-
-    with patch("app.ui.main_window.list_writable_chats", new=flood), patch("app.ui.main_window.show_error") as err:
+    flood = AsyncMock(side_effect=make_flood_wait(120))
+    with patch("app.ui.main_window.list_dialogs", new=flood):
         window._on_pick_chats_requested()
-        await _wait_until(lambda: err.called)
-    assert tr("chat_picker.error.flood_wait", seconds=120) == err.call_args[0][2]
+        dialog = window._chat_picker
+        await _wait_until(lambda: dialog._pages.currentWidget() is dialog._message_state)
+        await asyncio.sleep(0.05)
+    assert flood.await_count == 1
+    shown = [label.text() for label in dialog._message_state.findChildren(type(dialog._selection_label))]
+    assert tr("chat_picker.error.flood_wait", seconds=120) in shown
+    assert dialog._refresh_button.isEnabled() is True  # the user decides when to try again
+    dialog.reject()
     await _wait_until(lambda: window._recipient_widget._pick_chats_button.isEnabled())
 
 
@@ -303,9 +320,10 @@ def test_picker_and_button_render_in_both_languages(qapp):
             widget = RecipientWidget(show_chat_picker=True)
             widget.retranslate_ui()
             assert widget._pick_chats_button.text() == tr("recipient_widget.pick_chats_button")
-            dialog = ChatPickerDialog(CHATS)
+            dialog = _picker()
             assert dialog.windowTitle() == tr("chat_picker.title")
-            assert tr("chat_targets.type.channel") in dialog._list.item(0).text()
+            assert tr("chat_targets.type.channel") in dialog._proxy.index(0, 0).data()
+            assert dialog._type_filter._buttons[1].text() == tr("chat_picker.filter.people")
     finally:
         set_language(original_language)
 

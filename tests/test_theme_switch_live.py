@@ -14,7 +14,7 @@ from PySide6.QtWidgets import QApplication
 
 from app.database.database import Database
 from app.security.secure_storage import SecureStorage
-from app.telegram.chat_targets import ChatTarget, TargetType
+from app.telegram.chat_targets import DialogList, DialogTarget, TargetType
 from app.ui import icons, theme
 from app.ui.chat_picker_dialog import ChatPickerDialog
 from app.ui.main_window import MainWindow
@@ -79,8 +79,14 @@ async def test_dark_light_dark_with_open_dialogs_leaves_no_stale_colors(qapp, tm
 
     editor = MessageEditorDialog("Hello {name}", [], window)
     editor.show()
-    picker = ChatPickerDialog(
-        [ChatTarget(peer_id=-1001, title="Team", username="team", target_type=TargetType.SUPERGROUP)], window
+    picker = ChatPickerDialog(parent=window)
+    picker.set_dialogs(
+        DialogList(
+            dialogs=(
+                DialogTarget(peer_id=-1001, title="Team", username="team", target_type=TargetType.SUPERGROUP),
+                DialogTarget(peer_id=42, title="Anna", username=None, target_type=TargetType.USER),
+            )
+        )
     )
     picker.show()
     window._journal.setVisible(True)
@@ -110,6 +116,9 @@ async def test_dark_light_dark_with_open_dialogs_leaves_no_stale_colors(qapp, tm
             # Open dialogs follow too (they are polished by the same QSS).
             for dialog in (editor, picker):
                 assert dialog.palette().color(QPalette.ColorRole.Window).name() == QColor(tokens.surface).name()
+            # The picker's dialog list (painted by its own delegate) too.
+            picker_image = picker._list.viewport().grab().toImage()
+            assert picker_image.pixelColor(2, picker_image.height() - 2).name() == QColor(tokens.input_bg).name()
             # Themed SVG icons resolve their colour from the active tokens.
             assert _dominant_icon_color(themed_icon) == QColor(tokens.text_secondary).name()
             assert _dominant_icon_color(themed_icon, QIcon.State.On) == QColor(tokens.accent).name()

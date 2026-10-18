@@ -38,7 +38,12 @@ from unittest.mock import MagicMock
 from telethon import utils as telethon_utils
 from telethon.errors import SlowModeWaitError, UserIsBlockedError, UsernameNotOccupiedError
 from telethon.tl.functions.contacts import ResolvePhoneRequest
-from telethon.tl.functions.messages import CheckChatInviteRequest, SendMultiMediaRequest, UploadMediaRequest
+from telethon.tl.functions.messages import (
+    CheckChatInviteRequest,
+    GetDialogFiltersRequest,
+    SendMultiMediaRequest,
+    UploadMediaRequest,
+)
 from telethon.tl.types import (
     Channel,
     Chat,
@@ -50,6 +55,7 @@ from telethon.tl.types import (
     Photo,
     User,
 )
+from telethon.tl.types.messages import DialogFilters
 
 # Simulated failure rate for resolving/sending to a demo recipient --
 # high enough to realistically exercise retry/results/diagnostics (the
@@ -209,7 +215,7 @@ class DemoTelegramClient:
         return make_demo_user(identifier)
 
     async def iter_dialogs(self, *args: Any, **kwargs: Any):
-        yield _DemoDialog(make_demo_user("demo_friend"))
+        yield _DemoDialog(User(id=700000001, first_name="Anna", username="demo_friend", access_hash=700000001 * 31 + 7))
         for chat in self.chats:
             yield _DemoDialog(chat)
 
@@ -243,6 +249,8 @@ class DemoTelegramClient:
         return None, MagicMock(spec=InputMediaPhoto), None
 
     async def __call__(self, request: Any) -> Any:
+        if isinstance(request, GetDialogFiltersRequest):
+            return DialogFilters(filters=[])
         if isinstance(request, CheckChatInviteRequest):
             if request.hash == DEMO_INVITE_HASH:
                 return ChatInviteAlready(chat=self._chat_by_identifier("demo_team_chat"))

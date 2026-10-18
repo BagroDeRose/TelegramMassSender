@@ -16,7 +16,7 @@ from app.campaign.campaign_state import CampaignStatus
 from app.campaign.send_queue import SendItemStatus
 from app.i18n import tr
 from app.recipients.parser import parse_recipient_line
-from app.telegram.chat_targets import TargetType, list_writable_chats
+from app.telegram.chat_targets import TargetType, list_dialogs
 from app.telegram.demo_client import DEMO_INVITE_HASH, DemoTelegramClient
 from app.telegram.media_sender import Attachment
 
@@ -119,9 +119,9 @@ async def test_demo_never_joins_a_chat(qapp, monkeypatch):
     assert not any(isinstance(r, (ImportChatInviteRequest, JoinChannelRequest)) for r in requests)
 
 
-async def test_demo_chat_picker_lists_only_writable_chats():
-    chats = await list_writable_chats(DemoTelegramClient())
-    titles = [c.title for c in chats]
+async def test_demo_chat_picker_offers_only_writable_chats():
+    dialogs = (await list_dialogs(DemoTelegramClient())).dialogs
+    titles = [d.title for d in dialogs if d.target_type.is_chat and d.writable]
     assert titles == [
         "Demo News",
         "Demo Team Chat",

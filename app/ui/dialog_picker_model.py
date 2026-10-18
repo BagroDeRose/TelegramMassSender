@@ -282,7 +282,8 @@ class DialogRowDelegate(QStyledItemDelegate):
     active tokens at paint time, so a theme switch needs only a repaint."""
 
     def sizeHint(self, option, index) -> QSize:  # noqa: N802 - Qt override
-        return QSize(option.rect.width(), DIALOG_PICKER_ROW_HEIGHT)
+        # No width of its own: rows always fit the view, never scroll sideways.
+        return QSize(0, DIALOG_PICKER_ROW_HEIGHT)
 
     def paint(self, painter: QPainter, option, index) -> None:
         dialog: Optional[DialogTarget] = index.data(TARGET_ROLE)
@@ -316,7 +317,10 @@ class DialogRowDelegate(QStyledItemDelegate):
             AVATAR_SIZE,
         )
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(tokens.disabled_bg if muted else tokens.accent_soft))
+        circle = QColor(tokens.disabled_bg if muted else tokens.accent)
+        if not muted:
+            circle.setAlphaF(PILL_TINT_ALPHA)
+        painter.setBrush(circle)
         painter.drawEllipse(avatar)
         painter.setFont(theme.ui_font(FONT_SIZE_HELPER, theme.FONT_WEIGHT_SEMIBOLD))
         painter.setPen(QColor(tokens.disabled_text if muted else tokens.accent))

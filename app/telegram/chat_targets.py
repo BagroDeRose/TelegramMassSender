@@ -372,7 +372,9 @@ def _is_excluded_dialog(entity: Any) -> bool:
     service notifications are dialogs, but nobody to send a campaign to."""
     if not isinstance(entity, User):
         return False
-    return bool(entity.is_self or entity.deleted) or entity.id == SERVICE_NOTIFICATIONS_ID
+    if getattr(entity, "is_self", False) or getattr(entity, "deleted", False):
+        return True
+    return getattr(entity, "id", None) == SERVICE_NOTIFICATIONS_ID
 
 
 def _is_muted(dialog: Any, now: datetime) -> bool:
@@ -540,48 +542,3 @@ async def list_dialogs(client: Any, now: Optional[datetime] = None) -> DialogLis
             )
         )
     return DialogList(dialogs=tuple(targets), folders=tuple(rule.folder for rule in rules))
-
-
-# Superseded by list_dialogs; removed once the picker moves over.
-@dataclass(frozen=True)
-class ChatTarget:
-    peer_id: int  # marked id
-    title: str
-    username: Optional[str]
-    target_type: TargetType
-
-    @property
-    def recipient_line(self) -> str:
-        """What gets written into the Recipients box: @username when the
-        chat has one (stable, readable), else the marked numeric id."""
-        return f"@{self.username}" if self.username else str(self.peer_id)
-
-
-async def list_writable_chats(client: Any) -> List[ChatTarget]:
-    """Every group/supergroup/channel among the account's own dialogs that
-    a plain text message could be posted to right now (per
-    check_send_rights). Users and chats the account can't write to are
-    left out. FloodWaitError propagates to the caller untouched."""
-    text_only = SendRequirements(has_plain_text_message=True, message_count=1)
-    targets: List[ChatTarget] = []
-    seen: set = set()
-    async for dialog in client.iter_dialogs():
-        entity = dialog.entity
-        target_type = target_type_of(entity)
-        if target_type is None or not target_type.is_chat:
-            continue
-        if check_send_rights(entity, text_only) is not None:
-            continue
-        peer_id = chat_peer_id(entity)
-        if peer_id in seen:
-            continue
-        seen.add(peer_id)
-        targets.append(
-            ChatTarget(
-                peer_id=peer_id,
-                title=getattr(entity, "title", "") or "",
-                username=getattr(entity, "username", None) or None,
-                target_type=target_type,
-            )
-        )
-    return targets
