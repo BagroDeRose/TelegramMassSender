@@ -154,3 +154,22 @@ async def test_rows_follow_language_and_theme(qapp, tmp_path):
     finally:
         set_language(original_language)
         theme.apply_theme(QApplication.instance(), original_theme)
+
+
+async def test_an_account_that_needs_signing_in_is_not_counted_as_saved(qapp, tmp_path):
+    from app.telegram.account_manager import AccountStatus
+
+    window = _make_window(tmp_path)
+    repo = window._service.account_repository
+    ok = repo.create("+70000000060", "account_ok")
+    unfinished = repo.create("+70000000061", "account_unfinished")
+    for name in ("account_ok", "account_unfinished"):
+        (get_sessions_dir() / f"{name}.session").write_bytes(b"synthetic")
+    window._account_statuses = {
+        ok.id: AccountStatus(account=ok, is_authorized=True, needs_reauth=False),
+        unfinished.id: AccountStatus(account=unfinished, is_authorized=False, needs_reauth=True),
+    }
+    window._refresh_diagnostics()
+    sessions = _items(window)[tr("diagnostics.field.session_storage")]
+    assert sessions.value == trn("diagnostics.session_storage.summary", 2, present=1)
+    assert sessions.status == STATUS_WARNING

@@ -1234,9 +1234,15 @@ class MainWindow(QMainWindow):
             tr("diagnostics.network.offline"), diagnostics.STATUS_ERROR, tr("diagnostics.hint.network")
         )
 
+    def _accounts_needing_sign_in(self) -> set:
+        return {account_id for account_id, status in self._account_statuses.items() if status.needs_reauth}
+
     def _refresh_diagnostics(self) -> None:
         report = diagnostics.collect_diagnostics(
-            self._database, self._diagnostics_telegram_state(), self._diagnostics_network_state()
+            self._database,
+            self._diagnostics_telegram_state(),
+            self._diagnostics_network_state(),
+            self._accounts_needing_sign_in(),
         )
         self._last_diagnostics_report = report
         self._last_diagnostics_text = diagnostics.format_diagnostics_text(report)
@@ -1320,6 +1326,7 @@ class MainWindow(QMainWindow):
                 self._service.settings_repository.load_app_settings(),
                 self._diagnostics_telegram_state(),
                 self._diagnostics_network_state(),
+                self._accounts_needing_sign_in(),
             )
         except OSError as exc:
             show_error(
