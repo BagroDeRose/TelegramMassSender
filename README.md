@@ -16,7 +16,7 @@ A Windows desktop application that sends personal Telegram messages to a list of
 
 TelegramMassSender sends the *same message, personally, to each recipient in a list* — one Telegram message per recipient, from the user's own account, the way you'd write to each of them individually. Recipients are people, and optionally groups, supergroups and channels **the account is already a member of and allowed to post in** — it never joins a chat on its own, and Telegram's restrictions (permissions, slow mode, FloodWait) are respected, never worked around. It is not a bot and not a bulk-marketing tool. It integrates directly with Telegram's native **MTProto** protocol via **Telethon** — not the Bot API — and runs a real async event loop (**qasync**) bridging Qt's UI thread with `asyncio` network I/O.
 
-It supports multiple Telegram accounts, rich text formatting, media/album attachments, per-recipient `{name}` personalization (including from a CSV column), phone-number recipient resolution, a Telegram-style live message preview, named message presets and recipient groups, an optional step-by-step Campaign Wizard, failed-recipient retry, structured diagnostics, a full Russian/English UI, and campaign reporting — all backed by an 1168-test automated regression suite and a real Windows-packaged build (PyInstaller).
+It supports multiple Telegram accounts, rich text formatting, media/album attachments, per-recipient `{name}` personalization (including from a CSV column), phone-number recipient resolution, a Telegram-style live message preview, named message presets and recipient groups, an optional step-by-step Campaign Wizard, failed-recipient retry, structured diagnostics, a full Russian/English UI, and campaign reporting — all backed by an 1184-test automated regression suite and a real Windows-packaged build (PyInstaller).
 
 ## Key Features
 
@@ -135,7 +135,7 @@ Ordinary parts — not oversold: the settings page is a straightforward form bou
 pytest tests/ -v
 ```
 
-**1168 automated tests, 0 failures** (pytest + pytest-asyncio), run against a hand-built mock Telegram client (`tests/mocks/mock_telegram_client.py`) — no real Telegram account or network access needed. Coverage includes:
+**1184 automated tests, 0 failures** (pytest + pytest-asyncio), run against a hand-built mock Telegram client (`tests/mocks/mock_telegram_client.py`) — no real Telegram account or network access needed. Coverage includes:
 
 - Recipient parsing and import (all supported formats including phone numbers and malformed input, TXT import, and content-based CSV column/name detection).
 - Rich-text formatting and UTF-16 entity offset correctness, including the `{name}` placeholder (typed, CSV-supplied, and at message lengths well past Telegram's own text limit).
@@ -163,7 +163,7 @@ This is distinct from **manual packaged-build validation**: before each release,
 
 This project's requirements, architecture, and scope were defined and directed by the developer (BagroDeRose). Implementation was done with extensive AI assistance — primarily **Claude Code** — used for writing code, debugging, writing tests, code review, and documentation, always under human direction and verification rather than as unsupervised generation:
 
-- Every change is covered by the automated test suite (1168 tests, pytest/pytest-asyncio, mocked Telegram client).
+- Every change is covered by the automated test suite (1184 tests, pytest/pytest-asyncio, mocked Telegram client).
 - Bug fixes follow a reproduce → understand root cause → write a failing test → fix → regression test cycle, not guesswork.
 - A dedicated code review and security/privacy audit was performed before each public release (secret storage, log contents, session handling, git history sanitization).
 - The packaged Windows `.exe` is manually launched and validated before release — a successful build is not treated as sufficient on its own.
@@ -172,7 +172,7 @@ This is not a claim that every line was hand-typed, and it is not an unsupervise
 
 ## Download
 
-Latest release: **[v2.0.1](https://github.com/BagroDeRose/TelegramMassSender/releases/latest)** — download `TelegramMassSender-Windows.zip`, extract, and run `TelegramMassSender.exe`. No installation required. Full setup instructions (including obtaining a Telegram API ID/Hash) are in the [Russian user documentation](#документация-на-русском-языке) below.
+Latest release: **[v2.1.0](https://github.com/BagroDeRose/TelegramMassSender/releases/latest)** — download `TelegramMassSender-Windows.zip`, extract, and run `TelegramMassSender.exe`. No installation required. Full setup instructions (including obtaining a Telegram API ID/Hash) are in the [Russian user documentation](#документация-на-русском-языке) below.
 
 ## Limitations
 
@@ -487,7 +487,7 @@ https://t.me/user3
 
 Если в списке есть числовые ID чатов, перед первым таким чатом программа один раз загружает список ваших диалогов (без этого Telegram не даёт найти чат по ID). То же самое происходит, если Telegram не может найти человека по числовому ID из-за отсутствия данных о нём в сессии. Если Telegram в этот момент попросит подождать (FloodWait), рассылка встанет на паузу так же, как при отправке.
 
-Если подтверждение перед стартом включено (Настройки), окно подтверждения (оно показывается и перед «Повторить ошибки») показывает отдельно число пользователей и число групп/каналов; `@username` и ссылки `t.me/username` посчитаны отдельно, потому что человек это или чат, становится известно только при отправке.
+Если подтверждение перед стартом включено (Настройки), окно подтверждения (оно показывается и перед повторной отправкой ошибок) показывает отдельно число пользователей и число групп/каналов; `@username` и ссылки `t.me/username` посчитаны отдельно, потому что человек это или чат, становится известно только при отправке.
 
 Программа автоматически:
 - убирает пустые строки;
@@ -670,7 +670,7 @@ https://t.me/user3
 - **«Остановить»** — полностью останавливает рассылку.
 - Построчный ход рассылки по каждому получателю виден в **журнале** (см. следующий раздел), а сводная статистика — на странице **«Результаты»**.
 - Если включена настройка «Подтверждать запуск рассылки» (страница «Настройки»), перед стартом программа переспросит, скольким получателям будет отправлено сообщение.
-- **Защита от случайной большой рассылки:** если получателей больше порога «Большая рассылка» (Настройки → Отправка, по умолчанию 50, не меньше 10), перед стартом **всегда** показывается отдельное подтверждение — даже когда «Подтверждать запуск рассылки» выключено. В нём видно, сколько среди получателей людей, ботов и групп/каналов (и сколько `@username`, чей тип станет известен только при отправке); кнопка запуска выделена красным, а по умолчанию выбрана «Отмена» — Enter или Esc отменяют запуск. Это касается всех способов запуска: страницы «Кампания», Мастера кампании и «Повторить ошибки».
+- **Защита от случайной большой рассылки:** если получателей больше порога «Большая рассылка» (Настройки → Отправка, по умолчанию 50, не меньше 10), перед стартом **всегда** показывается отдельное подтверждение — даже когда «Подтверждать запуск рассылки» выключено. В нём видно, сколько среди получателей людей, ботов и групп/каналов (и сколько `@username`, чей тип станет известен только при отправке); кнопка запуска выделена красным, а по умолчанию выбрана «Отмена» — Enter или Esc отменяют запуск. Это касается всех способов запуска: страницы «Кампания», Мастера кампании и повторной отправки ошибок («Повторить выбранные» / «Повторить все ошибки»).
 
 #### Если Telegram временно ограничивает отправку (FloodWait)
 
@@ -883,7 +883,7 @@ build_windows.bat
 .venv\Scripts\python -m pytest tests/ -v
 ```
 
-На момент подготовки этой версии README полный набор тестов проходит целиком: **1168 тестов, 0 ошибок** (pytest + pytest-asyncio). Тесты используют собственный мок Telegram-клиента (`tests/mocks/mock_telegram_client.py`) вместо настоящего сервера Telegram, поэтому для их запуска не нужен ни интернет, ни реальный Telegram-аккаунт. Тесты также запускаются автоматически в GitHub Actions при каждом push/PR — см. значок «Tests» в начале README.
+На момент подготовки этой версии README полный набор тестов проходит целиком: **1184 тестов, 0 ошибок** (pytest + pytest-asyncio). Тесты используют собственный мок Telegram-клиента (`tests/mocks/mock_telegram_client.py`) вместо настоящего сервера Telegram, поэтому для их запуска не нужен ни интернет, ни реальный Telegram-аккаунт. Тесты также запускаются автоматически в GitHub Actions при каждом push/PR — см. значок «Tests» в начале README.
 
 #### Технологический стек
 
@@ -909,7 +909,7 @@ Windows-приложение на **Python + PySide6** (Qt для интерфе
 
 #### Как разрабатывался этот проект
 
-Требования, архитектуру и объём функциональности этого проекта определял автор репозитория. AI-инструменты (Claude Code) активно использовались в реализации, отладке, написании тестов, ревью кода и подготовке документации — но под его руководством и с его проверкой на каждом шаге, а не как автономная генерация без контроля. Это не означает, что код не проверялся: каждое изменение сопровождается автоматическими тестами (сейчас это упомянутые выше 1168 тестов на pytest/pytest-asyncio с мок-клиентом Telegram), а исправление ошибок в проекте ведётся по принципу «сначала воспроизвести проблему → понять причину → написать тест → исправить → прогнать регрессионные тесты», а не «на глаз». Перед публикацией репозитория отдельно проведены обзор кода и проверка безопасности/приватности (хранение секретов, содержимое логов, работа с сессиями), а собранный Windows-EXE запускался и проверялся вручную, а не считался готовым сразу по факту успешной сборки.
+Требования, архитектуру и объём функциональности этого проекта определял автор репозитория. AI-инструменты (Claude Code) активно использовались в реализации, отладке, написании тестов, ревью кода и подготовке документации — но под его руководством и с его проверкой на каждом шаге, а не как автономная генерация без контроля. Это не означает, что код не проверялся: каждое изменение сопровождается автоматическими тестами (сейчас это упомянутые выше 1184 тестов на pytest/pytest-asyncio с мок-клиентом Telegram), а исправление ошибок в проекте ведётся по принципу «сначала воспроизвести проблему → понять причину → написать тест → исправить → прогнать регрессионные тесты», а не «на глаз». Перед публикацией репозитория отдельно проведены обзор кода и проверка безопасности/приватности (хранение секретов, содержимое логов, работа с сессиями), а собранный Windows-EXE запускался и проверялся вручную, а не считался готовым сразу по факту успешной сборки.
 
 #### Где на диске хранятся данные пользователя
 
