@@ -96,7 +96,7 @@ class AccountManager:
         return self._client_manager.get_or_create(account.session_name)
 
     def get_active_client(self, account_session_name: str):
-        """Read-only lookup for Diagnostics (ROADMAP) -- unlike get_client,
+        """Read-only lookup for Diagnostics -- unlike get_client,
         never creates a client as a side effect; returns None if this
         session has no client instance yet."""
         return self._client_manager.get_active_client(account_session_name)

@@ -1,5 +1,5 @@
-"""WCAG 2.1 contrast-ratio checks for app.ui.theme's color tokens (ROADMAP
-v1.8 Accessibility: "Adequate contrast"). No prior automated coverage
+"""WCAG 2.1 contrast-ratio checks for app.ui.theme's color tokens (v1.8
+accessibility: adequate contrast). No prior automated coverage
 existed for this -- theme.py's existing tests check that colors differ
 between themes, never that they're actually readable.
 

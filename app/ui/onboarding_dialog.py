@@ -1,10 +1,10 @@
-"""First-run welcome dialog (ROADMAP v2.0 Onboarding).
+"""First-run welcome dialog (v2.0).
 
 Shown once, the first time the app has no persisted
 AppSettings.onboarding_completed -- explains the basic workflow and
 offers three ways forward: connect a real account (opens the existing
-LoginDialog), explore safely via Demo Mode (ROADMAP v2.0 Demo Mode,
-app.telegram.demo_client), or skip straight to the normal empty-state
+LoginDialog), explore safely via Demo Mode
+(app.telegram.demo_client), or skip straight to the normal empty-state
 app. A single, simple page -- not a multi-step wizard like
 CampaignWizard, since this dialog holds no workflow logic of its own,
 only an explanation and a choice.

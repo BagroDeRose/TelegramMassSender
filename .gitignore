@@ -41,11 +41,15 @@ dist/
 .vscode/
 .idea/
 
-# Local-only AI-assistant tooling (Claude Code skills/plugin setup) --
-# useful for local development but not part of the public project.
-# CLAUDE.md itself IS tracked intentionally (current project context/rules).
+# Local-only AI-assistant working files (Claude Code instructions, plans,
+# design notes and before/after screenshots) -- kept on the developer's
+# disk, not part of the public project.
 .claude/
 INSTALL_CLAUDE_SKILLS.md
+/CLAUDE.md
+/ROADMAP.md
+/docs/design.md
+/docs/redesign/
 
 # Test artifacts
 .pytest_cache/

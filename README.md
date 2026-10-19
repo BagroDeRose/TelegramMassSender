@@ -103,7 +103,7 @@ flowchart TD
 
 The UI never talks to Telethon directly — it goes through the campaign/service layer, which is what makes the mocked-client test suite possible (see [Testing](#testing)).
 
-All styling comes from one place, `app/ui/theme/`: `tokens.py` holds every colour, size and font name for both themes, `qss.py` is the single stylesheet template rendered from them, and `apply_theme()` sets the palette, fonts and stylesheet once per switch and switches the Windows title bar to dark/light. Bundled assets: the Inter typeface (SIL OFL 1.1, `assets/fonts/inter/OFL.txt`) and Lucide icons (ISC, `assets/icons/lucide/LICENSE.txt`). The redesign's reasoning and before/after screenshots are in `docs/design.md` and `docs/redesign/`.
+All styling comes from one place, `app/ui/theme/`: `tokens.py` holds every colour, size and font name for both themes, `qss.py` is the single stylesheet template rendered from them, and `apply_theme()` sets the palette, fonts and stylesheet once per switch and switches the Windows title bar to dark/light. Bundled assets: the Inter typeface (SIL OFL 1.1, `assets/fonts/inter/OFL.txt`) and Lucide icons (ISC, `assets/icons/lucide/LICENSE.txt`).
 
 ## Engineering Highlights
 

@@ -1,4 +1,4 @@
-"""Structured campaign event logging (ROADMAP: Structured Logging).
+"""Structured campaign event logging.
 
 Each event is one JSON object per log line, written through the same
 rotating, secret-scrubbing handler app.logging.logger already sets up

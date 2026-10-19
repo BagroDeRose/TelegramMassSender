@@ -1,4 +1,4 @@
-"""CSV recipient import (ROADMAP: Smart Recipient Import).
+"""CSV recipient import.
 
 Column detection is content-based, not header-based: for each row, every
 cell is tried against parse_recipient_line, and the first cell that

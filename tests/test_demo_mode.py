@@ -1,4 +1,4 @@
-"""Tests for Demo Mode (ROADMAP v2.0): app.telegram.demo_client's
+"""Tests for Demo Mode (v2.0): app.telegram.demo_client's
 DemoTelegramClient/DemoClientManager, and TelegramService.enter_demo_mode.
 No prior coverage existed for either app.telegram.service.py or Demo Mode
 itself.

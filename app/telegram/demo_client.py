@@ -1,4 +1,4 @@
-"""Fully local, simulated Telegram client for Demo Mode (ROADMAP v2.0).
+"""Fully local, simulated Telegram client for Demo Mode (v2.0).
 
 Duck-compatible with telethon.TelegramClient/app.telegram.client_manager.
 ClientManager for exactly the surface this app calls (see

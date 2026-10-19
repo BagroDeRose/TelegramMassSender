@@ -625,7 +625,7 @@ class MainWindow(QMainWindow):
         outer.setContentsMargins(0, 0, 0, 0)
         outer.setSpacing(0)
 
-        # Demo Mode banner (ROADMAP v2.0): a persistent, unmissable strip
+        # Demo Mode banner (v2.0): a persistent, unmissable strip
         # above the whole app shell -- not just a status-bar label, which
         # would be too easy to overlook for something this important
         # ("clearly indicate Demo Mode"). Hidden by default; shown only
@@ -1981,7 +1981,7 @@ class MainWindow(QMainWindow):
         account_manager.rename_account(account, new_alias)
         self._spawn(self._refresh_accounts(), "обновление списка аккаунтов")
 
-    # ---- demo mode (ROADMAP v2.0) -----------------------------------------------
+    # ---- demo mode (v2.0) -------------------------------------------------------
 
     def _on_try_demo_mode_requested(self) -> None:
         if not self._can_switch_accounts():

@@ -54,7 +54,7 @@ DEFAULT_DEBUG_LOGGING = False
 # 0 is the "no account was active" sentinel -- real account ids are SQLite
 # autoincrement, starting at 1, so 0 never collides with a real row.
 DEFAULT_ACTIVE_ACCOUNT_ID = 0
-# ROADMAP v2.0 Onboarding: the first-run welcome dialog is shown exactly
+# Onboarding (v2.0): the first-run welcome dialog is shown exactly
 # once, the first time the app ever launches with no persisted setting
 # for this yet -- flipped to True the moment that dialog closes
 # (Get Started/Try Demo/Skip alike), never shown again after.

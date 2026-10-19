@@ -186,8 +186,8 @@ def confirm_reset_settings(parent: QWidget) -> bool:
 
 
 def show_invalid_rows(parent: QWidget, title: str, rows: List[Tuple[str, str]]) -> None:
-    """Read-only review of recipient rows that failed to parse (ROADMAP:
-    "Allow user to review problematic rows") -- one "<raw> -- <reason>"
+    """Read-only review of recipient rows that failed to parse -- one
+    "<raw> -- <reason>"
     line per row. A QDialog with a plain-text view rather than another
     QMessageBox: the row list can be long, and a message box is not
     scrollable/selectable the way this needs to be."""

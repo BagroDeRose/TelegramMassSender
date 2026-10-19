@@ -1,4 +1,4 @@
-"""Optional step-by-step Campaign Wizard (ROADMAP: "Campaign Wizard") --
+"""Optional step-by-step Campaign Wizard --
 guides Recipients -> Message -> Attachments -> Sending options -> Preview
 -> Confirmation. Every step reuses the exact widget classes the existing
 single-page Campaign workflow already uses (RecipientWidget,

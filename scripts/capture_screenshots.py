@@ -1,5 +1,4 @@
-"""Capture screenshots of every page and dialog, for docs/redesign and
-docs/images.
+"""Capture screenshots of every page and dialog, for docs/images.
 
 Runs the real MainWindow on the real (Windows) Qt platform and the real
 qasync loop, against an isolated temporary database and secret store --

@@ -1,4 +1,4 @@
-"""Local recipient groups (ROADMAP: Recipient Groups) -- a named, saved
+"""Local recipient groups -- a named, saved
 snapshot of the Recipients box's raw text plus any CSV-derived {name}
 overrides (app.recipients.csv_importer), explicitly saved/loaded/renamed/
 deleted by the user via app.ui.main_window.
