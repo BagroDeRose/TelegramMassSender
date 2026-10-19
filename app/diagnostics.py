@@ -13,10 +13,11 @@ from typing import List, Tuple
 
 import telethon
 
-from app.config.paths import get_session_path
+from app.config.paths import get_session_file_path
 from app.database.database import Database
 from app.database.repositories import AccountRepository
 from app.i18n import tr
+from app.telegram.demo_client import DEMO_ACCOUNT_PHONE
 from app.version import APP_VERSION
 
 
@@ -39,9 +40,13 @@ def _session_storage_status(database: Database) -> str:
         accounts = AccountRepository(database).list_all()
     except Exception as exc:  # noqa: BLE001 -- same degrade-gracefully rule as _database_status
         return tr("diagnostics.status.error", error=exc)
+    # The demo account never has a session file (Demo Mode opens none).
+    accounts = [account for account in accounts if account.phone != DEMO_ACCOUNT_PHONE]
     if not accounts:
         return tr("diagnostics.session_storage.no_accounts")
-    present = sum(1 for account in accounts if get_session_path(account.session_name).exists())
+    # The file Telethon writes is "<name>.session"; get_session_path() is
+    # the name without that extension, so checking it always found 0.
+    present = sum(1 for account in accounts if get_session_file_path(account.session_name).exists())
     return tr("diagnostics.session_storage.summary", present=present, total=len(accounts))
 
 

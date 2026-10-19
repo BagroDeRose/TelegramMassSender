@@ -69,14 +69,14 @@ def test_session_storage_counts_present_session_files(tmp_path):
         repo.create("+70001112233", "session_present")
         repo.create("+70004445566", "session_missing")
 
+        # The real naming: Telethon writes "<session path>.session".
         present_file = tmp_path / "session_present.session"
         present_file.write_bytes(b"fake")
-        missing_file = tmp_path / "session_missing.session"  # deliberately never created
 
         def fake_get_session_path(session_name: str) -> Path:
-            return present_file if session_name == "session_present" else missing_file
+            return tmp_path / session_name
 
-        with patch("app.diagnostics.get_session_path", side_effect=fake_get_session_path):
+        with patch("app.config.paths.get_session_path", side_effect=fake_get_session_path):
             report = collect_diagnostics(db, "x", "y")
 
         values = dict(report.fields)
