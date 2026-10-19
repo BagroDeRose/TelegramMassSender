@@ -77,6 +77,45 @@ def _save(widget: QWidget, name: str) -> None:
     print("saved", name)
 
 
+def window_image(hwnd: int) -> QImage:
+    """One native window's own pixels, title bar included (PrintWindow
+    with PW_RENDERFULLCONTENT), even when other windows cover it."""
+    import ctypes
+    from ctypes import wintypes
+
+    user32, gdi32 = ctypes.windll.user32, ctypes.windll.gdi32
+    rect = wintypes.RECT()
+    user32.GetWindowRect(hwnd, ctypes.byref(rect))
+    width, height = rect.right - rect.left, rect.bottom - rect.top
+    hdc = user32.GetWindowDC(hwnd)
+    memory = gdi32.CreateCompatibleDC(hdc)
+    bitmap = gdi32.CreateCompatibleBitmap(hdc, width, height)
+    gdi32.SelectObject(memory, bitmap)
+    user32.PrintWindow(hwnd, memory, 2)
+
+    class BITMAPINFOHEADER(ctypes.Structure):
+        _fields_ = [
+            ("biSize", wintypes.DWORD), ("biWidth", wintypes.LONG), ("biHeight", wintypes.LONG),
+            ("biPlanes", wintypes.WORD), ("biBitCount", wintypes.WORD), ("biCompression", wintypes.DWORD),
+            ("biSizeImage", wintypes.DWORD), ("biXPelsPerMeter", wintypes.LONG), ("biYPelsPerMeter", wintypes.LONG),
+            ("biClrUsed", wintypes.DWORD), ("biClrImportant", wintypes.DWORD),
+        ]
+
+    header = BITMAPINFOHEADER(ctypes.sizeof(BITMAPINFOHEADER), width, -height, 1, 32, 0, 0, 0, 0, 0, 0)
+    buffer = ctypes.create_string_buffer(width * height * 4)
+    gdi32.GetDIBits(memory, bitmap, 0, height, buffer, ctypes.byref(header), 0)
+    gdi32.DeleteObject(bitmap)
+    gdi32.DeleteDC(memory)
+    user32.ReleaseDC(hwnd, hdc)
+    image = QImage(buffer.raw, width, height, width * 4, QImage.Format.Format_RGB32).copy()
+    # Drop the invisible resize borders around the visible frame.
+    visible = wintypes.RECT()
+    if ctypes.windll.dwmapi.DwmGetWindowAttribute(hwnd, 9, ctypes.byref(visible), ctypes.sizeof(visible)) == 0:
+        image = image.copy(visible.left - rect.left, visible.top - rect.top,
+                           visible.right - visible.left, visible.bottom - visible.top)
+    return image
+
+
 def _synthetic_images() -> List[Path]:
     paths = []
     for index, color in enumerate(("#6f8fc7", "#c79a6f", "#7fb38f")):
@@ -233,13 +272,10 @@ async def scenario() -> None:
 
     if not ONLY or "window_frame" in ONLY:
         # The real window including its Windows title bar (dark in the dark
-        # theme): grabbed from the screen, not rendered from the widget.
-        window.raise_()
-        window.activateWindow()
+        # theme). PrintWindow renders this window alone -- never a region of
+        # the screen, where whatever else is open could end up in the shot.
         await settle(0.6)
-        frame = window.frameGeometry()
-        shot = window.screen().grabWindow(0, frame.x(), frame.y(), frame.width(), frame.height())
-        shot.save(str(OUT / f"window_frame{SUFFIX}.png"))
+        window_image(int(window.winId())).save(str(OUT / f"window_frame{SUFFIX}.png"))
         print("saved window_frame")
 
     window._navigate_to_page(1)

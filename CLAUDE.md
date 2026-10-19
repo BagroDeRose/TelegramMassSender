@@ -52,7 +52,10 @@ described below.
     (right); the Campaign page is two columns via `layouts.
     ResponsiveColumns` (Recipients/Message/Attachments scroll left; the
     preview card and `CampaignControlsWidget` are pinned right, and fold
-    under the left column below `CAMPAIGN_FOLD_WIDTH`); Tab order is set
+    under the left column whenever the page is narrower than both columns
+    need -- `two_column_width()`: the left column's real minimum plus the
+    right column's preferred width, never below `CAMPAIGN_FOLD_WIDTH`);
+    Tab order is set
     explicitly in `campaign_tab_chain()`. Quick successes go to
     `self._toast()` (`motion.ToastHost`), not modal boxes; file exports
     and errors stay modal.
@@ -80,7 +83,13 @@ described below.
     `recipient_widget.py` (count pills), `journal_widget.py` (rows painted
     by a delegate: monospace time, status icon from the campaign layer's
     marker glyph), `stat_card.py`, `empty_state.py` (icon + sentence +
-    optional single action), `results_view.py`, `layouts.py`, `motion.py`
+    optional single action), `results_view.py`, `layouts.py`
+    (`ResponsiveColumns`; `FlowLayout`, the wrapping row every Campaign
+    page/RecipientWidget/AttachmentsWidget button row uses, so no row
+    forces its column wider than the page -- nothing may clip sideways at
+    any width from 900 px, journal open or not, tested in
+    `tests/test_layout_fit.py`; `WrappingLabel`, one line when it fits),
+    `motion.py`
     (toasts, page fade), `dialog_frame.py` (title / content / footer with
     the primary action rightmost) — page/widget components.
   - `attachments_widget.py` — the attachment tile grid. `move_attachment(
@@ -342,7 +351,7 @@ described below.
   `MainWindow.retranslate_ui()` the same way theme switching already
   dispatches `apply_theme()`. Deliberately not gettext or Qt Linguist
   (.ts/.qm + lupdate/lrelease) — this app has no other use for either.
-- `tests/` — pytest + pytest-asyncio (`asyncio_mode = auto`), 1168 tests,
+- `tests/` — pytest + pytest-asyncio (`asyncio_mode = auto`), 1184 tests,
   using `tests/mocks/mock_telegram_client.py` and
   `tests/mocks/fake_client_manager.py` instead of a real Telegram
   connection. `tests/conftest.py` has two autouse fixtures: an
@@ -381,7 +390,7 @@ reproduced with a failing test first, then fixed.
 
 **Tests.** After any code change, run the targeted test file, then the
 full suite (`pytest tests/ -v`). Don't delete or weaken existing tests just
-to make the suite pass. The current baseline is 1168 passed, 0 failures —
+to make the suite pass. The current baseline is 1184 passed, 0 failures —
 if that number changes, know exactly why before saying the change is done.
 
 **GUI.** Never block the Qt event loop or the asyncio event loop.

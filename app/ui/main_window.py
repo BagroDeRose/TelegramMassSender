@@ -104,7 +104,7 @@ from app.ui.dialogs import (
 )
 from app.ui.empty_state import build_empty_state, empty_state_action, retranslate_empty_state
 from app.ui.journal_widget import JournalWidget
-from app.ui.layouts import ResponsiveColumns
+from app.ui.layouts import FlowLayout, ResponsiveColumns
 from app.ui.results_view import ResultsHeader, ResultsRowDelegate, SegmentedControl
 from app.ui.motion import ToastHost, fade_in
 from app.ui.login_dialog import LoginDialog
@@ -206,6 +206,8 @@ def _page_header(title: str, subtitle: str) -> QWidget:
     layout.addWidget(title_label)
     subtitle_label = QLabel(subtitle, header)
     subtitle_label.setObjectName("pageSubtitle")
+    # Wraps on a narrow page instead of setting the page's minimum width.
+    subtitle_label.setWordWrap(True)
     layout.addWidget(subtitle_label)
     return header
 
@@ -718,8 +720,8 @@ class MainWindow(QMainWindow):
         recipients_layout.setSpacing(SPACE_SM)
         recipients_layout.addWidget(self._recipient_widget)
 
-        groups_row = QHBoxLayout()
-        groups_row.setSpacing(SPACE_XS)
+        # Label, combo and actions wrap rather than force the column wider.
+        groups_row = FlowLayout(spacing=SPACE_XS)
         self._groups_label = QLabel(tr("main_window.groups.label"), recipients_section)
         self._groups_label.setObjectName("helperText")
         groups_row.addWidget(self._groups_label)
@@ -734,7 +736,7 @@ class MainWindow(QMainWindow):
         self._delete_group_button = QPushButton(tr("main_window.groups.delete_button"), recipients_section)
         self._delete_group_button.setProperty("variant", "ghost")
         self._delete_group_button.clicked.connect(self._on_delete_group_clicked)
-        groups_row.addWidget(self._groups_combo, 1)
+        groups_row.addWidget(self._groups_combo)
         groups_row.addWidget(self._load_group_button)
         groups_row.addWidget(self._save_group_button)
         groups_row.addWidget(self._delete_group_button)
@@ -753,8 +755,7 @@ class MainWindow(QMainWindow):
         message_layout.setContentsMargins(0, 0, 0, 0)
         message_layout.setSpacing(SPACE_SM)
 
-        message_buttons = QHBoxLayout()
-        message_buttons.setSpacing(SPACE_SM)
+        message_buttons = FlowLayout(spacing=SPACE_SM)
         self._open_editor_button = QPushButton(tr("main_window.campaign_page.open_editor_button"), message_section)
         self._open_editor_button.setIcon(icons.themed("editor"))
         self._open_editor_button.setToolTip(tr("main_window.campaign_page.open_editor_tooltip"))
@@ -762,7 +763,7 @@ class MainWindow(QMainWindow):
         message_buttons.addWidget(self._open_editor_button)
         self._message_summary_label = QLabel("", message_section)
         self._message_summary_label.setObjectName("helperText")
-        message_buttons.addWidget(self._message_summary_label, 1)
+        message_buttons.addWidget(self._message_summary_label)
         message_layout.addLayout(message_buttons)
 
         self._name_hint_label = QLabel(tr("main_window.campaign_page.name_placeholder_hint"), message_section)
@@ -770,8 +771,7 @@ class MainWindow(QMainWindow):
         self._name_hint_label.setWordWrap(True)
         message_layout.addWidget(self._name_hint_label)
 
-        presets_row = QHBoxLayout()
-        presets_row.setSpacing(SPACE_XS)
+        presets_row = FlowLayout(spacing=SPACE_XS)
         self._presets_label = QLabel(tr("main_window.presets.label"), message_section)
         self._presets_label.setObjectName("helperText")
         presets_row.addWidget(self._presets_label)
@@ -786,7 +786,7 @@ class MainWindow(QMainWindow):
         self._delete_preset_button = QPushButton(tr("main_window.presets.delete_button"), message_section)
         self._delete_preset_button.setProperty("variant", "ghost")
         self._delete_preset_button.clicked.connect(self._on_delete_preset_clicked)
-        presets_row.addWidget(self._presets_combo, 1)
+        presets_row.addWidget(self._presets_combo)
         presets_row.addWidget(self._load_preset_button)
         presets_row.addWidget(self._save_preset_button)
         presets_row.addWidget(self._delete_preset_button)

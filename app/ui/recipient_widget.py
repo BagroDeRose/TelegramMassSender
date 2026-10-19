@@ -11,7 +11,6 @@ from typing import Dict, List, Optional
 from PySide6.QtCore import QTimer, Signal
 from PySide6.QtWidgets import (
     QFileDialog,
-    QHBoxLayout,
     QLabel,
     QMessageBox,
     QPlainTextEdit,
@@ -26,6 +25,7 @@ from app.recipients.importer import import_recipients_from_txt
 from app.recipients.parser import ParsedRecipient, ParseSummary, parse_recipient_line, parse_recipient_lines
 from app.ui import icons
 from app.ui.dialogs import show_invalid_rows
+from app.ui.layouts import FlowLayout
 from app.ui.theme import SPACE_SM, SPACE_XS
 
 _DEBOUNCE_MS = 300
@@ -49,8 +49,8 @@ class RecipientWidget(QWidget):
         self._text_edit.textChanged.connect(self._on_text_changed)
         layout.addWidget(self._text_edit)
 
-        buttons = QHBoxLayout()
-        buttons.setSpacing(SPACE_SM)
+        # Rows wrap rather than force the column wider (see FlowLayout).
+        buttons = FlowLayout(spacing=SPACE_SM)
         self._import_button = QPushButton(tr("recipient_widget.import_txt_button"), self)
         self._import_button.setIcon(icons.themed("import"))
         self._import_button.clicked.connect(self._on_import_clicked)
@@ -70,17 +70,15 @@ class RecipientWidget(QWidget):
         buttons.addWidget(self._import_csv_button)
         buttons.addWidget(self._pick_chats_button)
         buttons.addWidget(self._clear_button)
-        buttons.addStretch(1)
         layout.addLayout(buttons)
 
-        summary_row = QHBoxLayout()
-        summary_row.setSpacing(SPACE_XS)
+        summary_row = FlowLayout(spacing=SPACE_XS)
         # Shown only while the box is empty (a hint); otherwise the counts
         # are pills and this keeps the full sentence for screen readers.
         self._summary_label = QLabel(self)
         self._summary_label.setWordWrap(True)
         self._summary_label.setObjectName("summaryLabel")
-        summary_row.addWidget(self._summary_label, 1)
+        summary_row.addWidget(self._summary_label)
         self._pills = {}
         for key, status in (("valid", ""), ("chats", "info"), ("invalid", "error"), ("duplicates", "")):
             pill = QLabel(self)
@@ -89,7 +87,6 @@ class RecipientWidget(QWidget):
             pill.setVisible(False)
             summary_row.addWidget(pill)
             self._pills[key] = pill
-        summary_row.addStretch(1)
         self._review_invalid_button = QPushButton(tr("recipient_widget.review_invalid_button"), self)
         self._review_invalid_button.setProperty("variant", "ghost")
         self._review_invalid_button.clicked.connect(self._on_review_invalid_clicked)

@@ -33,6 +33,7 @@ from app.i18n import tr
 from app.telegram.media_sender import Attachment, AttachmentKind, kind_for_path
 from app.ui import icons, theme
 from app.ui.empty_state import build_empty_state, retranslate_empty_state
+from app.ui.layouts import FlowLayout
 from app.ui.theme import (
     ATTACHMENT_FILE_ICON,
     ATTACHMENT_REMOVE_ICON,
@@ -457,7 +458,8 @@ class AttachmentsWidget(QWidget):
         self._order_hint.setVisible(False)
         layout.addWidget(self._order_hint)
 
-        buttons = QHBoxLayout()
+        # Wraps rather than force the column wider (see FlowLayout).
+        buttons = FlowLayout(spacing=SPACE_SM)
         self._move_earlier_button = QPushButton(tr("attachments_widget.move_earlier_button"), self)
         self._move_earlier_button.setProperty("variant", "ghost")
         self._move_earlier_button.setIcon(icons.themed("chevron_left"))
@@ -487,7 +489,6 @@ class AttachmentsWidget(QWidget):
         buttons.addWidget(self._add_button)
         buttons.addWidget(self._remove_selected_button)
         buttons.addWidget(self._clear_button)
-        buttons.addStretch(1)
         layout.addLayout(buttons)
 
         self._sync_empty_state()

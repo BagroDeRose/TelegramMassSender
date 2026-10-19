@@ -33,6 +33,7 @@ from app.campaign.campaign_manager import ProgressSnapshot
 from app.i18n import tr
 from app.ui import icons, theme
 from app.ui.motion import fade_in
+from app.ui.layouts import WrappingLabel
 from app.ui.theme import MOTION_SLOW_MS, SPACE_LG, SPACE_MD, SPACE_SM, SPACE_XS
 
 _ELAPSED_TICK_MS = 1000
@@ -53,7 +54,9 @@ def format_countdown(total_seconds: int) -> str:
 
 
 def _label(text: str, object_name: str, parent: QWidget) -> QLabel:
-    label = QLabel(text, parent)
+    # Captions wrap only when the panel is squeezed (a narrow single
+    # column), so it never sets the page's minimum width.
+    label = WrappingLabel(text, parent) if object_name == "summaryKey" else QLabel(text, parent)
     label.setObjectName(object_name)
     return label
 
