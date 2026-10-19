@@ -16,7 +16,7 @@ A Windows desktop application that sends personal Telegram messages to a list of
 
 TelegramMassSender sends the *same message, personally, to each recipient in a list* — one Telegram message per recipient, from the user's own account, the way you'd write to each of them individually. Recipients are people, and optionally groups, supergroups and channels **the account is already a member of and allowed to post in** — it never joins a chat on its own, and Telegram's restrictions (permissions, slow mode, FloodWait) are respected, never worked around. It is not a bot and not a bulk-marketing tool. It integrates directly with Telegram's native **MTProto** protocol via **Telethon** — not the Bot API — and runs a real async event loop (**qasync**) bridging Qt's UI thread with `asyncio` network I/O.
 
-It supports multiple Telegram accounts, rich text formatting, media/album attachments, per-recipient `{name}` personalization (including from a CSV column), phone-number recipient resolution, a Telegram-style live message preview, named message presets and recipient groups, an optional step-by-step Campaign Wizard, failed-recipient retry, structured diagnostics, a full Russian/English UI, and campaign reporting — all backed by an 1184-test automated regression suite and a real Windows-packaged build (PyInstaller).
+It supports multiple Telegram accounts, rich text formatting, media/album attachments, per-recipient `{name}` personalization (including from a CSV column), phone-number recipient resolution, a Telegram-style live message preview, saved recipient lists and message templates, an optional step-by-step Campaign Wizard, failed-recipient retry, structured diagnostics, a full Russian/English UI, and campaign reporting — all backed by a 1214-test automated regression suite and a real Windows-packaged build (PyInstaller).
 
 ## Key Features
 
@@ -27,14 +27,15 @@ It supports multiple Telegram accounts, rich text formatting, media/album attach
 - A **From my chats…** picker (Campaign page and Campaign Wizard) lists every dialog of the active account — people, bots, groups, supergroups, forums, channels — newest first, with type segments, a Telegram-folder filter, an archive toggle and search by name/title/@username. Dialogs it can't write to are shown muted with the reason; ones already in the list are marked and not added twice. Picked dialogs go in as `@username`, or as their ID when there is none (a person added by ID is found through the account's dialogs at send time). It only reads the dialog and folder lists — no joining, no avatars downloaded — once per session per account (Refresh and account changes read them again), and a campaign's dialogs warm-up starts from that same list.
 - Per-recipient name personalization via a `{name}` placeholder, including inside rich-text formatting; for a group/channel it becomes the chat's title; a CSV-supplied name takes priority over Telegram's own name for that recipient.
 - Rich text editor (bold/italic/underline/strikethrough/spoiler/monospace/code block/links/emoji) with a live Telegram-style message preview, including a personalization preview against an example name.
-- Named message presets (text, formatting, attachments, optionally the sending interval) and named local recipient groups — save and reload a recipient list or a message template by name.
+- Saved recipient lists and message templates (text, formatting, attachments, optionally the sending interval), each behind one compact **Lists ▾** / **Templates ▾** menu in its card's header — on the Campaign page and in the Campaign Wizard: save the current one by name, load or delete a saved one.
+- Recipient counts that use what the account's dialogs already told the app: an `@username` found among the dialogs read by **From my chats…** counts as a person, a bot or a group/channel; one not seen there yet gets its own "@username" count, since its type is only known when sending. The counts follow a refresh and an account change.
 - An optional step-by-step Campaign Wizard (Recipients → Message → Attachments → Sending options → Preview → Confirmation) alongside the existing fast single-page workflow.
 - Photo, video, and document attachments, with automatic album batching, image thumbnails, and reordering by drag or by explicit Move earlier/Move later controls (also Ctrl+←/Ctrl+→).
 - Multiple Telegram accounts with persistent sessions and live switching.
 - Configurable randomized send interval with FloodWait-aware pausing (Telegram's own rate limits are respected, never bypassed), a pre-start duration estimate, and a live elapsed/remaining-time display while a campaign runs. A chat in slow mode fails with a "wait N sec" reason and the campaign moves on — slow mode is never waited out or bypassed.
 - Retry failed recipients (selected or all) after a campaign finishes, without resending anyone who already succeeded.
 - Live campaign statistics, failure-reason breakdowns, a filterable per-recipient results list, an event journal, and CSV report export/saving (including an export-failures-only option).
-- A Diagnostics panel (app/Python/Telethon versions, database/Telegram/network status) and a one-click sanitized diagnostic bundle export for troubleshooting.
+- A Diagnostics panel in plain words: one row per check (app version, database, Telegram, saved sign-ins, internet) with a status icon in its colour and a hint when something needs attention, Python/Telethon versions folded under "Technical details", an **Open data folder** button, and a one-click sanitized diagnostic bundle export. Neither the copied text nor the bundle contains a phone number, API credentials or session contents.
 - Full Russian/English UI with instant language switching (no restart), plus light and dark themes applied instantly across the whole UI.
 - A calm, consistent interface ("a quiet console"): one design-token module for both themes, Inter typeface, Lucide line icons, a two-column Campaign page with a chat-style message preview and a launch panel that turns into live progress, toasts for quick confirmations, keyboard-visible focus and a logical Tab order, a dark Windows title bar in the dark theme.
 - Windows DPAPI-encrypted credential storage; no secrets ever written to logs, including the structured diagnostic event log.
@@ -70,7 +71,7 @@ Attachments are sent in the order shown, and that order can be changed by draggi
 | UI | Python 3.13, PySide6 (Qt 6) |
 | Async runtime | `qasync` — bridges Qt's event loop with `asyncio` so network waits (including multi-minute FloodWait pauses) never block the UI |
 | Telegram integration | Telethon, speaking MTProto directly (not the Bot API) |
-| Persistence | SQLite (accounts, settings, saved-report metadata, message presets, recipient groups) |
+| Persistence | SQLite (accounts, settings, saved-report metadata, message templates ("presets" in code), saved recipient lists ("recipient groups" in code)) |
 | Credential security | Windows DPAPI (`CryptProtectData`/`CryptUnprotectData`) |
 | Packaging | PyInstaller (portable one-folder build) |
 | Testing | pytest + pytest-asyncio, with a hand-built mock Telegram client |
@@ -135,7 +136,7 @@ Ordinary parts — not oversold: the settings page is a straightforward form bou
 pytest tests/ -v
 ```
 
-**1184 automated tests, 0 failures** (pytest + pytest-asyncio), run against a hand-built mock Telegram client (`tests/mocks/mock_telegram_client.py`) — no real Telegram account or network access needed. Coverage includes:
+**1214 automated tests, 0 failures** (pytest + pytest-asyncio), run against a hand-built mock Telegram client (`tests/mocks/mock_telegram_client.py`) — no real Telegram account or network access needed. Coverage includes:
 
 - Recipient parsing and import (all supported formats including phone numbers and malformed input, TXT import, and content-based CSV column/name detection).
 - Rich-text formatting and UTF-16 entity offset correctness, including the `{name}` placeholder (typed, CSV-supplied, and at message lengths well past Telegram's own text limit).
@@ -163,7 +164,7 @@ This is distinct from **manual packaged-build validation**: before each release,
 
 This project's requirements, architecture, and scope were defined and directed by the developer (BagroDeRose). Implementation was done with extensive AI assistance — primarily **Claude Code** — used for writing code, debugging, writing tests, code review, and documentation, always under human direction and verification rather than as unsupervised generation:
 
-- Every change is covered by the automated test suite (1184 tests, pytest/pytest-asyncio, mocked Telegram client).
+- Every change is covered by the automated test suite (1214 tests, pytest/pytest-asyncio, mocked Telegram client).
 - Bug fixes follow a reproduce → understand root cause → write a failing test → fix → regression test cycle, not guesswork.
 - A dedicated code review and security/privacy audit was performed before each public release (secret storage, log contents, session handling, git history sanitization).
 - The packaged Windows `.exe` is manually launched and validated before release — a successful build is not treated as sufficient on its own.
@@ -212,10 +213,10 @@ Latest release: **[v2.1.0](https://github.com/BagroDeRose/TelegramMassSender/rel
 - [Подключение Telegram-аккаунта в программе](#подключение-telegram-аккаунта-в-программе)
 - [Несколько аккаунтов](#несколько-аккаунтов)
 - [Как добавить получателей](#как-добавить-получателей)
-- [Группы получателей](#группы-получателей)
+- [Сохранённые списки получателей](#сохранённые-списки-получателей)
 - [Создание сообщения](#создание-сообщения)
 - [Автоматическая подстановка имени ({name})](#автоматическая-подстановка-имени-name)
-- [Шаблоны сообщений (пресеты)](#шаблоны-сообщений-пресеты)
+- [Шаблоны сообщений](#шаблоны-сообщений)
 - [Мастер кампании](#мастер-кампании)
 - [Интервал отправки и запуск рассылки](#интервал-отправки-и-запуск-рассылки)
 - [Журнал](#журнал)
@@ -238,7 +239,7 @@ Latest release: **[v2.1.0](https://github.com/BagroDeRose/TelegramMassSender/rel
 - Получатели в любом сочетании форматов: `@username`, числовой Telegram ID, ссылка `t.me/username`, номер телефона в международном формате — вручную, из TXT-файла или из CSV-файла (колонки определяются автоматически, включая необязательную колонку с именем для `{name}`).
 - Автоматическая подстановка имени получателя в текст сообщения — плейсхолдер `{name}`; имя из CSV-файла имеет приоритет над именем из самого Telegram для этого получателя.
 - Форматирование текста (жирный, курсив, подчёркнутый, зачёркнутый, спойлер, моноширинный текст, блок кода, ссылки, emoji) в отдельном редакторе сообщений, с живым предпросмотром сообщения в стиле Telegram прямо на странице «Кампания», включая предпросмотр с примером имени для `{name}`.
-- Именные шаблоны сообщений (текст, форматирование, вложения и, при желании, интервал отправки) и именные группы получателей — можно сохранить и позже загрузить список получателей или текст сообщения по названию.
+- Шаблоны сообщений (текст, форматирование, вложения и, при желании, интервал отправки) и сохранённые списки получателей — по одной компактной кнопке-меню **«Шаблоны ▾»** и **«Списки ▾»** в заголовке карточки, на странице «Кампания» и в Мастере кампании: сохранить текущее под названием, загрузить или удалить сохранённое.
 - Необязательный пошаговый «Мастер кампании» (Получатели → Сообщение → Вложения → Параметры отправки → Предпросмотр → Подтверждение) как альтернатива обычной работе на одной странице — быстрый способ остаётся без изменений.
 - Фото, видео и документы вложением, с автоматической группировкой фото/видео в альбомы, миниатюрами изображений и изменением порядка вложений — перетаскиванием либо кнопками «Раньше»/«Позже» (а также Ctrl+←/Ctrl+→).
 - Несколько подключённых Telegram-аккаунтов с быстрым переключением между ними.
@@ -247,7 +248,7 @@ Latest release: **[v2.1.0](https://github.com/BagroDeRose/TelegramMassSender/rel
 - Живая статистика рассылки, разбивка по причинам ошибок, фильтруемый список получателей по статусу, журнал событий в реальном времени, экспорт и сохранение отчётов в CSV (включая экспорт только неудачных отправок).
 - Раздел «Диагностика» (версии приложения/Python/Telethon, состояние базы данных, статус подключения к Telegram) и экспорт диагностического пакета в один клик — для обращения в поддержку.
 - Полностью русский и английский интерфейс с мгновенным переключением языка без перезапуска, а также светлая и тёмная тема оформления, применяемые мгновенно.
-- Все данные (Telegram-сессии, настройки, отчёты, шаблоны, группы получателей) хранятся локально на вашем компьютере; секреты — в зашифрованном виде.
+- Все данные (Telegram-сессии, настройки, отчёты, шаблоны, сохранённые списки получателей) хранятся локально на вашем компьютере; секреты — в зашифрованном виде.
 
 ---
 
@@ -494,7 +495,7 @@ https://t.me/user3
 - удаляет повторяющихся получателей (дубликаты);
 - отмечает строки, которые не подходят ни под один из поддерживаемых форматов (счётчик «ошибок формата» под полем).
 
-Под полем ввода в реальном времени видно: сколько получателей распознано как валидные, сколько с ошибками формата и сколько дубликатов было убрано.
+Под полем ввода в реальном времени видно: сколько получателей распознано как валидные, сколько из них групп и каналов, сколько ботов, сколько с ошибками формата и сколько дубликатов было убрано. Тип получателя по `@username` программа берёт из уже загруженного списка ваших диалогов (тот же, что показывает «Из моих чатов…»): канал по `@username` сразу считается в «групп и каналов», человек — в получателях, бот — в «ботов». Если такого `@username` среди загруженных диалогов нет, он попадает в отдельный счётчик **«@username: N»** — его тип станет известен только при отправке (подсказка об этом — при наведении). Счётчики пересчитываются сами, когда список диалогов обновляется или меняется активный аккаунт.
 
 > **Важно:** программа отправляет по одному сообщению каждому получателю лично. Писать можно людям из ваших личных контактов, готовым получить от вас сообщение, а также в группы и каналы, где ваш аккаунт уже состоит и имеет право писать. Программа не вступает в чаты, не обходит ограничения Telegram и не должна использоваться для рассылок по чужим беседам.
 
@@ -543,15 +544,15 @@ https://t.me/user3
 
 ---
 
-### Группы получателей
+### Сохранённые списки получателей
 
-Если один и тот же список получателей используется регулярно (например, «Клиенты» или «Тестовые аккаунты»), его можно сохранить под названием и не вводить заново каждый раз. Строка с группами расположена прямо под полем ввода получателей, на странице «Кампания»:
+Если один и тот же список получателей используется регулярно (например, «Клиенты» или «Тестовые аккаунты»), его можно сохранить под названием и не вводить заново каждый раз. Для этого — кнопка-меню **«Списки ▾»** в заголовке карточки «Получатели» (такая же есть на шаге «Получатели» Мастера кампании):
 
-- **«Сохранить как…»** — сохраняет текущий список получателей (включая имена для `{name}`, если они пришли из CSV-импорта) под именем, которое вы укажете.
-- **«Загрузить»** — заменяет текущий список получателей на содержимое выбранной в выпадающем списке группы.
-- **«Удалить»** — удаляет выбранную группу (программа переспросит подтверждение).
+- **«Сохранить текущий список…»** — сохраняет текущий список получателей (включая имена для `{name}`, если они пришли из CSV-импорта) под названием, которое вы укажете.
+- **«Загрузить»** — подменю со всеми сохранёнными списками; выбранный заменяет текущий список получателей.
+- **«Удалить…»** — подменю с теми же списками; выбранный удаляется (программа переспросит подтверждение).
 
-Группа — это только список получателей и, при наличии, их имена для `{name}`; никакой дополнительной информации (заметок, истории переписки, тегов) программа не хранит — это не CRM-система, а просто именованный, сохранённый список.
+Пока сохранённых списков нет, «Загрузить» и «Удалить…» неактивны, а в меню написано, почему. Сохранённый список — это только получатели и, при наличии, их имена для `{name}`; никакой дополнительной информации (заметок, истории переписки, тегов) программа не хранит — это не CRM-система. Списки, сохранённые в прежних версиях под названием «группы», остаются на месте и показываются в этом меню.
 
 ---
 
@@ -623,21 +624,21 @@ https://t.me/user3
 
 ---
 
-### Шаблоны сообщений (пресеты)
+### Шаблоны сообщений
 
-Готовый текст сообщения (со всем форматированием и списком вложений, а при желании — и с интервалом отправки) можно сохранить под названием и использовать повторно в другой рассылке. Строка с шаблонами расположена под полем «Пример имени для {name}», на странице «Кампания»:
+Готовый текст сообщения (со всем форматированием и списком вложений, а при желании — и с интервалом отправки) можно сохранить под названием и использовать повторно в другой рассылке. Для этого — кнопка-меню **«Шаблоны ▾»** в заголовке карточки «Сообщение» (такая же есть на шаге «Сообщение» Мастера кампании):
 
-- **«Сохранить как…»** — сохраняет текущий текст сообщения, форматирование, вложения и текущий интервал отправки под именем, которое вы укажете.
-- **«Загрузить»** — заменяет текущее сообщение и вложения на содержимое выбранного шаблона. Если какой-то из сохранённых файлов вложений с тех пор был перемещён или удалён, программа предупредит об этом отдельно и загрузит всё остальное.
-- **«Удалить»** — удаляет выбранный шаблон (программа переспросит подтверждение).
+- **«Сохранить текущее сообщение…»** — сохраняет текущий текст сообщения, форматирование, вложения и текущий интервал отправки под названием, которое вы укажете.
+- **«Загрузить»** — подменю со всеми шаблонами; выбранный заменяет текущее сообщение и вложения (и интервал, если он был сохранён). Если какой-то из сохранённых файлов вложений с тех пор был перемещён или удалён, программа предупредит об этом отдельно и загрузит всё остальное.
+- **«Удалить…»** — подменю с теми же шаблонами; выбранный удаляется (программа переспросит подтверждение).
 
-Шаблон создаётся только явным нажатием «Сохранить как…» — программа никогда не сохраняет шаблоны автоматически и не превращает историю переписки в список шаблонов.
+Пока шаблонов нет, «Загрузить» и «Удалить…» неактивны. Шаблон создаётся только явным сохранением — программа никогда не сохраняет шаблоны автоматически и не превращает историю переписки в список шаблонов. В Мастере кампании меню работает с сообщением, вложениями и интервалом самого мастера; настройки интервала меняются, только когда вы проходите шаг «Параметры отправки».
 
 ---
 
 ### Мастер кампании
 
-Кроме обычной работы на одной странице «Кампания», есть необязательный пошаговый режим — кнопка **«Мастер кампании»** в правом верхнем углу страницы «Кампания». Он проводит через те же самые действия по шагам, один за другим: **Получатели → Сообщение → Вложения → Параметры отправки → Предпросмотр → Подтверждение**, используя ровно те же поля ввода, редактор сообщения и список вложений, что и обычная страница — просто в виде последовательности отдельных экранов вместо одной длинной страницы. На шаге «Получатели» есть та же кнопка **«Из моих чатов…»**: выбранные диалоги добавляются в список мастера.
+Кроме обычной работы на одной странице «Кампания», есть необязательный пошаговый режим — кнопка **«Мастер кампании»** в правом верхнем углу страницы «Кампания». Он проводит через те же самые действия по шагам, один за другим: **Получатели → Сообщение → Вложения → Параметры отправки → Предпросмотр → Подтверждение**, используя ровно те же поля ввода, редактор сообщения и список вложений, что и обычная страница — просто в виде последовательности отдельных экранов вместо одной длинной страницы. На шаге «Получатели» есть та же кнопка **«Из моих чатов…»**: выбранные диалоги добавляются в список мастера; там же — меню **«Списки ▾»**, а на шаге «Сообщение» — меню **«Шаблоны ▾»**: они загружают сохранённое прямо в мастер.
 
 На последнем шаге («Подтверждение») показана сводка (число получателей, число вложений, интервал отправки) и кнопка **«Начать рассылку»** — она запускает ту же самую рассылку, что и обычная кнопка «▶ Начать рассылку» на странице «Кампания» (та же самая проверка получателей/вложений, тот же диалог подтверждения, если он включён в настройках). После нажатия мастер закрывается, и дальнейший прогресс рассылки виден на обычной странице «Кампания» и в «Результатах» — отдельного экрана хода выполнения внутри мастера нет.
 
@@ -768,17 +769,19 @@ https://t.me/user3
 
 ### Диагностика
 
-Карточка **«Диагностика»** на странице «Настройки» показывает техническую информацию о текущем состоянии программы — полезно, если нужно обратиться за помощью или сообщить о проблеме:
+Карточка **«Диагностика»** на странице «Настройки» коротко и простыми словами показывает, всё ли в порядке, — полезно, если нужно обратиться за помощью или сообщить о проблеме. По строке на каждую проверку, у каждой — значок и текст в цвете состояния («В порядке», предупреждение или ошибка), а если что-то не так — подсказка, что сделать:
 
-- версия приложения, версия Python, версия библиотеки Telethon;
-- состояние базы данных программы (реальная проверка, а не предположение);
-- статус подключения к Telegram (подключён ли сейчас какой-либо аккаунт);
-- сколько аккаунтов имеют файл сессии на диске;
-- состояние сетевого соединения активного аккаунта.
+- **Версия программы**;
+- **База данных** — реальная проверка, а не предположение;
+- **Telegram** — подключён ли сейчас активный аккаунт (показывается его @username, номер телефона — никогда);
+- **Сохранённые входы** — у скольких аккаунтов сохранён вход, например «2 из 2 аккаунтов». Если у какого-то аккаунта входа нет, программа подскажет войти в него заново на странице «Аккаунты». Демо-аккаунт не считается;
+- **Интернет** — есть ли связь у активного аккаунта.
 
-Кнопка **«Копировать диагностику»** копирует весь этот текст в буфер обмена, чтобы вставить его, например, в сообщение при обращении за помощью. Кнопка **«Обновить»** пересчитывает все показатели заново. Кнопка **«Экспорт диагностического пакета»** сохраняет ZIP-архив с этой же информацией, настройками программы (без паролей и секретов) и техническим логом — удобно приложить целиком к обращению в поддержку.
+Версии Python и библиотеки Telethon спрятаны в раскрывающийся блок **«Технические сведения»**. Кнопка **«Открыть папку данных»** открывает папку программы в Проводнике (сам путь на экране не показывается).
 
-> Диагностическая информация никогда не содержит API Hash, пароль двухфакторной аутентификации, содержимое файлов сессий или текст ваших сообщений — ни на экране, ни в скопированном тексте, ни в экспортированном ZIP-архиве.
+Кнопка **«Копировать диагностику»** копирует этот текст в буфер обмена, чтобы вставить его, например, в сообщение при обращении за помощью. Кнопка **«Обновить»** пересчитывает все показатели заново. Кнопка **«Экспорт диагностического пакета»** сохраняет ZIP-архив с этой же информацией, настройками программы (без паролей и секретов) и техническим логом — удобно приложить целиком к обращению в поддержку.
+
+> Диагностическая информация никогда не содержит API Hash, пароль двухфакторной аутентификации, номер телефона, содержимое файлов сессий или текст ваших сообщений — ни на экране, ни в скопированном тексте, ни в экспортированном ZIP-архиве.
 
 ---
 
@@ -883,7 +886,7 @@ build_windows.bat
 .venv\Scripts\python -m pytest tests/ -v
 ```
 
-На момент подготовки этой версии README полный набор тестов проходит целиком: **1184 тестов, 0 ошибок** (pytest + pytest-asyncio). Тесты используют собственный мок Telegram-клиента (`tests/mocks/mock_telegram_client.py`) вместо настоящего сервера Telegram, поэтому для их запуска не нужен ни интернет, ни реальный Telegram-аккаунт. Тесты также запускаются автоматически в GitHub Actions при каждом push/PR — см. значок «Tests» в начале README.
+На момент подготовки этой версии README полный набор тестов проходит целиком: **1214 тестов, 0 ошибок** (pytest + pytest-asyncio). Тесты используют собственный мок Telegram-клиента (`tests/mocks/mock_telegram_client.py`) вместо настоящего сервера Telegram, поэтому для их запуска не нужен ни интернет, ни реальный Telegram-аккаунт. Тесты также запускаются автоматически в GitHub Actions при каждом push/PR — см. значок «Tests» в начале README.
 
 #### Технологический стек
 
@@ -899,17 +902,17 @@ Windows-приложение на **Python + PySide6** (Qt для интерфе
 - `assets/fonts/inter/` — шрифт Inter (лицензия SIL OFL 1.1, `OFL.txt`); `assets/icons/lucide/` — иконки Lucide (лицензия ISC, `LICENSE.txt`). Обе папки входят в сборку.
 - `app/telegram/` — клиент Telethon (MTProto) и управление подключением/переподключением, отправка сообщений и медиа, резолвинг получателей, группы и каналы как получатели (`chat_targets.py`: тип чата, проверка прав, причины ошибок), подстановка `{name}`.
 - `app/campaign/` — очередь отправки, ограничитель частоты (rate limiter), состояние и логика кампании, шаблоны сообщений (`presets.py`), CSV-отчёты и библиотека сохранённых отчётов.
-- `app/recipients/` — разбор, импорт (TXT и CSV) и группы получателей.
+- `app/recipients/` — разбор, импорт (TXT и CSV) и сохранённые списки получателей (в коде — группы, `groups.py`).
 - `app/security/` — хранение секретов на основе Windows DPAPI.
 - `app/config/` — настройки приложения и пути к данным в `%APPDATA%`.
-- `app/database/` — локальное хранилище на SQLite: аккаунты, настройки, сохранённые отчёты, шаблоны сообщений, группы получателей.
+- `app/database/` — локальное хранилище на SQLite: аккаунты, настройки, сохранённые отчёты, шаблоны сообщений, сохранённые списки получателей.
 - `app/logging/` — журналирование в файл с ротацией и вычищением секретов из записей, а также структурированные события кампании (`events.py`) в том же файле.
 - `app/i18n/` — каталог переводов интерфейса (русский/английский) и его подключение.
 - `tests/` — автоматические тесты (pytest + pytest-asyncio), включая мок Telegram-клиента.
 
 #### Как разрабатывался этот проект
 
-Требования, архитектуру и объём функциональности этого проекта определял автор репозитория. AI-инструменты (Claude Code) активно использовались в реализации, отладке, написании тестов, ревью кода и подготовке документации — но под его руководством и с его проверкой на каждом шаге, а не как автономная генерация без контроля. Это не означает, что код не проверялся: каждое изменение сопровождается автоматическими тестами (сейчас это упомянутые выше 1184 тестов на pytest/pytest-asyncio с мок-клиентом Telegram), а исправление ошибок в проекте ведётся по принципу «сначала воспроизвести проблему → понять причину → написать тест → исправить → прогнать регрессионные тесты», а не «на глаз». Перед публикацией репозитория отдельно проведены обзор кода и проверка безопасности/приватности (хранение секретов, содержимое логов, работа с сессиями), а собранный Windows-EXE запускался и проверялся вручную, а не считался готовым сразу по факту успешной сборки.
+Требования, архитектуру и объём функциональности этого проекта определял автор репозитория. AI-инструменты (Claude Code) активно использовались в реализации, отладке, написании тестов, ревью кода и подготовке документации — но под его руководством и с его проверкой на каждом шаге, а не как автономная генерация без контроля. Это не означает, что код не проверялся: каждое изменение сопровождается автоматическими тестами (сейчас это упомянутые выше 1214 тестов на pytest/pytest-asyncio с мок-клиентом Telegram), а исправление ошибок в проекте ведётся по принципу «сначала воспроизвести проблему → понять причину → написать тест → исправить → прогнать регрессионные тесты», а не «на глаз». Перед публикацией репозитория отдельно проведены обзор кода и проверка безопасности/приватности (хранение секретов, содержимое логов, работа с сессиями), а собранный Windows-EXE запускался и проверялся вручную, а не считался готовым сразу по факту успешной сборки.
 
 #### Где на диске хранятся данные пользователя
 
@@ -917,7 +920,7 @@ Windows-приложение на **Python + PySide6** (Qt для интерфе
 
 ```
 %APPDATA%\TelegramMassSender\
-    database\app.db       — аккаунты, настройки, сохранённые отчёты, шаблоны сообщений и группы получателей (без секретов)
+    database\app.db       — аккаунты, настройки, сохранённые отчёты, шаблоны сообщений и сохранённые списки получателей (без секретов)
     sessions\*.session     — сессии Telegram, отдельная на каждый аккаунт
     config\secrets.dat     — API ID/API Hash, зашифровано (Windows DPAPI)
     reports\*.csv          — сохранённые CSV-отчёты о рассылках (если папка не изменена в Настройках)

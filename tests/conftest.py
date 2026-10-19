@@ -21,6 +21,17 @@ from typing import List
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+# Never the real %APPDATA%: the app keeps its database, logs and Telethon
+# session files under APPDATA, and a TelegramClient creates its .session
+# file as soon as it is constructed -- so a test building a MainWindow with
+# accounts used to leave session files in the user's real sessions folder.
+# Set before any app module is imported; REAL_APPDATA is kept only so a
+# test can check the suite never points at it.
+import tempfile  # noqa: E402
+
+REAL_APPDATA = os.environ.get("APPDATA")
+os.environ["APPDATA"] = tempfile.mkdtemp(prefix="tms_test_appdata_")
+
 import pytest
 from PySide6.QtCore import QCoreApplication, QEvent
 from PySide6.QtWidgets import QApplication

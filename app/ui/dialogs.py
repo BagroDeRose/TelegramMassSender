@@ -7,7 +7,7 @@ there is no persistent widget to retranslate.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import Iterable, List, Mapping, Tuple
 
 from PySide6.QtWidgets import QDialog, QMessageBox, QPlainTextEdit, QPushButton, QWidget
 
@@ -110,6 +110,31 @@ class RecipientBreakdown:
     @property
     def total(self) -> int:
         return self.people + self.bots + self.chats + self.unknown
+
+
+def recipient_breakdown(recipients: Iterable, known: Mapping[str, object]) -> "RecipientBreakdown":
+    """People / bots / groups-and-channels / not-yet-known. `known` maps a
+    normalized recipient key to its DialogCategory value from the
+    session's dialog cache; otherwise the format decides (a chat ID or
+    invite link is a chat, a phone/ID/link a person, a bare @username
+    unknown until resolved). Nothing is resolved here."""
+    from app.recipients.parser import RecipientKind
+    from app.telegram.chat_targets import DialogCategory
+
+    people = bots = chats = unknown = 0
+    for recipient in recipients:
+        category = known.get(recipient.normalized_key)
+        if category is DialogCategory.BOTS:
+            bots += 1
+        elif category is DialogCategory.PEOPLE:
+            people += 1
+        elif category is not None or recipient.is_chat_target:
+            chats += 1
+        elif recipient.kind == RecipientKind.USERNAME:
+            unknown += 1
+        else:
+            people += 1
+    return RecipientBreakdown(people=people, bots=bots, chats=chats, unknown=unknown)
 
 
 def build_large_campaign_box(

@@ -71,7 +71,7 @@ async def test_saving_a_preset_shows_a_toast_not_a_modal_box(qapp, tmp_path):
     window._message_text = "Hello"
     with patch("app.ui.main_window.QInputDialog") as mock_dialog, patch("app.ui.main_window.show_info") as modal:
         mock_dialog.getText.return_value = ("Weekly", True)
-        window._on_save_preset_clicked()
+        window._templates_menu.save_action.trigger()
     modal.assert_not_called()
     toasts = window._toasts.toasts
     assert len(toasts) == 1

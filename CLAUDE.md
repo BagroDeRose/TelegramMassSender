@@ -25,7 +25,15 @@ described below.
   connection, session-file presence, network state) for the Settings
   page's Diagnostics card. Every field degrades to an error string rather
   than raising if its underlying check fails; never reads API ID/Hash, a
-  password, or session file contents.
+  password, or session file contents. (v2.1.1) A report is
+  `DiagnosticItem`s (label, plain-words value, status ok/warning/error/
+  info, hint when something needs doing) plus `technical` (Python/
+  Telethon versions, shown folded). "Saved sign-ins" counts accounts
+  whose `.session` file exists via `paths.get_session_file_path()` --
+  `get_session_path()` has no extension (Telethon appends it), and
+  checking that path made it report "0 of N" on every machine -- and
+  leaves the demo account out. The Telegram row names the account by
+  @username only, never the phone (also in the copy and the bundle).
 - `app/diagnostic_bundle.py` — v1.7 Diagnostic Bundle:
   `export_diagnostic_bundle()` zips the Diagnostics report, the rotating
   log files (already secret-scrubbed at write time), and an `AppSettings`
@@ -59,6 +67,16 @@ described below.
     explicitly in `campaign_tab_chain()`. Quick successes go to
     `self._toast()` (`motion.ToastHost`), not modal boxes; file exports
     and errors stay modal.
+    (v2.1.1) Saved recipient lists and message templates ("recipient
+    groups"/"presets" in code and the DB) are one `saved_menu.
+    SavedItemsMenuButton` each ("Lists ▾"/"Templates ▾") in the header of
+    the Recipients/Message card (`_card(..., actions=...)`) and on the
+    wizard's Recipients/Message steps; the same id-based handlers serve
+    both, with `wizard=None` meaning the Campaign page. The counts under
+    every Recipients box follow the dialog cache: every cache change goes
+    through `_cache_dialogs`/`_drop_dialog_cache`, which push
+    `_cached_categories()` into each `RecipientWidget.
+    set_known_categories()`.
     Every start path (Campaign page, Campaign Wizard, Retry) asks through
     the one `_confirm_campaign_start`: more recipients than the
     `large_campaign_threshold` setting (default 50, min 10) always gets
@@ -80,7 +98,14 @@ described below.
     elapsed_seconds()` keeps counting up and can't be re-read later.
   - `sidebar.py` (collapsible to an icon rail, state in the
     `sidebar_collapsed` setting; active-account block at the bottom),
-    `recipient_widget.py` (count pills), `journal_widget.py` (rows painted
+    `recipient_widget.py` (count pills: recipients, groups & channels,
+    bots, "@username: N" for usernames of unknown type, invalid,
+    duplicates -- split by `dialogs.recipient_breakdown()`, from the
+    dialog cache's categories where known, else by format),
+    `saved_menu.py` (the "Lists ▾"/"Templates ▾" menu button: Save
+    current…, Load and Delete submenus, disabled with a reason while
+    nothing is saved; paints its own Lucide chevron, the style's arrow is
+    hidden in QSS), `journal_widget.py` (rows painted
     by a delegate: monospace time, status icon from the campaign layer's
     marker glyph), `stat_card.py`, `empty_state.py` (icon + sentence +
     optional single action), `results_view.py`, `layouts.py`
@@ -332,7 +357,8 @@ described below.
 - `app/security/` — `dpapi.py` (Windows `CryptProtectData`/`CryptUnprotectData`
   wrapper), `secure_storage.py` (API ID/Hash at-rest encryption).
 - `app/config/` — `settings.py` (defaults/bounds for all user settings),
-  `paths.py` (`%APPDATA%` layout).
+  `paths.py` (`%APPDATA%` layout; `get_session_file_path()` is the
+  `.session` file Telethon actually writes for a session name).
 - `app/database/` — SQLite via `database.py`; `models.py`/`repositories.py`
   for accounts, settings, saved-report metadata, named presets, and named
   recipient groups.
@@ -351,10 +377,13 @@ described below.
   `MainWindow.retranslate_ui()` the same way theme switching already
   dispatches `apply_theme()`. Deliberately not gettext or Qt Linguist
   (.ts/.qm + lupdate/lrelease) — this app has no other use for either.
-- `tests/` — pytest + pytest-asyncio (`asyncio_mode = auto`), 1184 tests,
+- `tests/` — pytest + pytest-asyncio (`asyncio_mode = auto`), 1214 tests,
   using `tests/mocks/mock_telegram_client.py` and
   `tests/mocks/fake_client_manager.py` instead of a real Telegram
-  connection. `tests/conftest.py` has two autouse fixtures: an
+  connection. `tests/conftest.py` points `APPDATA` at a temporary folder
+  before anything is imported (every MainWindow test with an account
+  used to create Telethon session files in the developer's real
+  `%APPDATA%\TelegramMassSender\sessions`), and has two autouse fixtures: an
   autouse `_block_network` fixture refuses every non-loopback connection
   (socket.connect, asyncio `create_connection` -- the Windows proactor
   loop bypasses socket.connect -- and Telethon's own
@@ -390,7 +419,7 @@ reproduced with a failing test first, then fixed.
 
 **Tests.** After any code change, run the targeted test file, then the
 full suite (`pytest tests/ -v`). Don't delete or weaken existing tests just
-to make the suite pass. The current baseline is 1184 passed, 0 failures —
+to make the suite pass. The current baseline is 1214 passed, 0 failures —
 if that number changes, know exactly why before saying the change is done.
 
 **GUI.** Never block the Qt event loop or the asyncio event loop.

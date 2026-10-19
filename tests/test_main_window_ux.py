@@ -22,6 +22,14 @@ from app.telegram.account_manager import Account
 from app.ui.main_window import MainWindow
 
 
+def _menu_action(menu, name):
+    """The QAction for `name` in a Saved lists / Templates submenu."""
+    for action in menu.actions():
+        if action.text() == name:
+            return action
+    raise AssertionError(f"{name!r} not in {[a.text() for a in menu.actions()]}")
+
+
 def _make_window(tmp_path: Path) -> MainWindow:
     # Isolated SecureStorage as well as an isolated database: without it
     # TelegramService falls back to the machine-wide DPAPI store, so on a
@@ -171,7 +179,7 @@ async def test_preview_name_survives_language_retranslation(qapp, tmp_path):
         set_language(LANGUAGE_RU)
 
 
-async def test_save_preset_writes_and_refreshes_combo(qapp, tmp_path):
+async def test_save_preset_writes_and_refreshes_the_templates_menu(qapp, tmp_path):
     window = _make_window(tmp_path)
     window._message_text = "Hello {name}"
     window._message_entities = []
@@ -181,14 +189,14 @@ async def test_save_preset_writes_and_refreshes_combo(qapp, tmp_path):
 
     with patch("app.ui.main_window.QInputDialog") as mock_dialog, patch("app.ui.main_window.show_info"):
         mock_dialog.getText.return_value = ("My preset", True)
-        window._on_save_preset_clicked()
+        window._templates_menu.save_action.trigger()
 
     from app.campaign import presets
 
     saved = presets.list_presets(window._preset_repo)
     assert len(saved) == 1
     assert saved[0].name == "My preset"
-    assert window._presets_combo.findText("My preset") != -1
+    assert window._templates_menu.item_names() == ["My preset"]
 
 
 async def test_save_preset_cancelled_does_not_create_a_row(qapp, tmp_path):
@@ -198,7 +206,7 @@ async def test_save_preset_cancelled_does_not_create_a_row(qapp, tmp_path):
 
     with patch("app.ui.main_window.QInputDialog") as mock_dialog:
         mock_dialog.getText.return_value = ("", False)  # user hit Cancel
-        window._on_save_preset_clicked()
+        window._templates_menu.save_action.trigger()
 
     from app.campaign import presets
 
@@ -211,12 +219,10 @@ async def test_load_preset_restores_message_and_attachments(qapp, tmp_path):
     window = _make_window(tmp_path)
     photo = tmp_path / "photo.jpg"
     photo.write_bytes(b"x")
-    saved = presets.save_preset(window._preset_repo, "Greeting", "Hi {name}", [], [photo])
-    window._refresh_presets_combo()
-    index = window._presets_combo.findData(saved.id)
-    window._presets_combo.setCurrentIndex(index)
+    presets.save_preset(window._preset_repo, "Greeting", "Hi {name}", [], [photo])
+    window._refresh_saved_menus()
 
-    window._on_load_preset_clicked()
+    _menu_action(window._templates_menu.load_menu, "Greeting").trigger()
 
     assert window._message_text == "Hi {name}"
     assert [a.path for a in window._attachments_widget.get_attachments()] == [photo]
@@ -230,39 +236,41 @@ async def test_load_preset_warns_about_missing_attachments_but_still_loads(qapp,
     present.write_bytes(b"x")
     gone = tmp_path / "gone.jpg"
     gone.write_bytes(b"x")
-    saved = presets.save_preset(window._preset_repo, "Mixed", "text", [], [present, gone])
+    presets.save_preset(window._preset_repo, "Mixed", "text", [], [present, gone])
     gone.unlink()
-    window._refresh_presets_combo()
-    window._presets_combo.setCurrentIndex(window._presets_combo.findData(saved.id))
+    window._refresh_saved_menus()
 
     with patch("app.ui.main_window.show_error") as mock_show_error:
-        window._on_load_preset_clicked()
+        _menu_action(window._templates_menu.load_menu, "Mixed").trigger()
 
     assert [a.path for a in window._attachments_widget.get_attachments()] == [present]
     assert mock_show_error.call_count == 1
     assert "gone.jpg" in mock_show_error.call_args[0][2]
 
 
-async def test_load_preset_with_no_selection_shows_an_error(qapp, tmp_path):
+async def test_templates_menu_with_nothing_saved_disables_load_and_delete(qapp, tmp_path):
+    # Was: "Load" with no combo selection showed an error. A menu has no
+    # selection; with nothing saved, Load/Delete are disabled and it says why.
+    from app.i18n import tr
+
     window = _make_window(tmp_path)
-
-    with patch("app.ui.main_window.show_error") as mock_show_error:
-        window._on_load_preset_clicked()
-
-    mock_show_error.assert_called_once()
+    menu = window._templates_menu
+    assert menu.save_action.isEnabled()
+    assert not menu.load_menu.isEnabled() and not menu.delete_menu.isEnabled()
+    assert menu.empty_action is not None and not menu.empty_action.isEnabled()
+    assert menu.empty_action.text() == tr("main_window.templates.empty")
 
 
 async def test_load_preset_restores_the_saved_interval(qapp, tmp_path):
     from app.campaign import presets
 
     window = _make_window(tmp_path)
-    saved = presets.save_preset(
+    presets.save_preset(
         window._preset_repo, "Timed", "text", [], [], min_delay_seconds=45, max_delay_seconds=90
     )
-    window._refresh_presets_combo()
-    window._presets_combo.setCurrentIndex(window._presets_combo.findData(saved.id))
+    window._refresh_saved_menus()
 
-    window._on_load_preset_clicked()
+    _menu_action(window._templates_menu.load_menu, "Timed").trigger()
 
     reloaded = window._service.settings_repository.load_app_settings()
     assert reloaded.min_delay_seconds == 45
@@ -274,45 +282,43 @@ async def test_delete_preset_removes_it(qapp, tmp_path):
     from app.campaign import presets
 
     window = _make_window(tmp_path)
-    saved = presets.save_preset(window._preset_repo, "Doomed", "text", [], [])
-    window._refresh_presets_combo()
-    window._presets_combo.setCurrentIndex(window._presets_combo.findData(saved.id))
+    presets.save_preset(window._preset_repo, "Doomed", "text", [], [])
+    window._refresh_saved_menus()
 
     with patch("app.ui.main_window.confirm_delete_preset", return_value=True):
-        window._on_delete_preset_clicked()
+        _menu_action(window._templates_menu.delete_menu, "Doomed…").trigger()
 
     assert presets.list_presets(window._preset_repo) == []
-    assert window._presets_combo.findData(saved.id) == -1
+    assert window._templates_menu.item_names() == []
 
 
 async def test_delete_preset_declined_keeps_it(qapp, tmp_path):
     from app.campaign import presets
 
     window = _make_window(tmp_path)
-    saved = presets.save_preset(window._preset_repo, "Kept", "text", [], [])
-    window._refresh_presets_combo()
-    window._presets_combo.setCurrentIndex(window._presets_combo.findData(saved.id))
+    presets.save_preset(window._preset_repo, "Kept", "text", [], [])
+    window._refresh_saved_menus()
 
     with patch("app.ui.main_window.confirm_delete_preset", return_value=False):
-        window._on_delete_preset_clicked()
+        _menu_action(window._templates_menu.delete_menu, "Kept…").trigger()
 
     assert len(presets.list_presets(window._preset_repo)) == 1
 
 
-async def test_save_group_writes_and_refreshes_combo(qapp, tmp_path):
+async def test_save_group_writes_and_refreshes_the_lists_menu(qapp, tmp_path):
     window = _make_window(tmp_path)
     window._recipient_widget.set_text("@ivan_test\n@maria_test")
 
     with patch("app.ui.main_window.QInputDialog") as mock_dialog, patch("app.ui.main_window.show_info"):
         mock_dialog.getText.return_value = ("Customers", True)
-        window._on_save_group_clicked()
+        window._lists_menu.save_action.trigger()
 
     from app.recipients import groups
 
     saved = groups.list_groups(window._group_repo)
     assert len(saved) == 1
     assert saved[0].name == "Customers"
-    assert window._groups_combo.findText("Customers") != -1
+    assert window._lists_menu.item_names() == ["Customers"]
 
 
 async def test_save_group_cancelled_does_not_create_a_row(qapp, tmp_path):
@@ -321,7 +327,7 @@ async def test_save_group_cancelled_does_not_create_a_row(qapp, tmp_path):
 
     with patch("app.ui.main_window.QInputDialog") as mock_dialog:
         mock_dialog.getText.return_value = ("", False)
-        window._on_save_group_clicked()
+        window._lists_menu.save_action.trigger()
 
     from app.recipients import groups
 
@@ -332,50 +338,50 @@ async def test_load_group_restores_text_and_name_overrides(qapp, tmp_path):
     from app.recipients import groups
 
     window = _make_window(tmp_path)
-    saved = groups.save_group(window._group_repo, "Customers", "@ivan_test", {"username:ivan_test": "Ivan"})
-    window._refresh_groups_combo()
-    window._groups_combo.setCurrentIndex(window._groups_combo.findData(saved.id))
+    groups.save_group(window._group_repo, "Customers", "@ivan_test", {"username:ivan_test": "Ivan"})
+    window._refresh_saved_menus()
 
-    window._on_load_group_clicked()
+    _menu_action(window._lists_menu.load_menu, "Customers").trigger()
 
     assert window._recipient_widget.get_text() == "@ivan_test"
     assert window._recipient_widget.name_overrides() == {"username:ivan_test": "Ivan"}
 
 
-async def test_load_group_with_no_selection_shows_an_error(qapp, tmp_path):
+async def test_lists_menu_with_nothing_saved_disables_load_and_delete(qapp, tmp_path):
+    # Was: "Load" with no combo selection showed an error (see the
+    # templates counterpart above).
+    from app.i18n import tr
+
     window = _make_window(tmp_path)
-
-    with patch("app.ui.main_window.show_error") as mock_show_error:
-        window._on_load_group_clicked()
-
-    mock_show_error.assert_called_once()
+    menu = window._lists_menu
+    assert menu.save_action.isEnabled()
+    assert not menu.load_menu.isEnabled() and not menu.delete_menu.isEnabled()
+    assert menu.empty_action is not None and menu.empty_action.text() == tr("main_window.lists.empty")
 
 
 async def test_delete_group_removes_it(qapp, tmp_path):
     from app.recipients import groups
 
     window = _make_window(tmp_path)
-    saved = groups.save_group(window._group_repo, "Doomed", "@a", {})
-    window._refresh_groups_combo()
-    window._groups_combo.setCurrentIndex(window._groups_combo.findData(saved.id))
+    groups.save_group(window._group_repo, "Doomed", "@a", {})
+    window._refresh_saved_menus()
 
     with patch("app.ui.main_window.confirm_delete_group", return_value=True):
-        window._on_delete_group_clicked()
+        _menu_action(window._lists_menu.delete_menu, "Doomed…").trigger()
 
     assert groups.list_groups(window._group_repo) == []
-    assert window._groups_combo.findData(saved.id) == -1
+    assert window._lists_menu.item_names() == []
 
 
 async def test_delete_group_declined_keeps_it(qapp, tmp_path):
     from app.recipients import groups
 
     window = _make_window(tmp_path)
-    saved = groups.save_group(window._group_repo, "Kept", "@a", {})
-    window._refresh_groups_combo()
-    window._groups_combo.setCurrentIndex(window._groups_combo.findData(saved.id))
+    groups.save_group(window._group_repo, "Kept", "@a", {})
+    window._refresh_saved_menus()
 
     with patch("app.ui.main_window.confirm_delete_group", return_value=False):
-        window._on_delete_group_clicked()
+        _menu_action(window._lists_menu.delete_menu, "Kept…").trigger()
 
     assert len(groups.list_groups(window._group_repo)) == 1
 
@@ -1121,16 +1127,16 @@ async def test_diagnostics_populated_on_startup(qapp, tmp_path):
     from app.version import APP_VERSION
 
     window = _make_window(tmp_path)
-    text = window._diagnostics_text.toPlainText()
-    assert APP_VERSION in text
-    assert text == window._last_diagnostics_text
+    shown = window.diagnostics_display_text()
+    assert APP_VERSION in shown
+    assert APP_VERSION in window._last_diagnostics_text
 
 
 async def test_diagnostics_reflects_no_account_by_default(qapp, tmp_path):
     from app.i18n import tr
 
     window = _make_window(tmp_path)
-    assert tr("diagnostics.telegram.no_account") in window._diagnostics_text.toPlainText()
+    assert tr("diagnostics.telegram.no_account") in window.diagnostics_display_text()
 
 
 async def test_copy_diagnostics_writes_to_the_clipboard(qapp, tmp_path):
@@ -1146,9 +1152,12 @@ async def test_copy_diagnostics_writes_to_the_clipboard(qapp, tmp_path):
 
 async def test_refresh_diagnostics_button_updates_the_text(qapp, tmp_path):
     window = _make_window(tmp_path)
-    window._diagnostics_text.setPlainText("stale")
+    stale_rows = window._diagnostics_rows
+    window._last_diagnostics_text = "stale"
     window._refresh_diagnostics_button.click()
-    assert window._diagnostics_text.toPlainText() != "stale"
+    assert window._last_diagnostics_text != "stale"
+    assert window._diagnostics_rows is not stale_rows  # rows rebuilt from a fresh report
+    assert window.diagnostics_display_text()
 
 
 async def test_export_diagnostic_bundle_writes_a_zip_and_shows_confirmation(qapp, tmp_path):

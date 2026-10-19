@@ -88,6 +88,15 @@ def get_session_path(session_name: str) -> Path:
     return get_sessions_dir() / session_name
 
 
+def get_session_file_path(session_name: str) -> Path:
+    """The file Telethon actually writes for `session_name`: the path
+    get_session_path() hands it, plus the '.session' extension Telethon
+    appends itself. Anything that looks for a session on disk must check
+    this, not get_session_path()."""
+    path = get_session_path(session_name)
+    return path if path.suffix == ".session" else path.with_name(path.name + ".session")
+
+
 def is_frozen() -> bool:
     return bool(getattr(sys, "frozen", False))
 

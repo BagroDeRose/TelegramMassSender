@@ -405,6 +405,18 @@ QToolButton[variant="ghost"][focusRing="true"] {
     border: ${focus_ring}px solid $focus_ring;
 }
 
+/* A button that opens a menu ("Saved lists", "Templates"): room on the
+   right for the chevron it paints itself instead of the style's arrow. */
+QPushButton[menuButton="true"] {
+    padding-right: ${menu_chevron_room}px;
+    text-align: left;
+}
+
+QPushButton[menuButton="true"]::menu-indicator {
+    image: none;
+    width: 0px;
+}
+
 QPushButton[variant="danger"], QPushButton#dangerButton {
     background-color: transparent;
     border: 1px solid $border;

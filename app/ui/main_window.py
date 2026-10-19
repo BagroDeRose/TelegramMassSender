@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Sequence
 
 from PySide6.QtCore import QEvent, QTimer, QUrl, Qt
 from PySide6.QtGui import QDesktopServices, QIcon
@@ -29,7 +29,6 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMainWindow,
     QMenu,
-    QPlainTextEdit,
     QPushButton,
     QScrollArea,
     QSpinBox,
@@ -54,7 +53,7 @@ from app.recipients import groups
 from app.recipients.groups import RecipientGroupError
 from app.recipients.parser import RecipientKind
 from app.campaign import report_library
-from app.config.paths import get_reports_dir, get_resource_path
+from app.config.paths import get_app_data_dir, get_reports_dir, get_resource_path
 from app.config.settings import (
     MAX_ALLOWED_DELAY_SECONDS,
     MAX_LARGE_CAMPAIGN_THRESHOLD,
@@ -66,7 +65,7 @@ from app.config.settings import (
 from app import diagnostics
 from app.diagnostic_bundle import export_diagnostic_bundle
 from app.database.database import Database
-from app.database.models import Preset, RecipientGroup, SavedReport
+from app.database.models import SavedReport
 from app.database.repositories import PresetRepository, RecipientGroupRepository, SavedReportRepository
 from app.i18n import LANGUAGE_LABELS, VALID_LANGUAGES, get_language, set_language, tr
 from app.logging.logger import get_logger
@@ -97,6 +96,7 @@ from app.ui.dialogs import (
     confirm_exit_during_campaign,
     RecipientBreakdown,
     confirm_large_campaign,
+    recipient_breakdown,
     confirm_reset_settings,
     confirm_start_campaign,
     show_error,
@@ -104,7 +104,7 @@ from app.ui.dialogs import (
 )
 from app.ui.empty_state import build_empty_state, empty_state_action, retranslate_empty_state
 from app.ui.journal_widget import JournalWidget
-from app.ui.layouts import FlowLayout, ResponsiveColumns
+from app.ui.layouts import FlowLayout, ResponsiveColumns, WrappingLabel
 from app.ui.results_view import ResultsHeader, ResultsRowDelegate, SegmentedControl
 from app.ui.motion import ToastHost, fade_in
 from app.ui.login_dialog import LoginDialog
@@ -116,13 +116,13 @@ from app.ui.onboarding_dialog import (
 from app.ui.message_editor_dialog import MessageEditorDialog
 from app.ui.message_preview import MessagePreviewWidget
 from app.ui.recipient_widget import RecipientWidget
+from app.ui.saved_menu import LISTS_TEXTS, TEMPLATES_TEXTS, SavedItemsMenuButton
 from app.ui.sidebar import Sidebar
 from app.ui.stat_card import StatCard
 from app.ui.theme import (
     CAMPAIGN_FOLD_WIDTH,
-    COMBO_MIN_WIDTH,
     CONTROL_WIDTH,
-    DIAGNOSTICS_MAX_HEIGHT,
+    ICON_SIZE,
     HEADER_GAP,
     LAUNCH_PANEL_WIDTH,
     PREVIEW_NAME_WIDTH,
@@ -174,9 +174,11 @@ def _chat_type_of(item) -> Optional[TargetType]:
     return target_type if target_type in CHAT_TARGET_TYPES else None
 
 
-def _card(title: str, content: QWidget, count_label: Optional[QLabel] = None) -> QFrame:
+def _card(
+    title: str, content: QWidget, count_label: Optional[QLabel] = None, actions: Sequence[QWidget] = ()
+) -> QFrame:
     """A borderless-content card: a bold title (+ optional right-aligned
-    badge) above the widget, all on one flat surface."""
+    actions and badge) above the widget, all on one flat surface."""
     card = QFrame()
     card.setObjectName("card")
     layout = QVBoxLayout(card)
@@ -188,12 +190,23 @@ def _card(title: str, content: QWidget, count_label: Optional[QLabel] = None) ->
     title_label.setObjectName("cardTitle")
     header.addWidget(title_label)
     header.addStretch(1)
+    for action in actions:
+        header.addWidget(action)
     if count_label is not None:
         header.addWidget(count_label)
     layout.addLayout(header)
 
     layout.addWidget(content)
     return card
+
+
+# Diagnostics status -> (Lucide icon, token role of its colour).
+_DIAGNOSTIC_STATUS_ICONS = {
+    "ok": ("check_circle", "success"),
+    "warning": ("warning", "warning"),
+    "error": ("error_circle", "error"),
+    "info": ("info", "text_muted"),
+}
 
 
 def _page_header(title: str, subtitle: str) -> QWidget:
@@ -356,8 +369,7 @@ class MainWindow(QMainWindow):
         self._update_message_preview()
         self._update_results_page()
         self._refresh_saved_reports()
-        self._refresh_presets_combo()
-        self._refresh_groups_combo()
+        self._refresh_saved_menus()
         self._refresh_diagnostics()
         self.statusBar().showMessage(tr("main_window.status.ready"))
         self._setup_system_tray()
@@ -377,21 +389,15 @@ class MainWindow(QMainWindow):
             *self._sidebar._buttons,
             self._sidebar._account_block,
             self._open_wizard_button,
+            self._lists_menu,
             recipients._text_edit,
             recipients._import_button,
             recipients._import_csv_button,
             recipients._pick_chats_button,
             recipients._clear_button,
             recipients._review_invalid_button,
-            self._groups_combo,
-            self._load_group_button,
-            self._save_group_button,
-            self._delete_group_button,
+            self._templates_menu,
             self._open_editor_button,
-            self._presets_combo,
-            self._load_preset_button,
-            self._save_preset_button,
-            self._delete_preset_button,
             attachments._list,
             attachments._move_earlier_button,
             attachments._move_later_button,
@@ -475,10 +481,7 @@ class MainWindow(QMainWindow):
         )
         self._open_wizard_button.setText(tr("main_window.campaign_page.open_wizard_button"))
         _retranslate_card_title(self._recipients_card, tr("main_window.campaign_page.recipients_card"))
-        self._load_group_button.setText(tr("main_window.groups.load_button"))
-        self._save_group_button.setText(tr("main_window.groups.save_button"))
-        self._delete_group_button.setText(tr("main_window.groups.delete_button"))
-        self._refresh_groups_combo()  # re-set the placeholder item's text
+        self._lists_menu.retranslate_ui()
         self._open_editor_button.setText(tr("main_window.campaign_page.open_editor_button"))
         self._open_editor_button.setToolTip(tr("main_window.campaign_page.open_editor_tooltip"))
         self._name_hint_label.setText(tr("main_window.campaign_page.name_placeholder_hint"))
@@ -488,15 +491,10 @@ class MainWindow(QMainWindow):
         # it may already be user-edited, and a language switch resetting
         # it back to the new language's default would silently discard
         # that. Only the label/tooltip text is retranslated.
-        self._load_preset_button.setText(tr("main_window.presets.load_button"))
-        self._save_preset_button.setText(tr("main_window.presets.save_button"))
-        self._delete_preset_button.setText(tr("main_window.presets.delete_button"))
-        self._refresh_presets_combo()  # re-set the placeholder item's text
+        self._templates_menu.retranslate_ui()
         _retranslate_card_title(self._message_card, tr("main_window.campaign_page.message_card"))
         _retranslate_card_title(self._attachments_card, tr("main_window.campaign_page.attachments_card"))
         _retranslate_card_title(self._preview_card, tr("main_window.campaign_page.preview_card"))
-        self._groups_label.setText(tr("main_window.groups.label"))
-        self._presets_label.setText(tr("main_window.presets.label"))
 
         _retranslate_page_header(
             self._accounts_page_header, tr("main_window.accounts_page.title"), tr("main_window.accounts_page.subtitle")
@@ -549,6 +547,9 @@ class MainWindow(QMainWindow):
         self._copy_diagnostics_button.setText(tr("main_window.settings.copy_diagnostics_button"))
         self._export_diagnostic_bundle_button.setText(tr("main_window.settings.export_diagnostic_bundle_button"))
         self._refresh_diagnostics_button.setText(tr("main_window.settings.refresh_diagnostics_button"))
+        self._open_data_folder_button.setText(tr("main_window.settings.open_data_folder_button"))
+        self._open_data_folder_button.setToolTip(tr("main_window.settings.open_data_folder_tooltip"))
+        self._technical_toggle.setText(tr("main_window.settings.technical_details_toggle"))
         self._refresh_diagnostics()
         self._theme_section_label.setText(tr("main_window.settings.theme_label"))
         self._theme_hint_label.setText(tr("main_window.settings.theme_hint"))
@@ -719,33 +720,17 @@ class MainWindow(QMainWindow):
         recipients_layout.setContentsMargins(0, 0, 0, 0)
         recipients_layout.setSpacing(SPACE_SM)
         recipients_layout.addWidget(self._recipient_widget)
-
-        # Label, combo and actions wrap rather than force the column wider.
-        groups_row = FlowLayout(spacing=SPACE_XS)
-        self._groups_label = QLabel(tr("main_window.groups.label"), recipients_section)
-        self._groups_label.setObjectName("helperText")
-        groups_row.addWidget(self._groups_label)
-        self._groups_combo = QComboBox(recipients_section)
-        self._groups_combo.setMinimumWidth(COMBO_MIN_WIDTH)
-        self._load_group_button = QPushButton(tr("main_window.groups.load_button"), recipients_section)
-        self._load_group_button.setProperty("variant", "ghost")
-        self._load_group_button.clicked.connect(self._on_load_group_clicked)
-        self._save_group_button = QPushButton(tr("main_window.groups.save_button"), recipients_section)
-        self._save_group_button.setProperty("variant", "ghost")
-        self._save_group_button.clicked.connect(self._on_save_group_clicked)
-        self._delete_group_button = QPushButton(tr("main_window.groups.delete_button"), recipients_section)
-        self._delete_group_button.setProperty("variant", "ghost")
-        self._delete_group_button.clicked.connect(self._on_delete_group_clicked)
-        groups_row.addWidget(self._groups_combo)
-        groups_row.addWidget(self._load_group_button)
-        groups_row.addWidget(self._save_group_button)
-        groups_row.addWidget(self._delete_group_button)
-        recipients_layout.addLayout(groups_row)
+        # "Lists ▾" / "Templates ▾" sit in their card's header: the button
+        # rows below are already full at the default window width.
+        self._lists_menu = self._make_lists_menu(self._recipient_widget, self)
 
         self._recipient_count_label = QLabel("0", page)
         self._recipient_count_label.setObjectName("cardCount")
         self._recipients_card = _card(
-            tr("main_window.campaign_page.recipients_card"), recipients_section, self._recipient_count_label
+            tr("main_window.campaign_page.recipients_card"),
+            recipients_section,
+            self._recipient_count_label,
+            actions=(self._lists_menu,),
         )
         left.addWidget(self._recipients_card)
 
@@ -761,6 +746,7 @@ class MainWindow(QMainWindow):
         self._open_editor_button.setToolTip(tr("main_window.campaign_page.open_editor_tooltip"))
         self._open_editor_button.clicked.connect(self._on_open_editor_clicked)
         message_buttons.addWidget(self._open_editor_button)
+        self._templates_menu = self._make_templates_menu(None, self)
         self._message_summary_label = QLabel("", message_section)
         self._message_summary_label.setObjectName("helperText")
         message_buttons.addWidget(self._message_summary_label)
@@ -771,28 +757,10 @@ class MainWindow(QMainWindow):
         self._name_hint_label.setWordWrap(True)
         message_layout.addWidget(self._name_hint_label)
 
-        presets_row = FlowLayout(spacing=SPACE_XS)
-        self._presets_label = QLabel(tr("main_window.presets.label"), message_section)
-        self._presets_label.setObjectName("helperText")
-        presets_row.addWidget(self._presets_label)
-        self._presets_combo = QComboBox(message_section)
-        self._presets_combo.setMinimumWidth(COMBO_MIN_WIDTH)
-        self._load_preset_button = QPushButton(tr("main_window.presets.load_button"), message_section)
-        self._load_preset_button.setProperty("variant", "ghost")
-        self._load_preset_button.clicked.connect(self._on_load_preset_clicked)
-        self._save_preset_button = QPushButton(tr("main_window.presets.save_button"), message_section)
-        self._save_preset_button.setProperty("variant", "ghost")
-        self._save_preset_button.clicked.connect(self._on_save_preset_clicked)
-        self._delete_preset_button = QPushButton(tr("main_window.presets.delete_button"), message_section)
-        self._delete_preset_button.setProperty("variant", "ghost")
-        self._delete_preset_button.clicked.connect(self._on_delete_preset_clicked)
-        presets_row.addWidget(self._presets_combo)
-        presets_row.addWidget(self._load_preset_button)
-        presets_row.addWidget(self._save_preset_button)
-        presets_row.addWidget(self._delete_preset_button)
-        message_layout.addLayout(presets_row)
 
-        self._message_card = _card(tr("main_window.campaign_page.message_card"), message_section)
+        self._message_card = _card(
+            tr("main_window.campaign_page.message_card"), message_section, actions=(self._templates_menu,)
+        )
         left.addWidget(self._message_card)
         self._attachments_card = _card(tr("main_window.campaign_page.attachments_card"), self._attachments_widget)
         left.addWidget(self._attachments_card)
@@ -860,11 +828,15 @@ class MainWindow(QMainWindow):
 
         status_row = QHBoxLayout()
         status_row.setSpacing(SPACE_SM)
+        # Both hidden until there is something to say: an empty pill still
+        # draws its background (a bare square on the empty page).
         self._results_status_label = QLabel("", page)
         self._results_status_label.setObjectName("pill")
+        self._results_status_label.setVisible(False)
         status_row.addWidget(self._results_status_label)
         self._results_duration_label = QLabel("", page)
         self._results_duration_label.setObjectName("helperText")
+        self._results_duration_label.setVisible(False)
         status_row.addWidget(self._results_duration_label)
         status_row.addStretch(1)
         layout.addLayout(status_row)
@@ -1172,20 +1144,33 @@ class MainWindow(QMainWindow):
         return widget
 
     def _build_diagnostics_settings(self) -> QWidget:
+        """One row per check: a status icon in the status colour, what was
+        checked and the result in plain words, and -- when something needs
+        doing -- a short hint. Versions live under "Technical details"."""
         widget = QWidget()
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(SPACE_SM)
 
-        self._diagnostics_text = QPlainTextEdit(widget)
-        self._diagnostics_text.setObjectName("monoText")
-        self._diagnostics_text.setReadOnly(True)
-        self._diagnostics_text.setMaximumHeight(DIAGNOSTICS_MAX_HEIGHT)
-        self._diagnostics_text.setFont(theme.mono_font())
-        layout.addWidget(self._diagnostics_text)
+        self._diagnostics_rows_holder = QVBoxLayout()
+        self._diagnostics_rows_holder.setContentsMargins(0, 0, 0, 0)
+        self._diagnostics_rows: Optional[QWidget] = None
+        layout.addLayout(self._diagnostics_rows_holder)
 
-        diagnostics_row = QHBoxLayout()
-        diagnostics_row.setSpacing(SPACE_SM)
+        self._technical_toggle = QPushButton(tr("main_window.settings.technical_details_toggle"), widget)
+        self._technical_toggle.setProperty("variant", "ghost")
+        self._technical_toggle.setCheckable(True)
+        self._technical_toggle.setIcon(icons.themed("chevron_right", "text_secondary"))
+        self._technical_toggle.toggled.connect(self._on_technical_details_toggled)
+        layout.addWidget(self._technical_toggle, 0, Qt.AlignmentFlag.AlignLeft)
+        self._technical_details = QLabel(widget)
+        self._technical_details.setObjectName("monoText")
+        self._technical_details.setFont(theme.mono_font())
+        self._technical_details.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self._technical_details.setVisible(False)
+        layout.addWidget(self._technical_details)
+
+        diagnostics_row = FlowLayout(spacing=SPACE_SM)
         self._copy_diagnostics_button = QPushButton(tr("main_window.settings.copy_diagnostics_button"), widget)
         self._copy_diagnostics_button.setIcon(icons.themed("copy"))
         self._copy_diagnostics_button.clicked.connect(self._on_copy_diagnostics_clicked)
@@ -1194,40 +1179,125 @@ class MainWindow(QMainWindow):
         )
         self._export_diagnostic_bundle_button.setIcon(icons.themed("export"))
         self._export_diagnostic_bundle_button.clicked.connect(self._on_export_diagnostic_bundle_clicked)
+        self._open_data_folder_button = QPushButton(tr("main_window.settings.open_data_folder_button"), widget)
+        self._open_data_folder_button.setIcon(icons.themed("folder"))
+        self._open_data_folder_button.setToolTip(tr("main_window.settings.open_data_folder_tooltip"))
+        self._open_data_folder_button.clicked.connect(self._on_open_data_folder_clicked)
         self._refresh_diagnostics_button = QPushButton(tr("main_window.settings.refresh_diagnostics_button"), widget)
         self._refresh_diagnostics_button.setProperty("variant", "ghost")
         self._refresh_diagnostics_button.setIcon(icons.themed("refresh"))
         self._refresh_diagnostics_button.clicked.connect(self._refresh_diagnostics)
         diagnostics_row.addWidget(self._copy_diagnostics_button)
         diagnostics_row.addWidget(self._export_diagnostic_bundle_button)
+        diagnostics_row.addWidget(self._open_data_folder_button)
         diagnostics_row.addWidget(self._refresh_diagnostics_button)
-        diagnostics_row.addStretch(1)
         layout.addLayout(diagnostics_row)
+        # Status icons are pixmaps: repaint them in the new colours.
+        theme.on_theme_changed(widget, lambda *_a: self._render_diagnostics())
         return widget
 
-    def _diagnostics_telegram_status(self) -> str:
+    def _diagnostics_telegram_state(self) -> diagnostics.ConnectionState:
         account = self._active_account()
         if account is None:
-            return tr("diagnostics.telegram.no_account")
-        label = f"@{account.username}" if account.username else account.phone
-        return tr("diagnostics.telegram.connected", label=label)
+            return diagnostics.ConnectionState(
+                tr("diagnostics.telegram.no_account"), diagnostics.STATUS_WARNING, tr("diagnostics.hint.add_account")
+            )
+        status = self._account_statuses.get(account.id)
+        client = self._service.account_manager.get_active_client(account.session_name) if self._service.account_manager else None
+        if status is not None and status.connection_error:
+            return diagnostics.ConnectionState(
+                tr("diagnostics.telegram.offline"), diagnostics.STATUS_ERROR, tr("diagnostics.hint.reconnect")
+            )
+        if status is not None and (status.needs_reauth or not status.is_authorized):
+            return diagnostics.ConnectionState(
+                tr("diagnostics.telegram.needs_sign_in"), diagnostics.STATUS_WARNING, tr("diagnostics.hint.add_account")
+            )
+        if status is None and (client is None or not client.is_connected()):
+            return diagnostics.ConnectionState(
+                tr("diagnostics.telegram.offline"), diagnostics.STATUS_WARNING, tr("diagnostics.hint.reconnect")
+            )
+        # The public @username only -- never the phone number.
+        if account.username:
+            return diagnostics.ConnectionState(
+                tr("diagnostics.telegram.connected", label=f"@{account.username}"), diagnostics.STATUS_OK
+            )
+        return diagnostics.ConnectionState(tr("diagnostics.telegram.connected_plain"), diagnostics.STATUS_OK)
 
-    def _diagnostics_network_status(self) -> str:
+    def _diagnostics_network_state(self) -> diagnostics.ConnectionState:
         account = self._active_account()
         account_manager = self._service.account_manager
         if account is None or account_manager is None:
-            return tr("diagnostics.network.unknown")
+            return diagnostics.ConnectionState(tr("diagnostics.network.unknown"), diagnostics.STATUS_INFO)
         client = account_manager.get_active_client(account.session_name)
         if client is not None and client.is_connected():
-            return tr("diagnostics.network.connected")
-        return tr("diagnostics.network.unknown")
+            return diagnostics.ConnectionState(tr("diagnostics.network.connected"), diagnostics.STATUS_OK)
+        return diagnostics.ConnectionState(
+            tr("diagnostics.network.offline"), diagnostics.STATUS_ERROR, tr("diagnostics.hint.network")
+        )
 
     def _refresh_diagnostics(self) -> None:
         report = diagnostics.collect_diagnostics(
-            self._database, self._diagnostics_telegram_status(), self._diagnostics_network_status()
+            self._database, self._diagnostics_telegram_state(), self._diagnostics_network_state()
         )
+        self._last_diagnostics_report = report
         self._last_diagnostics_text = diagnostics.format_diagnostics_text(report)
-        self._diagnostics_text.setPlainText(self._last_diagnostics_text)
+        self._render_diagnostics()
+
+    def _render_diagnostics(self) -> None:
+        report = getattr(self, "_last_diagnostics_report", None)
+        if report is None:
+            return
+        if self._diagnostics_rows is not None:
+            self._diagnostics_rows_holder.removeWidget(self._diagnostics_rows)
+            self._diagnostics_rows.deleteLater()
+        rows = QWidget(self._diagnostics_card)
+        rows.setObjectName("diagnosticsRows")
+        grid = QGridLayout(rows)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(SPACE_SM)
+        grid.setVerticalSpacing(SPACE_XS)
+        grid.setColumnStretch(2, 1)
+        scale = rows.devicePixelRatioF()
+        row = 0
+        for item in report.items:
+            icon_name, role = _DIAGNOSTIC_STATUS_ICONS.get(item.status, _DIAGNOSTIC_STATUS_ICONS[diagnostics.STATUS_INFO])
+            icon = QLabel(rows)
+            icon.setObjectName("diagnosticsIcon")
+            icon.setPixmap(icons.themed_pixmap(icon_name, role, ICON_SIZE, scale))
+            icon.setAccessibleName(tr(f"diagnostics.status_word.{item.status}"))
+            label = QLabel(item.label, rows)
+            label.setObjectName("summaryKey")
+            value = WrappingLabel(item.value, rows)
+            value.setObjectName("diagnosticsValue")
+            value.setAccessibleName(f"{item.label}: {item.value}")
+            grid.addWidget(icon, row, 0, Qt.AlignmentFlag.AlignTop)
+            grid.addWidget(label, row, 1, Qt.AlignmentFlag.AlignTop)
+            grid.addWidget(value, row, 2)
+            row += 1
+            if item.hint:
+                hint = WrappingLabel(item.hint, rows)
+                hint.setObjectName("helperText")
+                grid.addWidget(hint, row, 1, 1, 2)
+                row += 1
+        self._diagnostics_rows = rows
+        self._diagnostics_rows_holder.addWidget(rows)
+        self._technical_details.setText("\n".join(f"{label}: {value}" for label, value in report.technical))
+
+    def diagnostics_display_text(self) -> str:
+        """Everything the Diagnostics rows currently show, in order."""
+        if self._diagnostics_rows is None:
+            return ""
+        return "\n".join(label.text() for label in self._diagnostics_rows.findChildren(QLabel) if label.text())
+
+    def _on_technical_details_toggled(self, expanded: bool) -> None:
+        self._technical_details.setVisible(expanded)
+        self._technical_toggle.setIcon(
+            icons.themed("chevron_down" if expanded else "chevron_right", "text_secondary")
+        )
+
+    def _on_open_data_folder_clicked(self) -> None:
+        # Opened in Explorer; the path itself is never shown on screen.
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(get_app_data_dir())))
 
     def _on_copy_diagnostics_clicked(self) -> None:
         self._refresh_diagnostics()
@@ -1249,8 +1319,8 @@ class MainWindow(QMainWindow):
                 Path(path_str),
                 self._database,
                 self._service.settings_repository.load_app_settings(),
-                self._diagnostics_telegram_status(),
-                self._diagnostics_network_status(),
+                self._diagnostics_telegram_state(),
+                self._diagnostics_network_state(),
             )
         except OSError as exc:
             show_error(
@@ -1431,149 +1501,172 @@ class MainWindow(QMainWindow):
         self._message_summary_label.setText(text)
         self._campaign_controls.set_attachment_count(len(attachments))
 
-    # ---- message presets --------------------------------------------------
+    # ---- saved lists and message templates --------------------------------
+    # Internally (code, database) these are still "recipient groups" and
+    # "presets"; the UI calls them saved lists and templates. Both menus
+    # exist twice -- on the Campaign page and in the Campaign Wizard -- and
+    # share these handlers; `wizard` is None for the Campaign page.
 
-    def _refresh_presets_combo(self) -> None:
-        current_id = self._presets_combo.currentData()
-        self._presets_combo.blockSignals(True)
-        self._presets_combo.clear()
-        self._presets_combo.addItem(tr("main_window.presets.placeholder"), None)
-        for preset in presets.list_presets(self._preset_repo):
-            self._presets_combo.addItem(preset.name, preset.id)
-        if current_id is not None:
-            index = self._presets_combo.findData(current_id)
-            if index >= 0:
-                self._presets_combo.setCurrentIndex(index)
-        self._presets_combo.blockSignals(False)
+    def _make_lists_menu(self, target: RecipientWidget, dialog_parent: QWidget) -> SavedItemsMenuButton:
+        button = SavedItemsMenuButton(LISTS_TEXTS)
+        button.save_requested.connect(lambda: self._on_save_group_clicked(target, dialog_parent))
+        button.load_requested.connect(lambda group_id: self._on_load_group_requested(group_id, target, dialog_parent))
+        button.delete_requested.connect(lambda group_id: self._on_delete_group_requested(group_id, dialog_parent))
+        button.set_items(self._saved_group_items())
+        return button
 
-    def _selected_preset(self) -> Optional[Preset]:
-        preset_id = self._presets_combo.currentData()
-        if preset_id is None:
-            return None
-        return self._preset_repo.get_by_id(preset_id)
+    def _make_templates_menu(self, wizard: Optional[CampaignWizardDialog], dialog_parent: QWidget) -> SavedItemsMenuButton:
+        button = SavedItemsMenuButton(TEMPLATES_TEXTS)
+        button.save_requested.connect(lambda: self._on_save_preset_clicked(wizard, dialog_parent))
+        button.load_requested.connect(lambda preset_id: self._on_load_preset_requested(preset_id, wizard, dialog_parent))
+        button.delete_requested.connect(lambda preset_id: self._on_delete_preset_requested(preset_id, dialog_parent))
+        button.set_items(self._saved_preset_items())
+        return button
 
-    def _on_save_preset_clicked(self) -> None:
-        name, ok = QInputDialog.getText(self, tr("main_window.dialogs.save_preset_title"), tr("main_window.dialogs.preset_name_label"))
+    def _saved_group_items(self):
+        return [(group.id, group.name) for group in groups.list_groups(self._group_repo)]
+
+    def _saved_preset_items(self):
+        return [(preset.id, preset.name) for preset in presets.list_presets(self._preset_repo)]
+
+    def _refresh_saved_menus(self) -> None:
+        group_items = self._saved_group_items()
+        preset_items = self._saved_preset_items()
+        lists_menus = [self._lists_menu]
+        templates_menus = [self._templates_menu]
+        if self._campaign_wizard is not None:
+            lists_menus.append(self._wizard_lists_menu)
+            templates_menus.append(self._wizard_templates_menu)
+        for menu in lists_menus:
+            menu.set_items(group_items)
+        for menu in templates_menus:
+            menu.set_items(preset_items)
+
+    def _on_save_preset_clicked(
+        self, wizard: Optional[CampaignWizardDialog] = None, dialog_parent: Optional[QWidget] = None
+    ) -> None:
+        parent = dialog_parent or self
+        name, ok = QInputDialog.getText(parent, tr("main_window.dialogs.save_preset_title"), tr("main_window.dialogs.preset_name_label"))
         if not ok or not name.strip():
             return
-        settings = self._service.settings_repository.load_app_settings()
+        if wizard is None:
+            text, entities = self._message_text, self._message_entities
+            attachments = self._attachments_widget
+            settings = self._service.settings_repository.load_app_settings()
+            min_delay, max_delay = settings.min_delay_seconds, settings.max_delay_seconds
+        else:
+            text, entities = wizard.message()
+            attachments = wizard.attachments_widget
+            min_delay, max_delay = wizard.interval()
         saved = presets.save_preset(
             self._preset_repo,
             name,
-            self._message_text,
-            self._message_entities,
-            [a.path for a in self._attachments_widget.get_attachments()],
-            settings.min_delay_seconds,
-            settings.max_delay_seconds,
+            text,
+            entities,
+            [a.path for a in attachments.get_attachments()],
+            min_delay,
+            max_delay,
         )
-        self._refresh_presets_combo()
-        index = self._presets_combo.findData(saved.id)
-        if index >= 0:
-            self._presets_combo.setCurrentIndex(index)
+        self._refresh_saved_menus()
         self._toast(tr("main_window.dialogs.preset_saved_message", name=saved.name))
 
-    def _on_load_preset_clicked(self) -> None:
-        preset = self._selected_preset()
-        if preset is None:
-            show_error(self, tr("main_window.dialogs.save_preset_title"), tr("main_window.dialogs.no_preset_selected"))
+    def _on_load_preset_requested(
+        self, preset_id: int, wizard: Optional[CampaignWizardDialog] = None, dialog_parent: Optional[QWidget] = None
+    ) -> None:
+        parent = dialog_parent or self
+        preset = self._preset_repo.get_by_id(preset_id)
+        if preset is None:  # deleted in the meantime
+            self._refresh_saved_menus()
             return
         try:
             loaded = presets.load_preset(preset)
         except PresetError as exc:
-            show_error(self, tr("main_window.dialogs.save_preset_title"), str(exc))
+            show_error(parent, tr("main_window.dialogs.save_preset_title"), str(exc))
             return
 
-        self._message_text = loaded.message_text
-        self._message_entities = loaded.message_entities
-        self._attachments_widget.clear()
-        for path in loaded.attachment_paths:
-            self._attachments_widget.add_file(path)
-        if loaded.min_delay_seconds is not None and loaded.max_delay_seconds is not None:
-            settings = self._service.settings_repository.load_app_settings()
-            settings.min_delay_seconds = loaded.min_delay_seconds
-            settings.max_delay_seconds = loaded.max_delay_seconds
-            try:
-                self._service.settings_repository.save_app_settings(settings)
-            except SettingsValidationError:
-                pass  # a stale/out-of-range saved interval must not block loading the rest of the preset
-            else:
-                self._load_settings_into_page(settings)
-                self._campaign_controls.set_interval_summary(settings.min_delay_seconds, settings.max_delay_seconds)
-        self._update_message_preview()
+        has_interval = loaded.min_delay_seconds is not None and loaded.max_delay_seconds is not None
+        if wizard is not None:
+            wizard.set_message(loaded.message_text, loaded.message_entities)
+            attachments = wizard.attachments_widget
+            attachments.clear()
+            for path in loaded.attachment_paths:
+                attachments.add_file(path)
+            if has_interval:
+                wizard.set_interval(loaded.min_delay_seconds, loaded.max_delay_seconds)
+        else:
+            self._message_text = loaded.message_text
+            self._message_entities = loaded.message_entities
+            self._attachments_widget.clear()
+            for path in loaded.attachment_paths:
+                self._attachments_widget.add_file(path)
+            if has_interval:
+                settings = self._service.settings_repository.load_app_settings()
+                settings.min_delay_seconds = loaded.min_delay_seconds
+                settings.max_delay_seconds = loaded.max_delay_seconds
+                try:
+                    self._service.settings_repository.save_app_settings(settings)
+                except SettingsValidationError:
+                    pass  # a stale/out-of-range saved interval must not block loading the rest of the preset
+                else:
+                    self._load_settings_into_page(settings)
+                    self._campaign_controls.set_interval_summary(settings.min_delay_seconds, settings.max_delay_seconds)
+            self._update_message_preview()
 
         if loaded.missing_attachment_names:
             show_error(
-                self,
+                parent,
                 tr("main_window.dialogs.preset_missing_attachments_title"),
                 tr("main_window.dialogs.preset_missing_attachments_message", names=", ".join(loaded.missing_attachment_names)),
             )
 
-    def _on_delete_preset_clicked(self) -> None:
-        preset = self._selected_preset()
+    def _on_delete_preset_requested(self, preset_id: int, dialog_parent: Optional[QWidget] = None) -> None:
+        preset = self._preset_repo.get_by_id(preset_id)
         if preset is None:
-            show_error(self, tr("main_window.dialogs.save_preset_title"), tr("main_window.dialogs.no_preset_selected"))
+            self._refresh_saved_menus()
             return
-        if not confirm_delete_preset(self, preset.name):
+        if not confirm_delete_preset(dialog_parent or self, preset.name):
             return
         presets.delete_preset(self._preset_repo, preset.id)
-        self._refresh_presets_combo()
+        self._refresh_saved_menus()
 
-    # ---- recipient groups ---------------------------------------------------
-
-    def _refresh_groups_combo(self) -> None:
-        current_id = self._groups_combo.currentData()
-        self._groups_combo.blockSignals(True)
-        self._groups_combo.clear()
-        self._groups_combo.addItem(tr("main_window.groups.placeholder"), None)
-        for group in groups.list_groups(self._group_repo):
-            self._groups_combo.addItem(group.name, group.id)
-        if current_id is not None:
-            index = self._groups_combo.findData(current_id)
-            if index >= 0:
-                self._groups_combo.setCurrentIndex(index)
-        self._groups_combo.blockSignals(False)
-
-    def _selected_group(self) -> Optional[RecipientGroup]:
-        group_id = self._groups_combo.currentData()
-        if group_id is None:
-            return None
-        return self._group_repo.get_by_id(group_id)
-
-    def _on_save_group_clicked(self) -> None:
-        self._recipient_widget.flush()
-        name, ok = QInputDialog.getText(self, tr("main_window.dialogs.save_group_title"), tr("main_window.dialogs.group_name_label"))
+    def _on_save_group_clicked(
+        self, target: Optional[RecipientWidget] = None, dialog_parent: Optional[QWidget] = None
+    ) -> None:
+        target = target or self._recipient_widget
+        target.flush()
+        name, ok = QInputDialog.getText(
+            dialog_parent or self, tr("main_window.dialogs.save_group_title"), tr("main_window.dialogs.group_name_label")
+        )
         if not ok or not name.strip():
             return
-        saved = groups.save_group(
-            self._group_repo, name, self._recipient_widget.get_text(), self._recipient_widget.name_overrides()
-        )
-        self._refresh_groups_combo()
-        index = self._groups_combo.findData(saved.id)
-        if index >= 0:
-            self._groups_combo.setCurrentIndex(index)
+        saved = groups.save_group(self._group_repo, name, target.get_text(), target.name_overrides())
+        self._refresh_saved_menus()
         self._toast(tr("main_window.dialogs.group_saved_message", name=saved.name))
 
-    def _on_load_group_clicked(self) -> None:
-        group = self._selected_group()
+    def _on_load_group_requested(
+        self, group_id: int, target: Optional[RecipientWidget] = None, dialog_parent: Optional[QWidget] = None
+    ) -> None:
+        target = target or self._recipient_widget
+        group = self._group_repo.get_by_id(group_id)
         if group is None:
-            show_error(self, tr("main_window.dialogs.save_group_title"), tr("main_window.dialogs.no_group_selected"))
+            self._refresh_saved_menus()
             return
         try:
             loaded = groups.load_group(group)
         except RecipientGroupError as exc:
-            show_error(self, tr("main_window.dialogs.save_group_title"), str(exc))
+            show_error(dialog_parent or self, tr("main_window.dialogs.save_group_title"), str(exc))
             return
-        self._recipient_widget.set_text_with_names(loaded.recipients_text, loaded.name_overrides)
+        target.set_text_with_names(loaded.recipients_text, loaded.name_overrides)
 
-    def _on_delete_group_clicked(self) -> None:
-        group = self._selected_group()
+    def _on_delete_group_requested(self, group_id: int, dialog_parent: Optional[QWidget] = None) -> None:
+        group = self._group_repo.get_by_id(group_id)
         if group is None:
-            show_error(self, tr("main_window.dialogs.save_group_title"), tr("main_window.dialogs.no_group_selected"))
+            self._refresh_saved_menus()
             return
-        if not confirm_delete_group(self, group.name):
+        if not confirm_delete_group(dialog_parent or self, group.name):
             return
         groups.delete_group(self._group_repo, group.id)
-        self._refresh_groups_combo()
+        self._refresh_saved_menus()
 
     # ---- campaign wizard ---------------------------------------------------
 
@@ -1583,7 +1676,12 @@ class MainWindow(QMainWindow):
         wizard_recipients.pick_chats_requested.connect(
             lambda: self._on_pick_chats_requested(wizard_recipients, dialog)
         )
+        self._wizard_lists_menu = self._make_lists_menu(wizard_recipients, dialog)
+        wizard_recipients.add_action_widget(self._wizard_lists_menu)
+        self._wizard_templates_menu = self._make_templates_menu(dialog, dialog)
+        dialog.add_message_action(self._wizard_templates_menu)
         self._campaign_wizard = dialog
+        wizard_recipients.set_known_categories(self._cached_categories())
         self._update_pick_chats_enabled()
         return dialog
 
@@ -1615,7 +1713,7 @@ class MainWindow(QMainWindow):
 
     def _on_recipients_changed(self, summary) -> None:
         self._recipient_count_label.setText(str(len(summary.valid_recipients)))
-        self._campaign_controls.set_recipient_breakdown(sum(1 for r in summary.valid_recipients if r.is_chat_target))
+        self._campaign_controls.set_recipient_breakdown(self._recipient_widget.recipient_breakdown().chats)
         self._campaign_controls.set_recipient_count(len(summary.valid_recipients))
 
     # ---- account management -------------------------------------------------
@@ -1818,7 +1916,7 @@ class MainWindow(QMainWindow):
 
         self._account_widget.refresh_active_state(account_id)
         if account_id != previous_active_id:
-            self._dialog_cache.clear()
+            self._drop_dialog_cache()
         self._persist_active_account(account_id)
         self._on_form_state_changed()
         self._update_connection_status()
@@ -1841,7 +1939,7 @@ class MainWindow(QMainWindow):
             return
         async with self._account_lock:
             if self._is_active_account(account):
-                self._dialog_cache.clear()
+                self._drop_dialog_cache()
             try:
                 await account_manager.delete_account(account)
             except AccountDeletionError as exc:
@@ -1921,7 +2019,7 @@ class MainWindow(QMainWindow):
             self._service.enter_demo_mode()
         else:
             self._service.exit_demo_mode()
-        self._dialog_cache.clear()
+        self._drop_dialog_cache()
         self._demo_banner.setVisible(enter)
         # A half-finished switch belongs to the mode we just left.
         self._account_switch_in_progress = False
@@ -2024,7 +2122,7 @@ class MainWindow(QMainWindow):
 
     def _load_dialogs_into(self, dialog: ChatPickerDialog, account: Account) -> None:
         """First open, or Refresh: always a fresh read, replacing the cache."""
-        self._dialog_cache.clear()
+        self._drop_dialog_cache()
         dialog.set_loading()
         self._spawn(self._load_dialogs(dialog, account), "загрузка списка диалогов")
 
@@ -2049,7 +2147,7 @@ class MainWindow(QMainWindow):
             self._logger.warning("Не удалось загрузить список диалогов: %s", exc)
             error = tr("chat_picker.error.load_failed", error=exc)
         if snapshot is not None and self._is_active_account(account):
-            self._dialog_cache.put(self._dialog_cache_key(account), snapshot)
+            self._cache_dialogs(self._dialog_cache_key(account), snapshot)
         if self._chat_picker is not dialog:
             return  # closed while loading (the cache still keeps the result)
         if error is not None:
@@ -2142,21 +2240,23 @@ class MainWindow(QMainWindow):
         """People / bots / chats / not-yet-known -- from the cached dialogs
         where a recipient is among them, else from its format alone.
         Nothing is resolved before the user confirms."""
-        people = bots = chats = unknown = 0
+        return recipient_breakdown(recipients, self._cached_categories())
+
+    def _cache_dialogs(self, key, snapshot) -> None:
+        self._dialog_cache.put(key, snapshot)
+        self._on_dialog_cache_changed()
+
+    def _drop_dialog_cache(self) -> None:
+        self._dialog_cache.clear()
+        self._on_dialog_cache_changed()
+
+    def _on_dialog_cache_changed(self) -> None:
+        """The counts under every Recipients box follow what the cache
+        knows about the active account's dialogs."""
         known = self._cached_categories()
-        for recipient in recipients:
-            category = known.get(recipient.normalized_key)
-            if category is DialogCategory.BOTS:
-                bots += 1
-            elif category is DialogCategory.PEOPLE:
-                people += 1
-            elif category is not None or recipient.is_chat_target:
-                chats += 1
-            elif recipient.kind == RecipientKind.USERNAME:
-                unknown += 1
-            else:
-                people += 1
-        return RecipientBreakdown(people=people, bots=bots, chats=chats, unknown=unknown)
+        self._recipient_widget.set_known_categories(known)
+        if self._campaign_wizard is not None:
+            self._campaign_wizard.recipient_widget.set_known_categories(known)
 
     def _cached_categories(self) -> Dict[str, DialogCategory]:
         """normalized recipient key -> category, for the active account's
@@ -2373,6 +2473,7 @@ class MainWindow(QMainWindow):
 
     def _set_results_status(self, text: str, status: str) -> None:
         self._results_status_label.setText(text)
+        self._results_status_label.setVisible(bool(text))
         theme.set_status(self._results_status_label, status)
 
     def _update_results_stats(self, snapshot: ProgressSnapshot) -> None:
@@ -2392,6 +2493,7 @@ class MainWindow(QMainWindow):
             )
         else:
             self._results_duration_label.setText("")
+        self._results_duration_label.setVisible(bool(self._results_duration_label.text()))
 
     def _refresh_failed_items(self) -> None:
         all_items = self._report_source.items if self._report_source is not None else []
