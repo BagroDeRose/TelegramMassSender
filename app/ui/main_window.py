@@ -29,7 +29,6 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMainWindow,
     QMenu,
-    QPlainTextEdit,
     QPushButton,
     QScrollArea,
     QSpinBox,
@@ -54,7 +53,7 @@ from app.recipients import groups
 from app.recipients.groups import RecipientGroupError
 from app.recipients.parser import RecipientKind
 from app.campaign import report_library
-from app.config.paths import get_reports_dir, get_resource_path
+from app.config.paths import get_app_data_dir, get_reports_dir, get_resource_path
 from app.config.settings import (
     MAX_ALLOWED_DELAY_SECONDS,
     MAX_LARGE_CAMPAIGN_THRESHOLD,
@@ -104,7 +103,7 @@ from app.ui.dialogs import (
 )
 from app.ui.empty_state import build_empty_state, empty_state_action, retranslate_empty_state
 from app.ui.journal_widget import JournalWidget
-from app.ui.layouts import FlowLayout, ResponsiveColumns
+from app.ui.layouts import FlowLayout, ResponsiveColumns, WrappingLabel
 from app.ui.results_view import ResultsHeader, ResultsRowDelegate, SegmentedControl
 from app.ui.motion import ToastHost, fade_in
 from app.ui.login_dialog import LoginDialog
@@ -122,7 +121,7 @@ from app.ui.theme import (
     CAMPAIGN_FOLD_WIDTH,
     COMBO_MIN_WIDTH,
     CONTROL_WIDTH,
-    DIAGNOSTICS_MAX_HEIGHT,
+    ICON_SIZE,
     HEADER_GAP,
     LAUNCH_PANEL_WIDTH,
     PREVIEW_NAME_WIDTH,
@@ -194,6 +193,15 @@ def _card(title: str, content: QWidget, count_label: Optional[QLabel] = None) ->
 
     layout.addWidget(content)
     return card
+
+
+# Diagnostics status -> (Lucide icon, token role of its colour).
+_DIAGNOSTIC_STATUS_ICONS = {
+    "ok": ("check_circle", "success"),
+    "warning": ("warning", "warning"),
+    "error": ("error_circle", "error"),
+    "info": ("info", "text_muted"),
+}
 
 
 def _page_header(title: str, subtitle: str) -> QWidget:
@@ -549,6 +557,9 @@ class MainWindow(QMainWindow):
         self._copy_diagnostics_button.setText(tr("main_window.settings.copy_diagnostics_button"))
         self._export_diagnostic_bundle_button.setText(tr("main_window.settings.export_diagnostic_bundle_button"))
         self._refresh_diagnostics_button.setText(tr("main_window.settings.refresh_diagnostics_button"))
+        self._open_data_folder_button.setText(tr("main_window.settings.open_data_folder_button"))
+        self._open_data_folder_button.setToolTip(tr("main_window.settings.open_data_folder_tooltip"))
+        self._technical_toggle.setText(tr("main_window.settings.technical_details_toggle"))
         self._refresh_diagnostics()
         self._theme_section_label.setText(tr("main_window.settings.theme_label"))
         self._theme_hint_label.setText(tr("main_window.settings.theme_hint"))
@@ -1172,20 +1183,33 @@ class MainWindow(QMainWindow):
         return widget
 
     def _build_diagnostics_settings(self) -> QWidget:
+        """One row per check: a status icon in the status colour, what was
+        checked and the result in plain words, and -- when something needs
+        doing -- a short hint. Versions live under "Technical details"."""
         widget = QWidget()
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(SPACE_SM)
 
-        self._diagnostics_text = QPlainTextEdit(widget)
-        self._diagnostics_text.setObjectName("monoText")
-        self._diagnostics_text.setReadOnly(True)
-        self._diagnostics_text.setMaximumHeight(DIAGNOSTICS_MAX_HEIGHT)
-        self._diagnostics_text.setFont(theme.mono_font())
-        layout.addWidget(self._diagnostics_text)
+        self._diagnostics_rows_holder = QVBoxLayout()
+        self._diagnostics_rows_holder.setContentsMargins(0, 0, 0, 0)
+        self._diagnostics_rows: Optional[QWidget] = None
+        layout.addLayout(self._diagnostics_rows_holder)
 
-        diagnostics_row = QHBoxLayout()
-        diagnostics_row.setSpacing(SPACE_SM)
+        self._technical_toggle = QPushButton(tr("main_window.settings.technical_details_toggle"), widget)
+        self._technical_toggle.setProperty("variant", "ghost")
+        self._technical_toggle.setCheckable(True)
+        self._technical_toggle.setIcon(icons.themed("chevron_right", "text_secondary"))
+        self._technical_toggle.toggled.connect(self._on_technical_details_toggled)
+        layout.addWidget(self._technical_toggle, 0, Qt.AlignmentFlag.AlignLeft)
+        self._technical_details = QLabel(widget)
+        self._technical_details.setObjectName("monoText")
+        self._technical_details.setFont(theme.mono_font())
+        self._technical_details.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self._technical_details.setVisible(False)
+        layout.addWidget(self._technical_details)
+
+        diagnostics_row = FlowLayout(spacing=SPACE_SM)
         self._copy_diagnostics_button = QPushButton(tr("main_window.settings.copy_diagnostics_button"), widget)
         self._copy_diagnostics_button.setIcon(icons.themed("copy"))
         self._copy_diagnostics_button.clicked.connect(self._on_copy_diagnostics_clicked)
@@ -1194,40 +1218,125 @@ class MainWindow(QMainWindow):
         )
         self._export_diagnostic_bundle_button.setIcon(icons.themed("export"))
         self._export_diagnostic_bundle_button.clicked.connect(self._on_export_diagnostic_bundle_clicked)
+        self._open_data_folder_button = QPushButton(tr("main_window.settings.open_data_folder_button"), widget)
+        self._open_data_folder_button.setIcon(icons.themed("folder"))
+        self._open_data_folder_button.setToolTip(tr("main_window.settings.open_data_folder_tooltip"))
+        self._open_data_folder_button.clicked.connect(self._on_open_data_folder_clicked)
         self._refresh_diagnostics_button = QPushButton(tr("main_window.settings.refresh_diagnostics_button"), widget)
         self._refresh_diagnostics_button.setProperty("variant", "ghost")
         self._refresh_diagnostics_button.setIcon(icons.themed("refresh"))
         self._refresh_diagnostics_button.clicked.connect(self._refresh_diagnostics)
         diagnostics_row.addWidget(self._copy_diagnostics_button)
         diagnostics_row.addWidget(self._export_diagnostic_bundle_button)
+        diagnostics_row.addWidget(self._open_data_folder_button)
         diagnostics_row.addWidget(self._refresh_diagnostics_button)
-        diagnostics_row.addStretch(1)
         layout.addLayout(diagnostics_row)
+        # Status icons are pixmaps: repaint them in the new colours.
+        theme.on_theme_changed(widget, lambda *_a: self._render_diagnostics())
         return widget
 
-    def _diagnostics_telegram_status(self) -> str:
+    def _diagnostics_telegram_state(self) -> diagnostics.ConnectionState:
         account = self._active_account()
         if account is None:
-            return tr("diagnostics.telegram.no_account")
-        label = f"@{account.username}" if account.username else account.phone
-        return tr("diagnostics.telegram.connected", label=label)
+            return diagnostics.ConnectionState(
+                tr("diagnostics.telegram.no_account"), diagnostics.STATUS_WARNING, tr("diagnostics.hint.add_account")
+            )
+        status = self._account_statuses.get(account.id)
+        client = self._service.account_manager.get_active_client(account.session_name) if self._service.account_manager else None
+        if status is not None and status.connection_error:
+            return diagnostics.ConnectionState(
+                tr("diagnostics.telegram.offline"), diagnostics.STATUS_ERROR, tr("diagnostics.hint.reconnect")
+            )
+        if status is not None and (status.needs_reauth or not status.is_authorized):
+            return diagnostics.ConnectionState(
+                tr("diagnostics.telegram.needs_sign_in"), diagnostics.STATUS_WARNING, tr("diagnostics.hint.add_account")
+            )
+        if status is None and (client is None or not client.is_connected()):
+            return diagnostics.ConnectionState(
+                tr("diagnostics.telegram.offline"), diagnostics.STATUS_WARNING, tr("diagnostics.hint.reconnect")
+            )
+        # The public @username only -- never the phone number.
+        if account.username:
+            return diagnostics.ConnectionState(
+                tr("diagnostics.telegram.connected", label=f"@{account.username}"), diagnostics.STATUS_OK
+            )
+        return diagnostics.ConnectionState(tr("diagnostics.telegram.connected_plain"), diagnostics.STATUS_OK)
 
-    def _diagnostics_network_status(self) -> str:
+    def _diagnostics_network_state(self) -> diagnostics.ConnectionState:
         account = self._active_account()
         account_manager = self._service.account_manager
         if account is None or account_manager is None:
-            return tr("diagnostics.network.unknown")
+            return diagnostics.ConnectionState(tr("diagnostics.network.unknown"), diagnostics.STATUS_INFO)
         client = account_manager.get_active_client(account.session_name)
         if client is not None and client.is_connected():
-            return tr("diagnostics.network.connected")
-        return tr("diagnostics.network.unknown")
+            return diagnostics.ConnectionState(tr("diagnostics.network.connected"), diagnostics.STATUS_OK)
+        return diagnostics.ConnectionState(
+            tr("diagnostics.network.offline"), diagnostics.STATUS_ERROR, tr("diagnostics.hint.network")
+        )
 
     def _refresh_diagnostics(self) -> None:
         report = diagnostics.collect_diagnostics(
-            self._database, self._diagnostics_telegram_status(), self._diagnostics_network_status()
+            self._database, self._diagnostics_telegram_state(), self._diagnostics_network_state()
         )
+        self._last_diagnostics_report = report
         self._last_diagnostics_text = diagnostics.format_diagnostics_text(report)
-        self._diagnostics_text.setPlainText(self._last_diagnostics_text)
+        self._render_diagnostics()
+
+    def _render_diagnostics(self) -> None:
+        report = getattr(self, "_last_diagnostics_report", None)
+        if report is None:
+            return
+        if self._diagnostics_rows is not None:
+            self._diagnostics_rows_holder.removeWidget(self._diagnostics_rows)
+            self._diagnostics_rows.deleteLater()
+        rows = QWidget(self._diagnostics_card)
+        rows.setObjectName("diagnosticsRows")
+        grid = QGridLayout(rows)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(SPACE_SM)
+        grid.setVerticalSpacing(SPACE_XS)
+        grid.setColumnStretch(2, 1)
+        scale = rows.devicePixelRatioF()
+        row = 0
+        for item in report.items:
+            icon_name, role = _DIAGNOSTIC_STATUS_ICONS.get(item.status, _DIAGNOSTIC_STATUS_ICONS[diagnostics.STATUS_INFO])
+            icon = QLabel(rows)
+            icon.setObjectName("diagnosticsIcon")
+            icon.setPixmap(icons.themed_pixmap(icon_name, role, ICON_SIZE, scale))
+            icon.setAccessibleName(tr(f"diagnostics.status_word.{item.status}"))
+            label = QLabel(item.label, rows)
+            label.setObjectName("summaryKey")
+            value = WrappingLabel(item.value, rows)
+            value.setObjectName("diagnosticsValue")
+            value.setAccessibleName(f"{item.label}: {item.value}")
+            grid.addWidget(icon, row, 0, Qt.AlignmentFlag.AlignTop)
+            grid.addWidget(label, row, 1, Qt.AlignmentFlag.AlignTop)
+            grid.addWidget(value, row, 2)
+            row += 1
+            if item.hint:
+                hint = WrappingLabel(item.hint, rows)
+                hint.setObjectName("helperText")
+                grid.addWidget(hint, row, 1, 1, 2)
+                row += 1
+        self._diagnostics_rows = rows
+        self._diagnostics_rows_holder.addWidget(rows)
+        self._technical_details.setText("\n".join(f"{label}: {value}" for label, value in report.technical))
+
+    def diagnostics_display_text(self) -> str:
+        """Everything the Diagnostics rows currently show, in order."""
+        if self._diagnostics_rows is None:
+            return ""
+        return "\n".join(label.text() for label in self._diagnostics_rows.findChildren(QLabel) if label.text())
+
+    def _on_technical_details_toggled(self, expanded: bool) -> None:
+        self._technical_details.setVisible(expanded)
+        self._technical_toggle.setIcon(
+            icons.themed("chevron_down" if expanded else "chevron_right", "text_secondary")
+        )
+
+    def _on_open_data_folder_clicked(self) -> None:
+        # Opened in Explorer; the path itself is never shown on screen.
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(get_app_data_dir())))
 
     def _on_copy_diagnostics_clicked(self) -> None:
         self._refresh_diagnostics()
@@ -1249,8 +1358,8 @@ class MainWindow(QMainWindow):
                 Path(path_str),
                 self._database,
                 self._service.settings_repository.load_app_settings(),
-                self._diagnostics_telegram_status(),
-                self._diagnostics_network_status(),
+                self._diagnostics_telegram_state(),
+                self._diagnostics_network_state(),
             )
         except OSError as exc:
             show_error(

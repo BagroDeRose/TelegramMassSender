@@ -1121,16 +1121,16 @@ async def test_diagnostics_populated_on_startup(qapp, tmp_path):
     from app.version import APP_VERSION
 
     window = _make_window(tmp_path)
-    text = window._diagnostics_text.toPlainText()
-    assert APP_VERSION in text
-    assert text == window._last_diagnostics_text
+    shown = window.diagnostics_display_text()
+    assert APP_VERSION in shown
+    assert APP_VERSION in window._last_diagnostics_text
 
 
 async def test_diagnostics_reflects_no_account_by_default(qapp, tmp_path):
     from app.i18n import tr
 
     window = _make_window(tmp_path)
-    assert tr("diagnostics.telegram.no_account") in window._diagnostics_text.toPlainText()
+    assert tr("diagnostics.telegram.no_account") in window.diagnostics_display_text()
 
 
 async def test_copy_diagnostics_writes_to_the_clipboard(qapp, tmp_path):
@@ -1146,9 +1146,12 @@ async def test_copy_diagnostics_writes_to_the_clipboard(qapp, tmp_path):
 
 async def test_refresh_diagnostics_button_updates_the_text(qapp, tmp_path):
     window = _make_window(tmp_path)
-    window._diagnostics_text.setPlainText("stale")
+    stale_rows = window._diagnostics_rows
+    window._last_diagnostics_text = "stale"
     window._refresh_diagnostics_button.click()
-    assert window._diagnostics_text.toPlainText() != "stale"
+    assert window._last_diagnostics_text != "stale"
+    assert window._diagnostics_rows is not stale_rows  # rows rebuilt from a fresh report
+    assert window.diagnostics_display_text()
 
 
 async def test_export_diagnostic_bundle_writes_a_zip_and_shows_confirmation(qapp, tmp_path):

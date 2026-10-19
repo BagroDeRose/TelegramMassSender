@@ -15,7 +15,7 @@ from app.config.paths import get_app_data_dir, get_session_file_path, get_sessio
 from app.database.database import Database
 from app.database.repositories import AccountRepository
 from app.diagnostics import collect_diagnostics
-from app.i18n import tr
+from app.i18n import tr, trn
 from app.telegram.demo_client import DEMO_ACCOUNT_PHONE
 from tests.conftest import REAL_APPDATA
 
@@ -78,14 +78,14 @@ async def test_diagnostics_counts_real_session_files(tmp_path):
             client.session.save()
         finally:
             _close(client)
-        assert _session_storage_value(db) == tr("diagnostics.session_storage.summary", present=1, total=2)
+        assert _session_storage_value(db) == trn("diagnostics.session_storage.summary", 2, present=1)
 
         other = _client("account_without_session")
         try:
             other.session.save()
         finally:
             _close(other)
-        assert _session_storage_value(db) == tr("diagnostics.session_storage.summary", present=2, total=2)
+        assert _session_storage_value(db) == trn("diagnostics.session_storage.summary", 2, present=2)
     finally:
         db.close()
 
@@ -102,7 +102,7 @@ async def test_diagnostics_leaves_the_demo_account_out(tmp_path):
         finally:
             _close(client)
         # 1 of 1: Demo Mode never opens a session file, so it isn't counted.
-        assert _session_storage_value(db) == tr("diagnostics.session_storage.summary", present=1, total=1)
+        assert _session_storage_value(db) == trn("diagnostics.session_storage.summary", 1, present=1)
     finally:
         db.close()
 

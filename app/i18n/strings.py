@@ -868,24 +868,58 @@ STRINGS: Dict[str, Dict[str, str]] = {
     },
 
     # ---- app/diagnostics.py --------------------------------------------------
-    "diagnostics.field.app_version": {"ru": "Версия приложения", "en": "Application version"},
+    "diagnostics.field.app_version": {"ru": "Версия программы", "en": "App version"},
     "diagnostics.field.python_version": {"ru": "Версия Python", "en": "Python version"},
     "diagnostics.field.telethon_version": {"ru": "Версия Telethon", "en": "Telethon version"},
-    "diagnostics.field.database_status": {"ru": "Состояние базы данных", "en": "Database status"},
-    "diagnostics.field.telegram_status": {"ru": "Подключение к Telegram", "en": "Telegram connection"},
-    "diagnostics.field.session_storage": {"ru": "Хранилище сессий", "en": "Session storage"},
-    "diagnostics.field.network_status": {"ru": "Состояние сети", "en": "Network status"},
-    "diagnostics.status.ok": {"ru": "Ок", "en": "OK"},
+    "diagnostics.field.database_status": {"ru": "База данных", "en": "Database"},
+    "diagnostics.field.telegram_status": {"ru": "Telegram", "en": "Telegram"},
+    "diagnostics.field.session_storage": {"ru": "Сохранённые входы", "en": "Saved sign-ins"},
+    "diagnostics.field.network_status": {"ru": "Интернет", "en": "Internet"},
+    "diagnostics.status_word.ok": {"ru": "в порядке", "en": "OK"},
+    "diagnostics.status_word.warning": {"ru": "внимание", "en": "warning"},
+    "diagnostics.status_word.error": {"ru": "ошибка", "en": "error"},
+    "diagnostics.status_word.info": {"ru": "сведения", "en": "information"},
+    "diagnostics.technical_title": {"ru": "Технические сведения", "en": "Technical details"},
+    "diagnostics.status.ok": {"ru": "В порядке", "en": "OK"},
     "diagnostics.status.error": {"ru": "Ошибка: {error}", "en": "Error: {error}"},
-    "diagnostics.session_storage.no_accounts": {"ru": "Нет аккаунтов", "en": "No accounts"},
-    "diagnostics.session_storage.summary": {
-        "ru": "Файлы сессий найдены: {present} из {total}",
-        "en": "Session files present: {present} of {total}",
+    "diagnostics.session_storage.no_accounts": {"ru": "Аккаунтов пока нет", "en": "No accounts yet"},
+    "diagnostics.telegram.no_account": {"ru": "Аккаунт не подключён", "en": "No account connected"},
+    "diagnostics.telegram.connected": {"ru": "Подключён — {label}", "en": "Connected — {label}"},
+    "diagnostics.telegram.connected_plain": {"ru": "Подключён", "en": "Connected"},
+    "diagnostics.telegram.offline": {"ru": "Нет связи с Telegram", "en": "Can't reach Telegram"},
+    "diagnostics.telegram.needs_sign_in": {"ru": "Нужно войти заново", "en": "Needs signing in again"},
+    "diagnostics.network.connected": {"ru": "Соединение есть", "en": "Connected"},
+    "diagnostics.network.offline": {"ru": "Нет соединения", "en": "No connection"},
+    "diagnostics.network.unknown": {
+        "ru": "Не проверялось — нет подключённого аккаунта",
+        "en": "Not checked — no account connected",
     },
-    "diagnostics.telegram.no_account": {"ru": "Нет подключённого аккаунта", "en": "No account connected"},
-    "diagnostics.telegram.connected": {"ru": "Подключён: {label}", "en": "Connected: {label}"},
-    "diagnostics.network.connected": {"ru": "Активное соединение", "en": "Active connection"},
-    "diagnostics.network.unknown": {"ru": "Неизвестно", "en": "Unknown"},
+    "diagnostics.hint.database": {
+        "ru": "Перезапустите программу. Если не помогло — экспортируйте диагностический пакет и приложите его к обращению.",
+        "en": "Restart the app. If that doesn't help, export a diagnostic bundle and attach it to your report.",
+    },
+    "diagnostics.hint.sign_in_again": {
+        "ru": "Для аккаунтов без сохранённого входа войдите заново на странице «Аккаунты».",
+        "en": "Sign in again on the Accounts page for accounts without a saved sign-in.",
+    },
+    "diagnostics.hint.add_account": {
+        "ru": "Добавьте аккаунт или войдите заново на странице «Аккаунты».",
+        "en": "Add an account or sign in again on the Accounts page.",
+    },
+    "diagnostics.hint.reconnect": {
+        "ru": "Проверьте интернет и нажмите «Переподключить» на странице «Аккаунты».",
+        "en": "Check your internet connection and press Reconnect on the Accounts page.",
+    },
+    "diagnostics.hint.network": {
+        "ru": "Проверьте подключение к интернету.",
+        "en": "Check your internet connection.",
+    },
+    "main_window.settings.open_data_folder_button": {"ru": "Открыть папку данных", "en": "Open data folder"},
+    "main_window.settings.open_data_folder_tooltip": {
+        "ru": "Открыть в проводнике папку, где программа хранит настройки, журналы и отчёты",
+        "en": "Open the folder where the app keeps its settings, logs and reports in Explorer",
+    },
+    "main_window.settings.technical_details_toggle": {"ru": "Технические сведения", "en": "Technical details"},
 
     # ---- app/campaign/report_library.py: errors shown via show_error --------
     "report_library.error.file_not_found": {"ru": "Файл отчёта не найден: {path}", "en": "Report file not found: {path}"},
@@ -1061,6 +1095,10 @@ STRINGS: Dict[str, Dict[str, str]] = {
 }
 
 PLURALS: Dict[str, Dict[str, Dict[str, str]]] = {
+    "diagnostics.session_storage.summary": {
+        "ru": {"one": "{present} из {n} аккаунта", "few": "{present} из {n} аккаунтов", "many": "{present} из {n} аккаунтов"},
+        "en": {"one": "{present} of {n} account", "other": "{present} of {n} accounts"},
+    },
     "recipient_widget.recipient_count": {
         "ru": {"one": "{n} получатель", "few": "{n} получателя", "many": "{n} получателей"},
         "en": {"one": "{n} recipient", "other": "{n} recipients"},

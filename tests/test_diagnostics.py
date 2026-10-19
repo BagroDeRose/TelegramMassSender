@@ -12,7 +12,7 @@ from unittest.mock import patch
 from app.database.database import Database
 from app.database.repositories import AccountRepository
 from app.diagnostics import collect_diagnostics, format_diagnostics_text
-from app.i18n import tr
+from app.i18n import tr, trn
 from app.version import APP_VERSION
 
 
@@ -80,7 +80,7 @@ def test_session_storage_counts_present_session_files(tmp_path):
             report = collect_diagnostics(db, "x", "y")
 
         values = dict(report.fields)
-        expected = tr("diagnostics.session_storage.summary", present=1, total=2)
+        expected = trn("diagnostics.session_storage.summary", 2, present=1)
         assert values[tr("diagnostics.field.session_storage")] == expected
     finally:
         db.close()
@@ -99,15 +99,20 @@ def test_session_storage_degrades_gracefully_when_the_database_is_unreachable(tm
         db.close()
 
 
-def test_format_diagnostics_text_is_one_line_per_field(tmp_path):
+def test_format_diagnostics_text_has_items_hints_and_technical_details(tmp_path):
     db = Database(db_path=tmp_path / "app.db")
     try:
         report = collect_diagnostics(db, "x", "y")
         text = format_diagnostics_text(report)
         lines = text.splitlines()
-        assert len(lines) == len(report.fields)
-        for (label, value), line in zip(report.fields, lines):
-            assert line == f"{label}: {value}"
+        # One "label: value" line per item (a hint, if any, indented under it),
+        # then the technical details under their own heading.
+        for item in report.items:
+            assert f"{item.label}: {item.value}" in lines
+            if item.hint:
+                assert lines[lines.index(f"{item.label}: {item.value}") + 1] == f"  {item.hint}"
+        heading = lines.index(f"{tr('diagnostics.technical_title')}:")
+        assert lines[heading + 1 :] == [f"  {label}: {value}" for label, value in report.technical]
     finally:
         db.close()
 
