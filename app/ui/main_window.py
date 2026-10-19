@@ -828,11 +828,15 @@ class MainWindow(QMainWindow):
 
         status_row = QHBoxLayout()
         status_row.setSpacing(SPACE_SM)
+        # Both hidden until there is something to say: an empty pill still
+        # draws its background (a bare square on the empty page).
         self._results_status_label = QLabel("", page)
         self._results_status_label.setObjectName("pill")
+        self._results_status_label.setVisible(False)
         status_row.addWidget(self._results_status_label)
         self._results_duration_label = QLabel("", page)
         self._results_duration_label.setObjectName("helperText")
+        self._results_duration_label.setVisible(False)
         status_row.addWidget(self._results_duration_label)
         status_row.addStretch(1)
         layout.addLayout(status_row)
@@ -2469,6 +2473,7 @@ class MainWindow(QMainWindow):
 
     def _set_results_status(self, text: str, status: str) -> None:
         self._results_status_label.setText(text)
+        self._results_status_label.setVisible(bool(text))
         theme.set_status(self._results_status_label, status)
 
     def _update_results_stats(self, snapshot: ProgressSnapshot) -> None:
@@ -2488,6 +2493,7 @@ class MainWindow(QMainWindow):
             )
         else:
             self._results_duration_label.setText("")
+        self._results_duration_label.setVisible(bool(self._results_duration_label.text()))
 
     def _refresh_failed_items(self) -> None:
         all_items = self._report_source.items if self._report_source is not None else []
