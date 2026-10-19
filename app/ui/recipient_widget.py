@@ -6,7 +6,7 @@ thousands of lines doesn't stall the UI thread.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Mapping, Optional
 
 from PySide6.QtCore import QTimer, Signal
 from PySide6.QtWidgets import (
@@ -26,6 +26,7 @@ from app.recipients.parser import ParsedRecipient, ParseSummary, parse_recipient
 from app.ui import icons
 from app.ui.dialogs import show_invalid_rows
 from app.ui.layouts import FlowLayout
+from app.ui.dialogs import RecipientBreakdown, recipient_breakdown
 from app.ui.theme import SPACE_SM, SPACE_XS
 
 _DEBOUNCE_MS = 300
@@ -79,8 +80,16 @@ class RecipientWidget(QWidget):
         self._summary_label.setWordWrap(True)
         self._summary_label.setObjectName("summaryLabel")
         summary_row.addWidget(self._summary_label)
+        self._known_categories: Dict[str, object] = {}
         self._pills = {}
-        for key, status in (("valid", ""), ("chats", "info"), ("invalid", "error"), ("duplicates", "")):
+        for key, status in (
+            ("valid", ""),
+            ("chats", "info"),
+            ("bots", ""),
+            ("unknown", ""),
+            ("invalid", "error"),
+            ("duplicates", ""),
+        ):
             pill = QLabel(self)
             pill.setObjectName("pill")
             pill.setProperty("status", status)
@@ -146,19 +155,33 @@ class RecipientWidget(QWidget):
 
         self.recipients_changed.emit(summary)
 
+    def set_known_categories(self, known: Mapping[str, object]) -> None:
+        """normalized recipient key -> DialogCategory, from the session's
+        dialog cache (MainWindow keeps it current): a @username found
+        there is counted as what it is. Re-counts at once."""
+        self._known_categories = dict(known)
+        self._update_pills(self._last_summary)
+        self.recipients_changed.emit(self._last_summary)
+
+    def recipient_breakdown(self) -> RecipientBreakdown:
+        return recipient_breakdown(self._last_summary.valid_recipients, self._known_categories)
+
     def _update_pills(self, summary: ParseSummary) -> None:
         empty = summary.total_recipients == 0
         self._summary_label.setVisible(empty)
-        chat_count = sum(1 for p in summary.valid_recipients if p.is_chat_target)
+        breakdown = recipient_breakdown(summary.valid_recipients, self._known_categories)
         values = {
             "valid": (len(summary.valid_recipients), trn("recipient_widget.recipient_count", len(summary.valid_recipients))),
-            "chats": (chat_count, tr("recipient_widget.pill_chats", count=chat_count)),
+            "chats": (breakdown.chats, tr("recipient_widget.pill_chats", count=breakdown.chats)),
+            "bots": (breakdown.bots, tr("recipient_widget.pill_bots", count=breakdown.bots)),
+            "unknown": (breakdown.unknown, tr("recipient_widget.pill_unknown", count=breakdown.unknown)),
             "invalid": (summary.invalid_count, tr("recipient_widget.summary_invalid_count", count=summary.invalid_count)),
             "duplicates": (
                 summary.duplicates_removed,
                 tr("recipient_widget.summary_duplicates_removed", count=summary.duplicates_removed),
             ),
         }
+        self._pills["unknown"].setToolTip(tr("recipient_widget.pill_unknown_tooltip"))
         for key, pill in self._pills.items():
             count, text = values[key]
             pill.setText(text)

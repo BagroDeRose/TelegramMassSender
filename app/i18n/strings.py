@@ -530,6 +530,12 @@ STRINGS: Dict[str, Dict[str, str]] = {
     "recipient_widget.summary_invalid_count": {"ru": "ошибок формата: {count}", "en": "format errors: {count}"},
     "recipient_widget.summary_duplicates_removed": {"ru": "дубликатов удалено: {count}", "en": "duplicates removed: {count}"},
     "recipient_widget.pill_chats": {"ru": "групп и каналов: {count}", "en": "groups & channels: {count}"},
+    "recipient_widget.pill_bots": {"ru": "ботов: {count}", "en": "bots: {count}"},
+    "recipient_widget.pill_unknown": {"ru": "@username: {count}", "en": "@username: {count}"},
+    "recipient_widget.pill_unknown_tooltip": {
+        "ru": "Кто за этими @username — человек, бот или чат — станет известно при отправке. Диалоги, уже загруженные в «Из моих чатов…», считаются сразу.",
+        "en": "Whether these @usernames are people, bots or chats becomes known when sending. Dialogs already loaded in From my chats… are counted right away.",
+    },
     "recipient_widget.summary_chat_count": {"ru": "из них групп/каналов по ID или ссылке: {count}", "en": "groups/channels by ID or link: {count}"},
     "recipient_widget.pick_chats_button": {"ru": "Из моих чатов…", "en": "From my chats…"},
     "recipient_widget.pick_chats_tooltip": {

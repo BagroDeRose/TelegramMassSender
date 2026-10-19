@@ -96,6 +96,7 @@ from app.ui.dialogs import (
     confirm_exit_during_campaign,
     RecipientBreakdown,
     confirm_large_campaign,
+    recipient_breakdown,
     confirm_reset_settings,
     confirm_start_campaign,
     show_error,
@@ -1693,6 +1694,7 @@ class MainWindow(QMainWindow):
             lambda: self._on_pick_chats_requested(wizard_recipients, dialog)
         )
         self._campaign_wizard = dialog
+        wizard_recipients.set_known_categories(self._cached_categories())
         self._update_pick_chats_enabled()
         return dialog
 
@@ -1724,7 +1726,7 @@ class MainWindow(QMainWindow):
 
     def _on_recipients_changed(self, summary) -> None:
         self._recipient_count_label.setText(str(len(summary.valid_recipients)))
-        self._campaign_controls.set_recipient_breakdown(sum(1 for r in summary.valid_recipients if r.is_chat_target))
+        self._campaign_controls.set_recipient_breakdown(self._recipient_widget.recipient_breakdown().chats)
         self._campaign_controls.set_recipient_count(len(summary.valid_recipients))
 
     # ---- account management -------------------------------------------------
@@ -1927,7 +1929,7 @@ class MainWindow(QMainWindow):
 
         self._account_widget.refresh_active_state(account_id)
         if account_id != previous_active_id:
-            self._dialog_cache.clear()
+            self._drop_dialog_cache()
         self._persist_active_account(account_id)
         self._on_form_state_changed()
         self._update_connection_status()
@@ -1950,7 +1952,7 @@ class MainWindow(QMainWindow):
             return
         async with self._account_lock:
             if self._is_active_account(account):
-                self._dialog_cache.clear()
+                self._drop_dialog_cache()
             try:
                 await account_manager.delete_account(account)
             except AccountDeletionError as exc:
@@ -2030,7 +2032,7 @@ class MainWindow(QMainWindow):
             self._service.enter_demo_mode()
         else:
             self._service.exit_demo_mode()
-        self._dialog_cache.clear()
+        self._drop_dialog_cache()
         self._demo_banner.setVisible(enter)
         # A half-finished switch belongs to the mode we just left.
         self._account_switch_in_progress = False
@@ -2133,7 +2135,7 @@ class MainWindow(QMainWindow):
 
     def _load_dialogs_into(self, dialog: ChatPickerDialog, account: Account) -> None:
         """First open, or Refresh: always a fresh read, replacing the cache."""
-        self._dialog_cache.clear()
+        self._drop_dialog_cache()
         dialog.set_loading()
         self._spawn(self._load_dialogs(dialog, account), "загрузка списка диалогов")
 
@@ -2158,7 +2160,7 @@ class MainWindow(QMainWindow):
             self._logger.warning("Не удалось загрузить список диалогов: %s", exc)
             error = tr("chat_picker.error.load_failed", error=exc)
         if snapshot is not None and self._is_active_account(account):
-            self._dialog_cache.put(self._dialog_cache_key(account), snapshot)
+            self._cache_dialogs(self._dialog_cache_key(account), snapshot)
         if self._chat_picker is not dialog:
             return  # closed while loading (the cache still keeps the result)
         if error is not None:
@@ -2251,21 +2253,23 @@ class MainWindow(QMainWindow):
         """People / bots / chats / not-yet-known -- from the cached dialogs
         where a recipient is among them, else from its format alone.
         Nothing is resolved before the user confirms."""
-        people = bots = chats = unknown = 0
+        return recipient_breakdown(recipients, self._cached_categories())
+
+    def _cache_dialogs(self, key, snapshot) -> None:
+        self._dialog_cache.put(key, snapshot)
+        self._on_dialog_cache_changed()
+
+    def _drop_dialog_cache(self) -> None:
+        self._dialog_cache.clear()
+        self._on_dialog_cache_changed()
+
+    def _on_dialog_cache_changed(self) -> None:
+        """The counts under every Recipients box follow what the cache
+        knows about the active account's dialogs."""
         known = self._cached_categories()
-        for recipient in recipients:
-            category = known.get(recipient.normalized_key)
-            if category is DialogCategory.BOTS:
-                bots += 1
-            elif category is DialogCategory.PEOPLE:
-                people += 1
-            elif category is not None or recipient.is_chat_target:
-                chats += 1
-            elif recipient.kind == RecipientKind.USERNAME:
-                unknown += 1
-            else:
-                people += 1
-        return RecipientBreakdown(people=people, bots=bots, chats=chats, unknown=unknown)
+        self._recipient_widget.set_known_categories(known)
+        if self._campaign_wizard is not None:
+            self._campaign_wizard.recipient_widget.set_known_categories(known)
 
     def _cached_categories(self) -> Dict[str, DialogCategory]:
         """normalized recipient key -> category, for the active account's
