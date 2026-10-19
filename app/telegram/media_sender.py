@@ -51,7 +51,7 @@ class AttachmentKind(Enum):
     - .gif: Telegram has a distinct "animation" send mode (DocumentAttributeAnimated)
       that this app does not yet use -- sending it through the album path would
       be wrong, so it stays DOCUMENT-equivalent for sending until that's built
-      as its own change (see ROADMAP.md).
+      as its own change.
     - .bmp: Telegram's own photo pipeline does not reliably accept BMP the way
       it does JPEG/PNG/WEBP -- treating it as an album photo risks a delivery
       failure the app can't safely predict, so it is intentionally kept out of
@@ -62,7 +62,7 @@ class AttachmentKind(Enum):
     change: like DOCUMENT, they are sent as a plain document, exactly as
     every audio/zip file already was before this kind existed. Native
     Telegram voice/audio-message semantics remain a separate deferred
-    subtask (see ROADMAP.md), same as ANIMATION above.
+    subtask, same as ANIMATION above.
     Everything else, including every unrecognized extension, is DOCUMENT --
     never rejected, matching the existing "don't restrict the extension list
     without a technical reason" behavior.

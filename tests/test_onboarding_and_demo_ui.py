@@ -1,5 +1,5 @@
 """UI-level tests for the first-run OnboardingDialog and Demo Mode wiring
-in MainWindow (ROADMAP v2.0). Covers what tests/test_demo_mode.py does
+in MainWindow (v2.0). Covers what tests/test_demo_mode.py does
 not: the dialog itself, and MainWindow's reaction to each of its outcomes
 (the underlying TelegramService.enter_demo_mode/exit_demo_mode and
 DemoTelegramClient/DemoClientManager are covered there).

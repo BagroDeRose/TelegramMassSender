@@ -1,5 +1,5 @@
-"""Tests for app.telegram.client_manager.ClientManager (ROADMAP: Reliability
-Tests -- "Network disconnect" / "Reconnect"). This module had no dedicated
+"""Tests for app.telegram.client_manager.ClientManager (network
+disconnect and reconnect). This module had no dedicated
 tests before now; TelegramClient itself is mocked (constructor patched)
 so nothing here touches the real Telegram network.
 """

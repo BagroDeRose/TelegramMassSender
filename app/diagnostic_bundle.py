@@ -1,4 +1,4 @@
-"""Diagnostic bundle export (ROADMAP: Diagnostic Bundle) -- a single ZIP
+"""Diagnostic bundle export -- a single ZIP
 a user can attach to a bug report. Built entirely from already-sanitized
 sources:
 

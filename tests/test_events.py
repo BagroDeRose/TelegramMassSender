@@ -1,4 +1,4 @@
-"""Tests for app.logging.events (ROADMAP: Structured Logging) -- one JSON
+"""Tests for app.logging.events -- one JSON
 object per log line through the existing rotating/secret-scrubbing
 handler, never message contents or credentials.
 """

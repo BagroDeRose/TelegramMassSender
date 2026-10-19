@@ -1035,7 +1035,7 @@ def test_files_dropped_signal_is_wired_to_add_file(qapp, tmp_path):
     assert [x.path for x in widget.get_attachments()] == [paths[0], new_file]
 
 
-# ---- keyboard accessibility (ROADMAP v1.8) -----------------------------------
+# ---- keyboard accessibility (v1.8) -------------------------------------------
 #
 # Before this stage, _AttachmentTile had no focus policy at all (the
 # QWidget default is Qt.NoFocus) -- a tile could only ever be selected,

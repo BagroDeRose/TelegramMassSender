@@ -71,8 +71,8 @@ class TelegramService:
         return self._activate(api_id, api_hash)
 
     def enter_demo_mode(self) -> Account:
-        """Activates a fully local, simulated Telegram backend (ROADMAP
-        v2.0 Demo Mode): a DemoClientManager that never opens a real
+        """Activates a fully local, simulated Telegram backend (Demo
+        Mode, v2.0): a DemoClientManager that never opens a real
         connection -- no real API ID/Hash is needed or touched, and
         nothing here reads from or writes to SecureStorage.
 

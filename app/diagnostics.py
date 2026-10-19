@@ -1,4 +1,4 @@
-"""Diagnostics collection (ROADMAP: Diagnostics) -- read-only application/
+"""Diagnostics collection -- read-only application/
 environment/status information for troubleshooting, surfaced on the
 Settings page. Never includes API ID/Hash, 2FA passwords, phone numbers or
 session file contents -- only whether a session file exists on disk (a

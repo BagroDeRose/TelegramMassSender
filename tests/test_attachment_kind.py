@@ -126,7 +126,8 @@ def test_audio_and_archive_kinds_carry_no_sending_or_thumbnail_behavior_change(f
     # can pick a more specific icon (stage 2) -- they must behave exactly
     # like DOCUMENT did before this kind existed: sent individually, no
     # thumbnail, never rejected. Introducing a classification must never by
-    # itself imply a change to what gets sent or how (see CLAUDE.md).
+    # itself imply a change to what gets sent or how (see AttachmentKind
+    # in app/telegram/media_sender.py).
     path = Path(filename)
     assert Attachment(path=path).category == AttachmentCategory.SINGLE
     assert is_image(path) is False

@@ -51,7 +51,7 @@ jobs:
           # Defense in depth: this runner is a fresh checkout with no real
           # credentials/session files ever present, so this should always
           # find nothing -- but "Never publish secrets/session data" is
-          # explicit enough (ROADMAP v2.0 Release Engineering) to verify
+          # explicit enough a rule to verify
           # rather than assume, refusing to publish rather than silently
           # continuing if anything unexpected shows up.
           $forbidden = @("*.session", "*.session-journal", "secrets.dat", "*.env", "*.log")

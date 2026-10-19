@@ -1,4 +1,4 @@
-"""Tests for app.diagnostics (ROADMAP: Diagnostics). Verifies the report
+"""Tests for app.diagnostics. Verifies the report
 contains the expected fields, that a real DB failure is reported (not
 silently swallowed), and that nothing here ever touches session file
 contents -- only whether a file exists.

@@ -151,7 +151,7 @@ class _AttachmentTile(QWidget):
         self._press_pos: Optional[QPoint] = None
         self._was_sole_selection_on_press = False
         self._focus_from_click = False
-        # Accessibility (ROADMAP v1.8): without a focus policy the tile is
+        # Accessibility (v1.8): without a focus policy the tile is
         # unreachable by Tab and invisible to a screen reader.
         #
         # TabFocus rather than StrongFocus, with mouse focus taken by hand in
@@ -709,7 +709,7 @@ class AttachmentsWidget(QWidget):
         # own -- only QFrame-derived widgets do that automatically.
         tile.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         tile.setProperty("selected", "false")
-        # Accessibility (ROADMAP v1.8): a screen reader has no other text
+        # Accessibility (v1.8): a screen reader has no other text
         # to announce for this composite widget (its child labels are all
         # WA_TransparentForMouseEvents decoration, not focusable in their
         # own right) -- accessibleName is what gets read when the tile

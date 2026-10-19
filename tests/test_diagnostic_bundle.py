@@ -1,4 +1,4 @@
-"""Tests for app.diagnostic_bundle (ROADMAP: Diagnostic Bundle). Verifies
+"""Tests for app.diagnostic_bundle. Verifies
 the exported ZIP contains exactly the expected, already-sanitized
 contents, and never a session file, API credentials, or message text.
 """

@@ -6,7 +6,8 @@ apart.
 
 "Quiet console": an almost monochrome base; colour only carries meaning
 (status, progress, the single primary action). Contrast choices that
-departed from the brief's starting values are recorded in docs/design.md.
+departed from the brief's starting values are checked by
+tests/test_color_contrast.py.
 """
 from __future__ import annotations
 
