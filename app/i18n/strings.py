@@ -536,8 +536,21 @@ STRINGS: Dict[str, Dict[str, str]] = {
             "(only checked — the account never joins a chat)"
         ),
     },
-    "recipient_widget.import_txt_button": {"ru": "Импорт TXT", "en": "Import TXT"},
-    "recipient_widget.import_csv_button": {"ru": "Импорт CSV", "en": "Import CSV"},
+    "recipient_widget.import_button": {"ru": "Импорт", "en": "Import"},
+    "recipient_widget.import_tooltip": {
+        "ru": "Добавить получателей из файла: TXT или CSV",
+        "en": "Add recipients from a file: TXT or CSV",
+    },
+    "recipient_widget.import_txt_action": {"ru": "Из TXT-файла…", "en": "From a TXT file…"},
+    "recipient_widget.import_txt_action_tooltip": {
+        "ru": "Текстовый файл: по одному получателю в строке",
+        "en": "A text file: one recipient per line",
+    },
+    "recipient_widget.import_csv_action": {"ru": "Из CSV-файла…", "en": "From a CSV file…"},
+    "recipient_widget.import_csv_action_tooltip": {
+        "ru": "Таблица CSV: колонка с получателем находится сама, имя из соседней колонки подставляется в {{name}}",
+        "en": "A CSV table: the recipient column is found automatically; a name next to it fills {{name}}",
+    },
     "recipient_widget.clear_button": {"ru": "Очистить", "en": "Clear"},
     "recipient_widget.empty_summary": {
         "ru": "Нет получателей — вставьте @username, ID, ссылки t.me/... или номера телефонов, импортируйте TXT- или CSV-файл, либо выберите группы и каналы из своих чатов",

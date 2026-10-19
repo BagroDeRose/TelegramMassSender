@@ -107,3 +107,41 @@ async def test_narrow_page_folds_into_one_column(window):
     _configure(window, 1920, journal=False, collapsed=False)
     _settle()
     assert not window._campaign_columns.is_folded
+
+
+def _row_lines(row):
+    """How many lines a FlowLayout row of buttons takes."""
+    widgets = [row.itemAt(i).widget() for i in range(row.count())]
+    return len({w.y() for w in widgets if w is not None and w.isVisible()})
+
+
+@pytest.mark.parametrize("width", (1100, 1120, 1140, 1160, DEFAULT_WINDOW_WIDTH))
+async def test_recipient_buttons_stay_on_one_line(window, width):
+    # "Clear" wrapped onto a second line at 1100-1180 px with the sidebar
+    # expanded: Import TXT + Import CSV + From my chats + Clear needed
+    # ~510 px and the box had 385-465.
+    from app.i18n import LANGUAGE_EN, LANGUAGE_RU, set_language
+
+    try:
+        for language in (LANGUAGE_RU, LANGUAGE_EN):
+            set_language(language)
+            window.retranslate_ui()
+            for journal in (False, True):
+                _configure(window, width, journal, collapsed=False)
+                window._navigate_to_page(0)
+                _settle()
+                row = window._recipient_widget._buttons_row
+                assert _row_lines(row) == 1, (language, width, journal, window._recipient_widget.width())
+    finally:
+        set_language(LANGUAGE_RU)
+        window.retranslate_ui()
+
+
+async def test_wizard_recipient_buttons_stay_on_one_line(window):
+    wizard = window._build_campaign_wizard()
+    try:
+        wizard.show()
+        _settle()
+        assert _row_lines(wizard.recipient_widget._buttons_row) == 1
+    finally:
+        wizard.reject()

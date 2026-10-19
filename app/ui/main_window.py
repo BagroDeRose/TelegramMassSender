@@ -392,7 +392,6 @@ class MainWindow(QMainWindow):
             self._lists_menu,
             recipients._text_edit,
             recipients._import_button,
-            recipients._import_csv_button,
             recipients._pick_chats_button,
             recipients._clear_button,
             recipients._review_invalid_button,

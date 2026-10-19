@@ -96,3 +96,23 @@ def test_review_invalid_opens_dialog_with_raw_text_and_reason(qapp):
     _parent, _title, rows = mock_show.call_args[0]
     assert rows == [("not-a-valid-recipient", rows[0][1])]
     assert rows[0][1]  # a non-empty reason string
+
+
+def test_import_menu_offers_txt_and_csv(qapp):
+    # "Import TXT" and "Import CSV" became one "Import ▾" button so the
+    # row fits on one line at the default window width.
+    from app.i18n import tr
+
+    widget = RecipientWidget()
+    menu = widget._import_button.menu()
+    assert [a.text() for a in menu.actions()] == [
+        tr("recipient_widget.import_txt_action"),
+        tr("recipient_widget.import_csv_action"),
+    ]
+    with patch.object(RecipientWidget, "_on_import_clicked") as txt, patch.object(
+        RecipientWidget, "_on_import_csv_clicked"
+    ) as csv:
+        widget._import_txt_action.trigger()
+        widget._import_csv_action.trigger()
+    txt.assert_called_once_with()
+    csv.assert_called_once_with()
