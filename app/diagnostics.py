@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import platform
 from dataclasses import dataclass, field
-from typing import List, Tuple, Union
+from typing import Collection, List, Tuple, Union
 
 import telethon
 
@@ -68,7 +68,7 @@ def _database_item(database: Database) -> DiagnosticItem:
     return DiagnosticItem(label, tr("diagnostics.status.ok"), STATUS_OK)
 
 
-def _session_storage_item(database: Database) -> DiagnosticItem:
+def _session_storage_item(database: Database, needs_sign_in: Collection[int]) -> DiagnosticItem:
     label = tr("diagnostics.field.session_storage")
     try:
         accounts = AccountRepository(database).list_all()
@@ -80,7 +80,14 @@ def _session_storage_item(database: Database) -> DiagnosticItem:
         return DiagnosticItem(label, tr("diagnostics.session_storage.no_accounts"), STATUS_INFO)
     # The file Telethon writes is "<name>.session"; get_session_path() is
     # the name without that extension, so checking it always found 0.
-    present = sum(1 for account in accounts if get_session_file_path(account.session_name).exists())
+    # A session file alone isn't a saved sign-in: adding an account creates
+    # it before the code is entered, and a sign-in that never completed (or
+    # one Telegram has since revoked) leaves the file behind.
+    present = sum(
+        1
+        for account in accounts
+        if account.id not in needs_sign_in and get_session_file_path(account.session_name).exists()
+    )
     value = trn("diagnostics.session_storage.summary", len(accounts), present=present)
     if present == len(accounts):
         return DiagnosticItem(label, value, STATUS_OK)
@@ -94,13 +101,18 @@ def _connection_item(label: str, state: Union[ConnectionState, str]) -> Diagnost
 
 
 def collect_diagnostics(
-    database: Database, telegram: Union[ConnectionState, str], network: Union[ConnectionState, str]
+    database: Database,
+    telegram: Union[ConnectionState, str],
+    network: Union[ConnectionState, str],
+    needs_sign_in: Collection[int] = (),
 ) -> DiagnosticsReport:
+    """`needs_sign_in`: ids of accounts whose last status check found them
+    not signed in (the caller knows; this module never connects)."""
     items = [
         DiagnosticItem(tr("diagnostics.field.app_version"), APP_VERSION, STATUS_INFO),
         _database_item(database),
         _connection_item(tr("diagnostics.field.telegram_status"), telegram),
-        _session_storage_item(database),
+        _session_storage_item(database, needs_sign_in),
         _connection_item(tr("diagnostics.field.network_status"), network),
     ]
     technical = [

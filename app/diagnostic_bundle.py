@@ -23,6 +23,7 @@ import re
 import zipfile
 from dataclasses import asdict
 from pathlib import Path
+from typing import Collection
 
 from app.config.paths import get_logs_dir
 from app.config.settings import AppSettings
@@ -52,8 +53,9 @@ def export_diagnostic_bundle(
     settings: AppSettings,
     telegram_status: str,
     network_status: str,
+    needs_sign_in: Collection[int] = (),
 ) -> None:
-    report = collect_diagnostics(database, telegram_status, network_status)
+    report = collect_diagnostics(database, telegram_status, network_status, needs_sign_in)
     diagnostics_text = format_diagnostics_text(report)
     settings_dict = asdict(settings)
     # A custom reports folder (the default is "", meaning "use the app's

@@ -26,6 +26,7 @@ from app.recipients.parser import ParsedRecipient, ParseSummary, parse_recipient
 from app.ui import icons
 from app.ui.dialogs import show_invalid_rows
 from app.ui.layouts import FlowLayout
+from app.ui.menu_button import MenuButton
 from app.ui.dialogs import RecipientBreakdown, recipient_breakdown
 from app.ui.theme import SPACE_SM, SPACE_XS
 
@@ -52,12 +53,16 @@ class RecipientWidget(QWidget):
 
         # Rows wrap rather than force the column wider (see FlowLayout).
         buttons = FlowLayout(spacing=SPACE_SM)
-        self._import_button = QPushButton(tr("recipient_widget.import_txt_button"), self)
+        # One "Import ▾" (TXT / CSV) instead of two buttons: with both, the
+        # row needed ~510 px and wrapped at the default window width.
+        self._import_button = MenuButton(self)
         self._import_button.setIcon(icons.themed("import"))
-        self._import_button.clicked.connect(self._on_import_clicked)
-        self._import_csv_button = QPushButton(tr("recipient_widget.import_csv_button"), self)
-        self._import_csv_button.setIcon(icons.themed("import"))
-        self._import_csv_button.clicked.connect(self._on_import_csv_clicked)
+        import_menu = self._import_button.menu()
+        self._import_txt_action = import_menu.addAction("")
+        self._import_txt_action.triggered.connect(lambda _checked=False: self._on_import_clicked())
+        self._import_csv_action = import_menu.addAction("")
+        self._import_csv_action.triggered.connect(lambda _checked=False: self._on_import_csv_clicked())
+        self._retranslate_import()
         self._pick_chats_button = QPushButton(tr("recipient_widget.pick_chats_button"), self)
         self._pick_chats_button.setToolTip(tr("recipient_widget.pick_chats_tooltip"))
         self._pick_chats_button.setIcon(icons.themed("chats"))
@@ -68,7 +73,6 @@ class RecipientWidget(QWidget):
         self._clear_button.setProperty("variant", "ghost")
         self._clear_button.clicked.connect(self._on_clear_clicked)
         buttons.addWidget(self._import_button)
-        buttons.addWidget(self._import_csv_button)
         buttons.addWidget(self._pick_chats_button)
         buttons.addWidget(self._clear_button)
         self._buttons_row = buttons
@@ -322,11 +326,18 @@ class RecipientWidget(QWidget):
         self._name_overrides = dict(name_overrides)
         self.flush()
 
+    def _retranslate_import(self) -> None:
+        self._import_button.setText(tr("recipient_widget.import_button"))
+        self._import_button.setToolTip(tr("recipient_widget.import_tooltip"))
+        self._import_txt_action.setText(tr("recipient_widget.import_txt_action"))
+        self._import_txt_action.setToolTip(tr("recipient_widget.import_txt_action_tooltip"))
+        self._import_csv_action.setText(tr("recipient_widget.import_csv_action"))
+        self._import_csv_action.setToolTip(tr("recipient_widget.import_csv_action_tooltip"))
+
     def retranslate_ui(self) -> None:
         self._text_edit.setPlaceholderText(tr("recipient_widget.placeholder"))
         self._text_edit.setToolTip(tr("recipient_widget.tooltip"))
-        self._import_button.setText(tr("recipient_widget.import_txt_button"))
-        self._import_csv_button.setText(tr("recipient_widget.import_csv_button"))
+        self._retranslate_import()
         self._pick_chats_button.setText(tr("recipient_widget.pick_chats_button"))
         self._pick_chats_button.setToolTip(tr("recipient_widget.pick_chats_tooltip"))
         self._clear_button.setText(tr("recipient_widget.clear_button"))

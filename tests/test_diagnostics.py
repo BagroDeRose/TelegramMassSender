@@ -126,3 +126,27 @@ def test_diagnostics_never_includes_credential_or_session_content_fields(tmp_pat
             assert forbidden not in text
     finally:
         db.close()
+
+
+def test_a_session_whose_sign_in_was_never_finished_is_not_a_saved_sign_in(tmp_path):
+    # Starting to add an account creates its session file before the code
+    # is entered. If the sign-in never completes (Telegram refused to send
+    # the code, the dialog was closed), the file is there but nothing is
+    # signed in -- "2 of 2" claimed otherwise.
+    db = Database(db_path=tmp_path / "app.db")
+    try:
+        repo = AccountRepository(db)
+        signed_in = repo.create("+70001112233", "session_signed_in")
+        unfinished = repo.create("+70004445566", "session_unfinished")
+        for name in ("session_signed_in", "session_unfinished"):
+            (tmp_path / f"{name}.session").write_bytes(b"fake")
+
+        with patch("app.config.paths.get_session_path", side_effect=lambda name: tmp_path / name):
+            report = collect_diagnostics(db, "x", "y", needs_sign_in={unfinished.id})
+
+        item = next(i for i in report.items if i.label == tr("diagnostics.field.session_storage"))
+        assert item.value == trn("diagnostics.session_storage.summary", 2, present=1)
+        assert item.hint == tr("diagnostics.hint.sign_in_again")
+        assert signed_in.id != unfinished.id
+    finally:
+        db.close()

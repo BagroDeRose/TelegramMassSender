@@ -11,13 +11,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import List, Optional, Sequence, Tuple
 
-from PySide6.QtCore import QRect, Qt, Signal
-from PySide6.QtGui import QAction, QIcon, QPainter
-from PySide6.QtWidgets import QMenu, QPushButton, QWidget
+from PySide6.QtCore import Signal
+from PySide6.QtGui import QAction
+from PySide6.QtWidgets import QMenu, QWidget
 
 from app.i18n import tr
 from app.ui import icons
-from app.ui.theme import ICON_SIZE_SM, SPACE_MD
+from app.ui.menu_button import MenuButton
 
 
 @dataclass(frozen=True)
@@ -33,7 +33,7 @@ class SavedMenuTexts:
     icon: str
 
 
-class SavedItemsMenuButton(QPushButton):
+class SavedItemsMenuButton(MenuButton):
     save_requested = Signal()
     load_requested = Signal(int)
     delete_requested = Signal(int)
@@ -42,14 +42,8 @@ class SavedItemsMenuButton(QPushButton):
         super().__init__(parent)
         self._texts = texts
         self._items: List[Tuple[int, str]] = []
-        # The style's own menu arrow is hidden in QSS; the chevron is
-        # painted here so it is a Lucide icon in the theme's colours.
-        self.setProperty("menuButton", True)
         self.setIcon(icons.themed(texts.icon))
-        self._chevron = icons.themed("chevron_down")
-        self._menu = QMenu(self)
-        self._menu.setToolTipsVisible(True)
-        self.setMenu(self._menu)
+        self._menu = self.menu()
         self.save_action: Optional[QAction] = None
         self.load_menu: Optional[QMenu] = None
         self.delete_menu: Optional[QMenu] = None
@@ -73,14 +67,6 @@ class SavedItemsMenuButton(QPushButton):
         self.setText(tr(self._texts.button))
         self.setToolTip(tr(self._texts.tooltip))
         self._rebuild()
-
-    def paintEvent(self, event) -> None:
-        super().paintEvent(event)
-        painter = QPainter(self)
-        rect = QRect(self.width() - SPACE_MD - ICON_SIZE_SM, (self.height() - ICON_SIZE_SM) // 2, ICON_SIZE_SM, ICON_SIZE_SM)
-        mode = QIcon.Mode.Normal if self.isEnabled() else QIcon.Mode.Disabled
-        self._chevron.paint(painter, rect, Qt.AlignmentFlag.AlignCenter, mode)
-        painter.end()
 
     def _rebuild(self) -> None:
         menu = self._menu
