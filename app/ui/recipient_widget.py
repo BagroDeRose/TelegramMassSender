@@ -71,6 +71,7 @@ class RecipientWidget(QWidget):
         buttons.addWidget(self._import_csv_button)
         buttons.addWidget(self._pick_chats_button)
         buttons.addWidget(self._clear_button)
+        self._buttons_row = buttons
         layout.addLayout(buttons)
 
         summary_row = FlowLayout(spacing=SPACE_XS)
@@ -154,6 +155,11 @@ class RecipientWidget(QWidget):
         self._name_overrides = {k: v for k, v in self._name_overrides.items() if k in surviving_keys}
 
         self.recipients_changed.emit(summary)
+
+    def add_action_widget(self, widget: QWidget) -> None:
+        """Another control in the row next to Import/Clear (the window's
+        "Saved lists" menu, on the Campaign page and in the wizard)."""
+        self._buttons_row.addWidget(widget)
 
     def set_known_categories(self, known: Mapping[str, object]) -> None:
         """normalized recipient key -> DialogCategory, from the session's

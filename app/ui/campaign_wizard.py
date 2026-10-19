@@ -51,6 +51,7 @@ from app.ui.message_preview import MessagePreviewWidget
 from app.ui.recipient_widget import RecipientWidget
 from app.ui import icons, theme
 from app.ui.dialog_frame import build_dialog_frame
+from app.ui.layouts import FlowLayout
 from app.ui.theme import SPACE_SM, SPACE_XS, WIZARD_HEIGHT, WIZARD_WIDTH
 
 _STEP_TITLE_KEYS = [
@@ -175,9 +176,38 @@ class CampaignWizardDialog(QDialog):
         layout.addWidget(self._message_summary_label)
         open_button = QPushButton(tr("campaign_wizard.message.open_editor_button"), page)
         open_button.clicked.connect(self._on_open_editor_clicked)
-        layout.addWidget(open_button, alignment=Qt.AlignmentFlag.AlignLeft)
+        self._message_actions = FlowLayout(spacing=SPACE_SM)
+        self._message_actions.addWidget(open_button)
+        layout.addLayout(self._message_actions)
         layout.addStretch(1)
         return page
+
+    def add_message_action(self, widget: QWidget) -> None:
+        """Another control next to "Open editor" (the window's Templates menu)."""
+        self._message_actions.addWidget(widget)
+
+    def message(self):
+        """(text, formatting entities) of the wizard's own message."""
+        return self._message_text, list(self._message_entities)
+
+    def set_message(self, text: str, entities) -> None:
+        self._message_text = text
+        self._message_entities = list(entities)
+        self._update_message_summary()
+
+    def interval(self):
+        """(min, max) seconds currently on the sending-options step."""
+        return self._min_spin.value(), self._max_spin.value()
+
+    def set_interval(self, min_seconds: int, max_seconds: int) -> None:
+        """Only the step's boxes: saved to settings when the step is left,
+        like anything typed there, so cancelling the wizard changes nothing."""
+        self._min_spin.setValue(min_seconds)
+        self._max_spin.setValue(max_seconds)
+
+    @property
+    def attachments_widget(self) -> AttachmentsWidget:
+        return self._attachments_widget
 
     def _build_attachments_page(self) -> QWidget:
         page = QWidget(self)

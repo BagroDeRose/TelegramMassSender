@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Sequence
 
 from PySide6.QtCore import QEvent, QTimer, QUrl, Qt
 from PySide6.QtGui import QDesktopServices, QIcon
@@ -65,7 +65,7 @@ from app.config.settings import (
 from app import diagnostics
 from app.diagnostic_bundle import export_diagnostic_bundle
 from app.database.database import Database
-from app.database.models import Preset, RecipientGroup, SavedReport
+from app.database.models import SavedReport
 from app.database.repositories import PresetRepository, RecipientGroupRepository, SavedReportRepository
 from app.i18n import LANGUAGE_LABELS, VALID_LANGUAGES, get_language, set_language, tr
 from app.logging.logger import get_logger
@@ -116,11 +116,11 @@ from app.ui.onboarding_dialog import (
 from app.ui.message_editor_dialog import MessageEditorDialog
 from app.ui.message_preview import MessagePreviewWidget
 from app.ui.recipient_widget import RecipientWidget
+from app.ui.saved_menu import LISTS_TEXTS, TEMPLATES_TEXTS, SavedItemsMenuButton
 from app.ui.sidebar import Sidebar
 from app.ui.stat_card import StatCard
 from app.ui.theme import (
     CAMPAIGN_FOLD_WIDTH,
-    COMBO_MIN_WIDTH,
     CONTROL_WIDTH,
     ICON_SIZE,
     HEADER_GAP,
@@ -174,9 +174,11 @@ def _chat_type_of(item) -> Optional[TargetType]:
     return target_type if target_type in CHAT_TARGET_TYPES else None
 
 
-def _card(title: str, content: QWidget, count_label: Optional[QLabel] = None) -> QFrame:
+def _card(
+    title: str, content: QWidget, count_label: Optional[QLabel] = None, actions: Sequence[QWidget] = ()
+) -> QFrame:
     """A borderless-content card: a bold title (+ optional right-aligned
-    badge) above the widget, all on one flat surface."""
+    actions and badge) above the widget, all on one flat surface."""
     card = QFrame()
     card.setObjectName("card")
     layout = QVBoxLayout(card)
@@ -188,6 +190,8 @@ def _card(title: str, content: QWidget, count_label: Optional[QLabel] = None) ->
     title_label.setObjectName("cardTitle")
     header.addWidget(title_label)
     header.addStretch(1)
+    for action in actions:
+        header.addWidget(action)
     if count_label is not None:
         header.addWidget(count_label)
     layout.addLayout(header)
@@ -365,8 +369,7 @@ class MainWindow(QMainWindow):
         self._update_message_preview()
         self._update_results_page()
         self._refresh_saved_reports()
-        self._refresh_presets_combo()
-        self._refresh_groups_combo()
+        self._refresh_saved_menus()
         self._refresh_diagnostics()
         self.statusBar().showMessage(tr("main_window.status.ready"))
         self._setup_system_tray()
@@ -386,21 +389,15 @@ class MainWindow(QMainWindow):
             *self._sidebar._buttons,
             self._sidebar._account_block,
             self._open_wizard_button,
+            self._lists_menu,
             recipients._text_edit,
             recipients._import_button,
             recipients._import_csv_button,
             recipients._pick_chats_button,
             recipients._clear_button,
             recipients._review_invalid_button,
-            self._groups_combo,
-            self._load_group_button,
-            self._save_group_button,
-            self._delete_group_button,
+            self._templates_menu,
             self._open_editor_button,
-            self._presets_combo,
-            self._load_preset_button,
-            self._save_preset_button,
-            self._delete_preset_button,
             attachments._list,
             attachments._move_earlier_button,
             attachments._move_later_button,
@@ -484,10 +481,7 @@ class MainWindow(QMainWindow):
         )
         self._open_wizard_button.setText(tr("main_window.campaign_page.open_wizard_button"))
         _retranslate_card_title(self._recipients_card, tr("main_window.campaign_page.recipients_card"))
-        self._load_group_button.setText(tr("main_window.groups.load_button"))
-        self._save_group_button.setText(tr("main_window.groups.save_button"))
-        self._delete_group_button.setText(tr("main_window.groups.delete_button"))
-        self._refresh_groups_combo()  # re-set the placeholder item's text
+        self._lists_menu.retranslate_ui()
         self._open_editor_button.setText(tr("main_window.campaign_page.open_editor_button"))
         self._open_editor_button.setToolTip(tr("main_window.campaign_page.open_editor_tooltip"))
         self._name_hint_label.setText(tr("main_window.campaign_page.name_placeholder_hint"))
@@ -497,15 +491,10 @@ class MainWindow(QMainWindow):
         # it may already be user-edited, and a language switch resetting
         # it back to the new language's default would silently discard
         # that. Only the label/tooltip text is retranslated.
-        self._load_preset_button.setText(tr("main_window.presets.load_button"))
-        self._save_preset_button.setText(tr("main_window.presets.save_button"))
-        self._delete_preset_button.setText(tr("main_window.presets.delete_button"))
-        self._refresh_presets_combo()  # re-set the placeholder item's text
+        self._templates_menu.retranslate_ui()
         _retranslate_card_title(self._message_card, tr("main_window.campaign_page.message_card"))
         _retranslate_card_title(self._attachments_card, tr("main_window.campaign_page.attachments_card"))
         _retranslate_card_title(self._preview_card, tr("main_window.campaign_page.preview_card"))
-        self._groups_label.setText(tr("main_window.groups.label"))
-        self._presets_label.setText(tr("main_window.presets.label"))
 
         _retranslate_page_header(
             self._accounts_page_header, tr("main_window.accounts_page.title"), tr("main_window.accounts_page.subtitle")
@@ -731,33 +720,17 @@ class MainWindow(QMainWindow):
         recipients_layout.setContentsMargins(0, 0, 0, 0)
         recipients_layout.setSpacing(SPACE_SM)
         recipients_layout.addWidget(self._recipient_widget)
-
-        # Label, combo and actions wrap rather than force the column wider.
-        groups_row = FlowLayout(spacing=SPACE_XS)
-        self._groups_label = QLabel(tr("main_window.groups.label"), recipients_section)
-        self._groups_label.setObjectName("helperText")
-        groups_row.addWidget(self._groups_label)
-        self._groups_combo = QComboBox(recipients_section)
-        self._groups_combo.setMinimumWidth(COMBO_MIN_WIDTH)
-        self._load_group_button = QPushButton(tr("main_window.groups.load_button"), recipients_section)
-        self._load_group_button.setProperty("variant", "ghost")
-        self._load_group_button.clicked.connect(self._on_load_group_clicked)
-        self._save_group_button = QPushButton(tr("main_window.groups.save_button"), recipients_section)
-        self._save_group_button.setProperty("variant", "ghost")
-        self._save_group_button.clicked.connect(self._on_save_group_clicked)
-        self._delete_group_button = QPushButton(tr("main_window.groups.delete_button"), recipients_section)
-        self._delete_group_button.setProperty("variant", "ghost")
-        self._delete_group_button.clicked.connect(self._on_delete_group_clicked)
-        groups_row.addWidget(self._groups_combo)
-        groups_row.addWidget(self._load_group_button)
-        groups_row.addWidget(self._save_group_button)
-        groups_row.addWidget(self._delete_group_button)
-        recipients_layout.addLayout(groups_row)
+        # "Lists ▾" / "Templates ▾" sit in their card's header: the button
+        # rows below are already full at the default window width.
+        self._lists_menu = self._make_lists_menu(self._recipient_widget, self)
 
         self._recipient_count_label = QLabel("0", page)
         self._recipient_count_label.setObjectName("cardCount")
         self._recipients_card = _card(
-            tr("main_window.campaign_page.recipients_card"), recipients_section, self._recipient_count_label
+            tr("main_window.campaign_page.recipients_card"),
+            recipients_section,
+            self._recipient_count_label,
+            actions=(self._lists_menu,),
         )
         left.addWidget(self._recipients_card)
 
@@ -773,6 +746,7 @@ class MainWindow(QMainWindow):
         self._open_editor_button.setToolTip(tr("main_window.campaign_page.open_editor_tooltip"))
         self._open_editor_button.clicked.connect(self._on_open_editor_clicked)
         message_buttons.addWidget(self._open_editor_button)
+        self._templates_menu = self._make_templates_menu(None, self)
         self._message_summary_label = QLabel("", message_section)
         self._message_summary_label.setObjectName("helperText")
         message_buttons.addWidget(self._message_summary_label)
@@ -783,28 +757,10 @@ class MainWindow(QMainWindow):
         self._name_hint_label.setWordWrap(True)
         message_layout.addWidget(self._name_hint_label)
 
-        presets_row = FlowLayout(spacing=SPACE_XS)
-        self._presets_label = QLabel(tr("main_window.presets.label"), message_section)
-        self._presets_label.setObjectName("helperText")
-        presets_row.addWidget(self._presets_label)
-        self._presets_combo = QComboBox(message_section)
-        self._presets_combo.setMinimumWidth(COMBO_MIN_WIDTH)
-        self._load_preset_button = QPushButton(tr("main_window.presets.load_button"), message_section)
-        self._load_preset_button.setProperty("variant", "ghost")
-        self._load_preset_button.clicked.connect(self._on_load_preset_clicked)
-        self._save_preset_button = QPushButton(tr("main_window.presets.save_button"), message_section)
-        self._save_preset_button.setProperty("variant", "ghost")
-        self._save_preset_button.clicked.connect(self._on_save_preset_clicked)
-        self._delete_preset_button = QPushButton(tr("main_window.presets.delete_button"), message_section)
-        self._delete_preset_button.setProperty("variant", "ghost")
-        self._delete_preset_button.clicked.connect(self._on_delete_preset_clicked)
-        presets_row.addWidget(self._presets_combo)
-        presets_row.addWidget(self._load_preset_button)
-        presets_row.addWidget(self._save_preset_button)
-        presets_row.addWidget(self._delete_preset_button)
-        message_layout.addLayout(presets_row)
 
-        self._message_card = _card(tr("main_window.campaign_page.message_card"), message_section)
+        self._message_card = _card(
+            tr("main_window.campaign_page.message_card"), message_section, actions=(self._templates_menu,)
+        )
         left.addWidget(self._message_card)
         self._attachments_card = _card(tr("main_window.campaign_page.attachments_card"), self._attachments_widget)
         left.addWidget(self._attachments_card)
@@ -1541,149 +1497,172 @@ class MainWindow(QMainWindow):
         self._message_summary_label.setText(text)
         self._campaign_controls.set_attachment_count(len(attachments))
 
-    # ---- message presets --------------------------------------------------
+    # ---- saved lists and message templates --------------------------------
+    # Internally (code, database) these are still "recipient groups" and
+    # "presets"; the UI calls them saved lists and templates. Both menus
+    # exist twice -- on the Campaign page and in the Campaign Wizard -- and
+    # share these handlers; `wizard` is None for the Campaign page.
 
-    def _refresh_presets_combo(self) -> None:
-        current_id = self._presets_combo.currentData()
-        self._presets_combo.blockSignals(True)
-        self._presets_combo.clear()
-        self._presets_combo.addItem(tr("main_window.presets.placeholder"), None)
-        for preset in presets.list_presets(self._preset_repo):
-            self._presets_combo.addItem(preset.name, preset.id)
-        if current_id is not None:
-            index = self._presets_combo.findData(current_id)
-            if index >= 0:
-                self._presets_combo.setCurrentIndex(index)
-        self._presets_combo.blockSignals(False)
+    def _make_lists_menu(self, target: RecipientWidget, dialog_parent: QWidget) -> SavedItemsMenuButton:
+        button = SavedItemsMenuButton(LISTS_TEXTS)
+        button.save_requested.connect(lambda: self._on_save_group_clicked(target, dialog_parent))
+        button.load_requested.connect(lambda group_id: self._on_load_group_requested(group_id, target, dialog_parent))
+        button.delete_requested.connect(lambda group_id: self._on_delete_group_requested(group_id, dialog_parent))
+        button.set_items(self._saved_group_items())
+        return button
 
-    def _selected_preset(self) -> Optional[Preset]:
-        preset_id = self._presets_combo.currentData()
-        if preset_id is None:
-            return None
-        return self._preset_repo.get_by_id(preset_id)
+    def _make_templates_menu(self, wizard: Optional[CampaignWizardDialog], dialog_parent: QWidget) -> SavedItemsMenuButton:
+        button = SavedItemsMenuButton(TEMPLATES_TEXTS)
+        button.save_requested.connect(lambda: self._on_save_preset_clicked(wizard, dialog_parent))
+        button.load_requested.connect(lambda preset_id: self._on_load_preset_requested(preset_id, wizard, dialog_parent))
+        button.delete_requested.connect(lambda preset_id: self._on_delete_preset_requested(preset_id, dialog_parent))
+        button.set_items(self._saved_preset_items())
+        return button
 
-    def _on_save_preset_clicked(self) -> None:
-        name, ok = QInputDialog.getText(self, tr("main_window.dialogs.save_preset_title"), tr("main_window.dialogs.preset_name_label"))
+    def _saved_group_items(self):
+        return [(group.id, group.name) for group in groups.list_groups(self._group_repo)]
+
+    def _saved_preset_items(self):
+        return [(preset.id, preset.name) for preset in presets.list_presets(self._preset_repo)]
+
+    def _refresh_saved_menus(self) -> None:
+        group_items = self._saved_group_items()
+        preset_items = self._saved_preset_items()
+        lists_menus = [self._lists_menu]
+        templates_menus = [self._templates_menu]
+        if self._campaign_wizard is not None:
+            lists_menus.append(self._wizard_lists_menu)
+            templates_menus.append(self._wizard_templates_menu)
+        for menu in lists_menus:
+            menu.set_items(group_items)
+        for menu in templates_menus:
+            menu.set_items(preset_items)
+
+    def _on_save_preset_clicked(
+        self, wizard: Optional[CampaignWizardDialog] = None, dialog_parent: Optional[QWidget] = None
+    ) -> None:
+        parent = dialog_parent or self
+        name, ok = QInputDialog.getText(parent, tr("main_window.dialogs.save_preset_title"), tr("main_window.dialogs.preset_name_label"))
         if not ok or not name.strip():
             return
-        settings = self._service.settings_repository.load_app_settings()
+        if wizard is None:
+            text, entities = self._message_text, self._message_entities
+            attachments = self._attachments_widget
+            settings = self._service.settings_repository.load_app_settings()
+            min_delay, max_delay = settings.min_delay_seconds, settings.max_delay_seconds
+        else:
+            text, entities = wizard.message()
+            attachments = wizard.attachments_widget
+            min_delay, max_delay = wizard.interval()
         saved = presets.save_preset(
             self._preset_repo,
             name,
-            self._message_text,
-            self._message_entities,
-            [a.path for a in self._attachments_widget.get_attachments()],
-            settings.min_delay_seconds,
-            settings.max_delay_seconds,
+            text,
+            entities,
+            [a.path for a in attachments.get_attachments()],
+            min_delay,
+            max_delay,
         )
-        self._refresh_presets_combo()
-        index = self._presets_combo.findData(saved.id)
-        if index >= 0:
-            self._presets_combo.setCurrentIndex(index)
+        self._refresh_saved_menus()
         self._toast(tr("main_window.dialogs.preset_saved_message", name=saved.name))
 
-    def _on_load_preset_clicked(self) -> None:
-        preset = self._selected_preset()
-        if preset is None:
-            show_error(self, tr("main_window.dialogs.save_preset_title"), tr("main_window.dialogs.no_preset_selected"))
+    def _on_load_preset_requested(
+        self, preset_id: int, wizard: Optional[CampaignWizardDialog] = None, dialog_parent: Optional[QWidget] = None
+    ) -> None:
+        parent = dialog_parent or self
+        preset = self._preset_repo.get_by_id(preset_id)
+        if preset is None:  # deleted in the meantime
+            self._refresh_saved_menus()
             return
         try:
             loaded = presets.load_preset(preset)
         except PresetError as exc:
-            show_error(self, tr("main_window.dialogs.save_preset_title"), str(exc))
+            show_error(parent, tr("main_window.dialogs.save_preset_title"), str(exc))
             return
 
-        self._message_text = loaded.message_text
-        self._message_entities = loaded.message_entities
-        self._attachments_widget.clear()
-        for path in loaded.attachment_paths:
-            self._attachments_widget.add_file(path)
-        if loaded.min_delay_seconds is not None and loaded.max_delay_seconds is not None:
-            settings = self._service.settings_repository.load_app_settings()
-            settings.min_delay_seconds = loaded.min_delay_seconds
-            settings.max_delay_seconds = loaded.max_delay_seconds
-            try:
-                self._service.settings_repository.save_app_settings(settings)
-            except SettingsValidationError:
-                pass  # a stale/out-of-range saved interval must not block loading the rest of the preset
-            else:
-                self._load_settings_into_page(settings)
-                self._campaign_controls.set_interval_summary(settings.min_delay_seconds, settings.max_delay_seconds)
-        self._update_message_preview()
+        has_interval = loaded.min_delay_seconds is not None and loaded.max_delay_seconds is not None
+        if wizard is not None:
+            wizard.set_message(loaded.message_text, loaded.message_entities)
+            attachments = wizard.attachments_widget
+            attachments.clear()
+            for path in loaded.attachment_paths:
+                attachments.add_file(path)
+            if has_interval:
+                wizard.set_interval(loaded.min_delay_seconds, loaded.max_delay_seconds)
+        else:
+            self._message_text = loaded.message_text
+            self._message_entities = loaded.message_entities
+            self._attachments_widget.clear()
+            for path in loaded.attachment_paths:
+                self._attachments_widget.add_file(path)
+            if has_interval:
+                settings = self._service.settings_repository.load_app_settings()
+                settings.min_delay_seconds = loaded.min_delay_seconds
+                settings.max_delay_seconds = loaded.max_delay_seconds
+                try:
+                    self._service.settings_repository.save_app_settings(settings)
+                except SettingsValidationError:
+                    pass  # a stale/out-of-range saved interval must not block loading the rest of the preset
+                else:
+                    self._load_settings_into_page(settings)
+                    self._campaign_controls.set_interval_summary(settings.min_delay_seconds, settings.max_delay_seconds)
+            self._update_message_preview()
 
         if loaded.missing_attachment_names:
             show_error(
-                self,
+                parent,
                 tr("main_window.dialogs.preset_missing_attachments_title"),
                 tr("main_window.dialogs.preset_missing_attachments_message", names=", ".join(loaded.missing_attachment_names)),
             )
 
-    def _on_delete_preset_clicked(self) -> None:
-        preset = self._selected_preset()
+    def _on_delete_preset_requested(self, preset_id: int, dialog_parent: Optional[QWidget] = None) -> None:
+        preset = self._preset_repo.get_by_id(preset_id)
         if preset is None:
-            show_error(self, tr("main_window.dialogs.save_preset_title"), tr("main_window.dialogs.no_preset_selected"))
+            self._refresh_saved_menus()
             return
-        if not confirm_delete_preset(self, preset.name):
+        if not confirm_delete_preset(dialog_parent or self, preset.name):
             return
         presets.delete_preset(self._preset_repo, preset.id)
-        self._refresh_presets_combo()
+        self._refresh_saved_menus()
 
-    # ---- recipient groups ---------------------------------------------------
-
-    def _refresh_groups_combo(self) -> None:
-        current_id = self._groups_combo.currentData()
-        self._groups_combo.blockSignals(True)
-        self._groups_combo.clear()
-        self._groups_combo.addItem(tr("main_window.groups.placeholder"), None)
-        for group in groups.list_groups(self._group_repo):
-            self._groups_combo.addItem(group.name, group.id)
-        if current_id is not None:
-            index = self._groups_combo.findData(current_id)
-            if index >= 0:
-                self._groups_combo.setCurrentIndex(index)
-        self._groups_combo.blockSignals(False)
-
-    def _selected_group(self) -> Optional[RecipientGroup]:
-        group_id = self._groups_combo.currentData()
-        if group_id is None:
-            return None
-        return self._group_repo.get_by_id(group_id)
-
-    def _on_save_group_clicked(self) -> None:
-        self._recipient_widget.flush()
-        name, ok = QInputDialog.getText(self, tr("main_window.dialogs.save_group_title"), tr("main_window.dialogs.group_name_label"))
+    def _on_save_group_clicked(
+        self, target: Optional[RecipientWidget] = None, dialog_parent: Optional[QWidget] = None
+    ) -> None:
+        target = target or self._recipient_widget
+        target.flush()
+        name, ok = QInputDialog.getText(
+            dialog_parent or self, tr("main_window.dialogs.save_group_title"), tr("main_window.dialogs.group_name_label")
+        )
         if not ok or not name.strip():
             return
-        saved = groups.save_group(
-            self._group_repo, name, self._recipient_widget.get_text(), self._recipient_widget.name_overrides()
-        )
-        self._refresh_groups_combo()
-        index = self._groups_combo.findData(saved.id)
-        if index >= 0:
-            self._groups_combo.setCurrentIndex(index)
+        saved = groups.save_group(self._group_repo, name, target.get_text(), target.name_overrides())
+        self._refresh_saved_menus()
         self._toast(tr("main_window.dialogs.group_saved_message", name=saved.name))
 
-    def _on_load_group_clicked(self) -> None:
-        group = self._selected_group()
+    def _on_load_group_requested(
+        self, group_id: int, target: Optional[RecipientWidget] = None, dialog_parent: Optional[QWidget] = None
+    ) -> None:
+        target = target or self._recipient_widget
+        group = self._group_repo.get_by_id(group_id)
         if group is None:
-            show_error(self, tr("main_window.dialogs.save_group_title"), tr("main_window.dialogs.no_group_selected"))
+            self._refresh_saved_menus()
             return
         try:
             loaded = groups.load_group(group)
         except RecipientGroupError as exc:
-            show_error(self, tr("main_window.dialogs.save_group_title"), str(exc))
+            show_error(dialog_parent or self, tr("main_window.dialogs.save_group_title"), str(exc))
             return
-        self._recipient_widget.set_text_with_names(loaded.recipients_text, loaded.name_overrides)
+        target.set_text_with_names(loaded.recipients_text, loaded.name_overrides)
 
-    def _on_delete_group_clicked(self) -> None:
-        group = self._selected_group()
+    def _on_delete_group_requested(self, group_id: int, dialog_parent: Optional[QWidget] = None) -> None:
+        group = self._group_repo.get_by_id(group_id)
         if group is None:
-            show_error(self, tr("main_window.dialogs.save_group_title"), tr("main_window.dialogs.no_group_selected"))
+            self._refresh_saved_menus()
             return
-        if not confirm_delete_group(self, group.name):
+        if not confirm_delete_group(dialog_parent or self, group.name):
             return
         groups.delete_group(self._group_repo, group.id)
-        self._refresh_groups_combo()
+        self._refresh_saved_menus()
 
     # ---- campaign wizard ---------------------------------------------------
 
@@ -1693,6 +1672,10 @@ class MainWindow(QMainWindow):
         wizard_recipients.pick_chats_requested.connect(
             lambda: self._on_pick_chats_requested(wizard_recipients, dialog)
         )
+        self._wizard_lists_menu = self._make_lists_menu(wizard_recipients, dialog)
+        wizard_recipients.add_action_widget(self._wizard_lists_menu)
+        self._wizard_templates_menu = self._make_templates_menu(dialog, dialog)
+        dialog.add_message_action(self._wizard_templates_menu)
         self._campaign_wizard = dialog
         wizard_recipients.set_known_categories(self._cached_categories())
         self._update_pick_chats_enabled()

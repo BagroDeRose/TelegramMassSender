@@ -57,19 +57,27 @@ STRINGS: Dict[str, Dict[str, str]] = {
     "main_window.campaign_page.title": {"ru": "Кампания", "en": "Campaign"},
     "main_window.campaign_page.subtitle": {"ru": "Создайте и запустите рассылку в Telegram", "en": "Create and launch a Telegram campaign"},
     "main_window.campaign_page.recipients_card": {"ru": "Получатели", "en": "Recipients"},
-    "main_window.groups.placeholder": {"ru": "Выберите группу…", "en": "Choose a group…"},
-    "main_window.groups.load_button": {"ru": "Загрузить", "en": "Load"},
-    "main_window.groups.label": {"ru": "Группа:", "en": "Group:"},
-    "main_window.groups.save_button": {"ru": "Сохранить как…", "en": "Save as…"},
+    # "Saved lists" -- recipient groups in code and in the database.
+    "main_window.lists.button": {"ru": "Списки", "en": "Lists"},
+    "main_window.lists.tooltip": {
+        "ru": "Сохранённые списки получателей. Сохраните текущий список под своим названием, чтобы в следующий раз загрузить его одним щелчком, а не вставлять заново. Хранятся только на этом компьютере.",
+        "en": "Saved recipient lists. Save the current list under a name to load it again in one click next time instead of pasting it. Kept on this computer only.",
+    },
+    "main_window.lists.save_action": {"ru": "Сохранить текущий список…", "en": "Save current list…"},
+    "main_window.lists.load_menu": {"ru": "Загрузить", "en": "Load"},
+    "main_window.lists.delete_menu": {"ru": "Удалить…", "en": "Delete…"},
+    "main_window.lists.empty": {
+        "ru": "Сохранённых списков пока нет — загружать и удалять нечего",
+        "en": "No saved lists yet — nothing to load or delete",
+    },
     "main_window.groups.delete_button": {"ru": "Удалить", "en": "Delete"},
-    "main_window.dialogs.save_group_title": {"ru": "Сохранить группу", "en": "Save group"},
-    "main_window.dialogs.group_name_label": {"ru": "Название группы:", "en": "Group name:"},
-    "main_window.dialogs.group_saved_message": {"ru": "Группа «{name}» сохранена.", "en": "Group “{name}” saved."},
-    "main_window.dialogs.no_group_selected": {"ru": "Сначала выберите группу в списке.", "en": "First select a group from the list."},
-    "main_window.dialogs.delete_group_title": {"ru": "Удалить группу?", "en": "Delete group?"},
+    "main_window.dialogs.save_group_title": {"ru": "Сохранить список", "en": "Save list"},
+    "main_window.dialogs.group_name_label": {"ru": "Название списка:", "en": "List name:"},
+    "main_window.dialogs.group_saved_message": {"ru": "Список «{name}» сохранён.", "en": "List “{name}” saved."},
+    "main_window.dialogs.delete_group_title": {"ru": "Удалить список?", "en": "Delete list?"},
     "main_window.dialogs.delete_group_message": {
-        "ru": "Группа «{name}» будет удалена без возможности восстановления. Продолжить?",
-        "en": "The group “{name}” will be permanently deleted. Continue?",
+        "ru": "Сохранённый список «{name}» будет удалён без возможности восстановления. Продолжить?",
+        "en": "The saved list “{name}” will be permanently deleted. Continue?",
     },
     "main_window.campaign_page.open_editor_button": {"ru": "Открыть редактор", "en": "Open editor"},
     "main_window.campaign_page.open_editor_tooltip": {
@@ -84,21 +92,29 @@ STRINGS: Dict[str, Dict[str, str]] = {
     "main_window.campaign_page.preview_card": {"ru": "Предпросмотр", "en": "Preview"},
     "main_window.campaign_page.message_summary": {"ru": "Символов: {chars}", "en": "{chars} characters"},
     "main_window.campaign_page.message_empty": {"ru": "Текст ещё не написан", "en": "No text yet"},
-    "main_window.presets.placeholder": {"ru": "Выберите шаблон…", "en": "Choose a preset…"},
-    "main_window.presets.load_button": {"ru": "Загрузить", "en": "Load"},
-    "main_window.presets.label": {"ru": "Шаблон:", "en": "Preset:"},
-    "main_window.presets.save_button": {"ru": "Сохранить как…", "en": "Save as…"},
+    # "Templates" -- presets in code and in the database.
+    "main_window.templates.button": {"ru": "Шаблоны", "en": "Templates"},
+    "main_window.templates.tooltip": {
+        "ru": "Шаблоны сообщений: текст с оформлением, вложения и интервал отправки. Сохраните сообщение, чтобы использовать его в следующих кампаниях. Хранятся только на этом компьютере.",
+        "en": "Message templates: formatted text, attachments and the sending interval. Save a message to reuse it in later campaigns. Kept on this computer only.",
+    },
+    "main_window.templates.save_action": {"ru": "Сохранить текущее сообщение…", "en": "Save current message…"},
+    "main_window.templates.load_menu": {"ru": "Загрузить", "en": "Load"},
+    "main_window.templates.delete_menu": {"ru": "Удалить…", "en": "Delete…"},
+    "main_window.templates.empty": {
+        "ru": "Сохранённых шаблонов пока нет — загружать и удалять нечего",
+        "en": "No saved templates yet — nothing to load or delete",
+    },
     "main_window.presets.delete_button": {"ru": "Удалить", "en": "Delete"},
-    "main_window.dialogs.save_preset_title": {"ru": "Сохранить шаблон", "en": "Save preset"},
-    "main_window.dialogs.preset_name_label": {"ru": "Название шаблона:", "en": "Preset name:"},
-    "main_window.dialogs.preset_saved_message": {"ru": "Шаблон «{name}» сохранён.", "en": "Preset “{name}” saved."},
-    "main_window.dialogs.no_preset_selected": {"ru": "Сначала выберите шаблон в списке.", "en": "First select a preset from the list."},
-    "main_window.dialogs.delete_preset_title": {"ru": "Удалить шаблон?", "en": "Delete preset?"},
-    "main_window.dialogs.delete_preset_message": {"ru": "Шаблон «{name}» будет удалён без возможности восстановления. Продолжить?", "en": "The preset “{name}” will be permanently deleted. Continue?"},
+    "main_window.dialogs.save_preset_title": {"ru": "Сохранить шаблон", "en": "Save template"},
+    "main_window.dialogs.preset_name_label": {"ru": "Название шаблона:", "en": "Template name:"},
+    "main_window.dialogs.preset_saved_message": {"ru": "Шаблон «{name}» сохранён.", "en": "Template “{name}” saved."},
+    "main_window.dialogs.delete_preset_title": {"ru": "Удалить шаблон?", "en": "Delete template?"},
+    "main_window.dialogs.delete_preset_message": {"ru": "Шаблон «{name}» будет удалён без возможности восстановления. Продолжить?", "en": "The template “{name}” will be permanently deleted. Continue?"},
     "main_window.dialogs.preset_missing_attachments_title": {"ru": "Вложения не найдены", "en": "Attachments not found"},
     "main_window.dialogs.preset_missing_attachments_message": {
         "ru": "Следующие файлы из шаблона больше не найдены и не были добавлены: {names}",
-        "en": "The following files from the preset could no longer be found and were not added: {names}",
+        "en": "The following files from the template could no longer be found and were not added: {names}",
     },
     "main_window.campaign_page.preview_name_label": {"ru": "Пример имени для {{name}}:", "en": "Example name for {{name}}:"},
     "main_window.campaign_page.preview_name_default": {"ru": "Александр", "en": "Alex"},
@@ -278,8 +294,8 @@ STRINGS: Dict[str, Dict[str, str]] = {
     },
     "main_window.settings.debug_logging_checkbox": {"ru": "Расширенное логирование (для диагностики)", "en": "Verbose logging (for diagnostics)"},
     "main_window.settings.reset_hint": {
-        "ru": "Вернёт все настройки к значениям по умолчанию. Аккаунты, отчёты и шаблоны не затрагиваются.",
-        "en": "Returns every setting to its default. Accounts, reports and presets are not touched.",
+        "ru": "Вернёт все настройки к значениям по умолчанию. Аккаунты, отчёты, шаблоны и сохранённые списки не затрагиваются.",
+        "en": "Returns every setting to its default. Accounts, reports, templates and saved lists are not touched.",
     },
     "main_window.settings.reset_settings_button": {"ru": "Сбросить настройки приложения", "en": "Reset application settings"},
     "main_window.settings.diagnostics_card": {"ru": "Диагностика", "en": "Diagnostics"},
@@ -864,13 +880,13 @@ STRINGS: Dict[str, Dict[str, str]] = {
 
     # ---- app/campaign/presets.py -------------------------------------------
     "presets.untitled_name": {"ru": "Без названия", "en": "Untitled"},
-    "presets.error.corrupted": {"ru": "Не удалось прочитать сохранённый шаблон (повреждённые данные)", "en": "Couldn't read the saved preset (corrupted data)"},
+    "presets.error.corrupted": {"ru": "Не удалось прочитать сохранённый шаблон (повреждённые данные)", "en": "Couldn't read the saved template (corrupted data)"},
 
     # ---- app/recipients/groups.py -------------------------------------------
     "recipient_groups.untitled_name": {"ru": "Без названия", "en": "Untitled"},
     "recipient_groups.error.corrupted": {
-        "ru": "Не удалось прочитать сохранённую группу (повреждённые данные)",
-        "en": "Couldn't read the saved group (corrupted data)",
+        "ru": "Не удалось прочитать сохранённый список (повреждённые данные)",
+        "en": "Couldn't read the saved list (corrupted data)",
     },
 
     # ---- app/diagnostics.py --------------------------------------------------

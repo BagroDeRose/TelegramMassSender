@@ -344,6 +344,9 @@ def stylesheet_for(theme: str) -> str:
         "space_md": SPACE_MD,
         "space_lg": SPACE_LG,
         "space_xl": SPACE_XL,
+        # Right padding of a menu button: its painted chevron (app/ui/saved_menu.py)
+        # plus a gap on either side.
+        "menu_chevron_room": SPACE_SM + ICON_SIZE_SM + SPACE_MD,
         "radius_sm": RADIUS_SM,
         "radius_md": RADIUS_MD,
         "radius_lg": RADIUS_LG,
