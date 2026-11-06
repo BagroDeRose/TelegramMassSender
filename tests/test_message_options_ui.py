@@ -302,3 +302,21 @@ def _russian():
     set_language(LANGUAGE_RU)
     yield
     set_language(LANGUAGE_RU)
+
+
+async def test_wizard_options_reach_the_campaign_page(qapp, tmp_path):
+    window = _make_window(tmp_path)
+    wizard = window._build_campaign_wizard()
+    try:
+        wizard.set_message("Смотрите t.me/example", [])
+        wizard._message_options_widget.preview_check.setChecked(True)
+        assert wizard.result_state().message_options.link_preview.url == "https://t.me/example"
+        wizard.recipient_widget.set_text("@someone")
+        with patch.object(wizard, "exec", return_value=1), patch.object(window, "_on_start_requested"):
+            window._campaign_wizard = None
+            with patch.object(window, "_build_campaign_wizard", return_value=wizard):
+                window._on_open_campaign_wizard_clicked()
+        assert window._message_options.link_preview.url == "https://t.me/example"
+        assert window._message_options_widget.preview_check.isChecked()
+    finally:
+        wizard.reject()
