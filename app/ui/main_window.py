@@ -81,6 +81,9 @@ from app.telegram.chat_targets import (
 from app.telegram.exceptions import AccountDeletionError, AccountSwitchBlockedError
 from app.security.secure_storage import SecureStorage
 from app.telegram.service import TelegramService
+from app.telegram.media_sender import build_media_send_plan
+from app.telegram.message_options import DEFAULT_CAPTION_LIMIT, MessageOptions
+from app.telegram.server_info import ServerInfoCache
 from app.telegram.template import expand_name_placeholder
 from app.ui import icons, theme
 from app.ui.account_widget import AccountWidget, account_initials, display_name, status_text_and_variant
@@ -116,6 +119,7 @@ from app.ui.onboarding_dialog import (
 from app.ui.message_editor_dialog import MessageEditorDialog
 from app.ui.message_preview import MessagePreviewWidget
 from app.ui.recipient_widget import RecipientWidget
+from app.ui.message_options_widget import MessageOptionsWidget
 from app.ui.saved_menu import LISTS_TEXTS, TEMPLATES_TEXTS, SavedItemsMenuButton
 from app.ui.sidebar import Sidebar
 from app.ui.stat_card import StatCard
@@ -330,6 +334,14 @@ class MainWindow(QMainWindow):
         # actual editing happens in MessageEditorDialog.
         self._message_text: str = ""
         self._message_entities: List[TypeMessageEntity] = []
+        # Order of text and media, link preview -- saved with a template.
+        self._message_options = MessageOptions()
+        # Caption limit per account and link-preview cards, asked from
+        # Telegram once per session (app.telegram.server_info).
+        self._server_info = ServerInfoCache()
+        self._server_info_pending: set = set()
+        # Taken with _last_campaign_context, so Retry sends the same plan.
+        self._last_campaign_send_options = (MessageOptions(), DEFAULT_CAPTION_LIMIT)
 
         settings = self._service.settings_repository.load_app_settings()
 
@@ -484,6 +496,7 @@ class MainWindow(QMainWindow):
         self._open_editor_button.setText(tr("main_window.campaign_page.open_editor_button"))
         self._open_editor_button.setToolTip(tr("main_window.campaign_page.open_editor_tooltip"))
         self._name_hint_label.setText(tr("main_window.campaign_page.name_placeholder_hint"))
+        self._message_options_widget.retranslate_ui()
         self._preview_name_label.setText(tr("main_window.campaign_page.preview_name_label"))
         self._preview_name_edit.setToolTip(tr("main_window.campaign_page.preview_name_tooltip"))
         # The example name's current *value* is deliberately left alone --
@@ -755,6 +768,13 @@ class MainWindow(QMainWindow):
         self._name_hint_label.setObjectName("helperText")
         self._name_hint_label.setWordWrap(True)
         message_layout.addWidget(self._name_hint_label)
+
+        # How the message goes out: the "two messages" notice with the order
+        # choice, and the link preview -- read off the same send plan the
+        # sender executes.
+        self._message_options_widget = MessageOptionsWidget(message_section)
+        self._message_options_widget.options_changed.connect(self._on_message_options_changed)
+        message_layout.addWidget(self._message_options_widget)
 
 
         self._message_card = _card(
@@ -1476,10 +1496,86 @@ class MainWindow(QMainWindow):
     # ---- message editor / preview --------------------------------------------
 
     def _on_open_editor_clicked(self) -> None:
-        dialog = MessageEditorDialog(self._message_text, self._message_entities, self)
+        dialog = MessageEditorDialog(
+            self._message_text,
+            self._message_entities,
+            self,
+            attachments=self._attachments_widget.get_attachments(),
+            caption_limit=self._current_caption_limit(),
+            options=self._message_options,
+            example_name=self._preview_name_edit.text(),
+        )
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self._message_text, self._message_entities = dialog.result_content()
+            self._set_message_options(dialog.result_options())
             self._update_message_preview()
+
+    def _on_message_options_changed(self) -> None:
+        self._message_options = self._message_options_widget.options()
+        self._update_message_preview()
+
+    def _set_message_options(self, options: MessageOptions) -> None:
+        self._message_options = options
+        self._message_options_widget.set_options(options)
+
+    def _server_info_key(self, account):
+        return (account.id, account.session_name)
+
+    def _current_caption_limit(self) -> int:
+        """The active account's caption limit, once Telegram told us
+        (help.getAppConfig); 1024 until then or without an account."""
+        account = self._active_account()
+        if account is None:
+            return DEFAULT_CAPTION_LIMIT
+        return self._server_info.known_caption_limit(self._server_info_key(account)) or DEFAULT_CAPTION_LIMIT
+
+    def _connected_client(self):
+        account = self._active_account()
+        account_manager = self._service.account_manager
+        if account is None or account_manager is None:
+            return None
+        client = account_manager.get_active_client(account.session_name)
+        # `is True`: Telethon and the demo client answer a real bool.
+        if client is None or client.is_connected() is not True:
+            return None
+        return client
+
+    def _ensure_server_info(self) -> None:
+        """Ask Telegram for the active account's caption limit (once per
+        session) -- it only matters once the message has media; the
+        preview and the notices follow when it arrives."""
+        account = self._active_account()
+        client = self._connected_client()
+        if account is None or client is None:
+            return
+        key = self._server_info_key(account)
+        if self._server_info.known_caption_limit(key) is not None or ("limit", key) in self._server_info_pending:
+            return
+        self._server_info_pending.add(("limit", key))
+
+        async def load() -> None:
+            try:
+                await self._server_info.caption_limit(key, client)
+            finally:
+                self._server_info_pending.discard(("limit", key))
+            self._update_message_preview()
+
+        self._spawn(load(), "лимит подписи")
+
+    def _ensure_link_preview(self, url: str) -> None:
+        client = self._connected_client()
+        if client is None or self._server_info.has_link_preview(url) or ("preview", url) in self._server_info_pending:
+            return
+        self._server_info_pending.add(("preview", url))
+
+        async def load() -> None:
+            try:
+                await self._server_info.link_preview(client, url)
+            finally:
+                self._server_info_pending.discard(("preview", url))
+            self._update_message_preview()
+
+        self._spawn(load(), "превью ссылки")
 
     def _update_message_preview(self) -> None:
         attachments = self._attachments_widget.get_attachments()
@@ -1495,7 +1591,37 @@ class MainWindow(QMainWindow):
         preview_text, preview_entities = expand_name_placeholder(
             self._message_text, self._message_entities, self._preview_name_edit.text()
         )
-        self._message_preview.update_preview(preview_text, preview_entities, attachment_names, attachments)
+        # The same plan the send executes, for the active account's caption
+        # limit and the chosen order/link preview.
+        if attachments:
+            self._ensure_server_info()
+        caption_limit = self._current_caption_limit()
+        plan = build_media_send_plan(
+            attachments,
+            preview_text,
+            preview_entities,
+            options=self._message_options,
+            caption_limit=caption_limit,
+            validate=False,
+        )
+        self._message_options_widget.set_context(
+            self._message_text, self._message_entities, attachments, caption_limit, preview_text, preview_entities
+        )
+        link_info = None
+        if plan.text_link_preview is not None:
+            url = plan.text_link_preview.url
+            link_info = self._server_info.known_link_preview(url)
+            if not self._server_info.has_link_preview(url):
+                self._ensure_link_preview(url)
+        chosen = self._message_options.link_preview.url
+        if chosen and self._server_info.has_link_preview(chosen):
+            info = self._server_info.known_link_preview(chosen)
+            self._message_options_widget.set_large_media_supported(info.has_large_media if info else None)
+        else:
+            self._message_options_widget.set_large_media_supported(None)
+        self._message_preview.update_preview(
+            preview_text, preview_entities, attachment_names, attachments, plan=plan, link_info=link_info
+        )
         self._update_message_summary(attachments)
         self._on_form_state_changed()
 
@@ -1560,10 +1686,12 @@ class MainWindow(QMainWindow):
             attachments = self._attachments_widget
             settings = self._service.settings_repository.load_app_settings()
             min_delay, max_delay = settings.min_delay_seconds, settings.max_delay_seconds
+            options = self._message_options
         else:
             text, entities = wizard.message()
             attachments = wizard.attachments_widget
             min_delay, max_delay = wizard.interval()
+            options = wizard.message_options()
         saved = presets.save_preset(
             self._preset_repo,
             name,
@@ -1572,6 +1700,7 @@ class MainWindow(QMainWindow):
             [a.path for a in attachments.get_attachments()],
             min_delay,
             max_delay,
+            message_options=options,
         )
         self._refresh_saved_menus()
         self._toast(tr("main_window.dialogs.preset_saved_message", name=saved.name))
@@ -1593,6 +1722,7 @@ class MainWindow(QMainWindow):
         has_interval = loaded.min_delay_seconds is not None and loaded.max_delay_seconds is not None
         if wizard is not None:
             wizard.set_message(loaded.message_text, loaded.message_entities)
+            wizard.set_message_options(loaded.message_options)
             attachments = wizard.attachments_widget
             attachments.clear()
             for path in loaded.attachment_paths:
@@ -1602,6 +1732,7 @@ class MainWindow(QMainWindow):
         else:
             self._message_text = loaded.message_text
             self._message_entities = loaded.message_entities
+            self._set_message_options(loaded.message_options)
             self._attachments_widget.clear()
             for path in loaded.attachment_paths:
                 self._attachments_widget.add_file(path)
@@ -1678,6 +1809,7 @@ class MainWindow(QMainWindow):
 
     def _build_campaign_wizard(self) -> CampaignWizardDialog:
         dialog = CampaignWizardDialog(self._service.settings_repository, self)
+        dialog.set_caption_limit(self._current_caption_limit())
         wizard_recipients = dialog.recipient_widget
         wizard_recipients.pick_chats_requested.connect(
             lambda: self._on_pick_chats_requested(wizard_recipients, dialog)
@@ -1707,6 +1839,7 @@ class MainWindow(QMainWindow):
         self._recipient_widget.set_text(result.recipients_text)
         self._message_text = result.message_text
         self._message_entities = result.message_entities
+        self._set_message_options(result.message_options)
         self._attachments_widget.clear()
         for path in result.attachment_paths:
             self._attachments_widget.add_file(path)
@@ -1847,6 +1980,8 @@ class MainWindow(QMainWindow):
         theme.set_status(self._connection_dot, dot_status)
         self._connection_status_label.setText(text)
         self._refresh_diagnostics()
+        if self._attachments_widget.get_attachments():
+            self._ensure_server_info()
 
     def _toast(self, text: str, status: str = "success") -> None:
         """Non-blocking confirmation for a successful, non-critical action."""
@@ -2237,7 +2372,15 @@ class MainWindow(QMainWindow):
         self._update_pick_chats_enabled()
         self._spawn(
             self._start_campaign(
-                account, recipients, text, entities, attachments, rate_limiter, settings.retry_count, recipient_names
+                account,
+                recipients,
+                text,
+                entities,
+                attachments,
+                rate_limiter,
+                settings.retry_count,
+                recipient_names,
+                message_options=self._message_options,
             ),
             "запуск рассылки",
         )
@@ -2302,6 +2445,8 @@ class MainWindow(QMainWindow):
         recipient_names,
         delivered_chat_ids=None,
         resume_steps=None,
+        message_options: Optional[MessageOptions] = None,
+        caption_limit: Optional[int] = None,
     ) -> None:
         account_manager = self._service.account_manager
         assert account_manager is not None
@@ -2318,6 +2463,12 @@ class MainWindow(QMainWindow):
             self._update_pick_chats_enabled()
             return
 
+        message_options = message_options or MessageOptions()
+        if caption_limit is None:
+            # The account's own limit (asked once per session; 1024 if
+            # Telegram can't tell). Retry passes the original run's.
+            caption_limit = await self._server_info.caption_limit(self._server_info_key(account), client)
+
         campaign = CampaignManager(
             client=client,
             recipients=recipients,
@@ -2333,6 +2484,8 @@ class MainWindow(QMainWindow):
             delivered_chat_ids=delivered_chat_ids,
             resume_steps=resume_steps,
             dialog_snapshot=self._dialog_cache.get(self._dialog_cache_key(account)),
+            message_options=message_options,
+            caption_limit=caption_limit,
             # No Qt parent on purpose: with parent=self, Qt's ownership
             # hierarchy would keep every past campaign alive forever as a
             # child of MainWindow. Plain Python refcounting reclaims it as
@@ -2348,6 +2501,7 @@ class MainWindow(QMainWindow):
         # are re-read fresh from current settings at retry time instead,
         # same as a normal Start.
         self._last_campaign_context = (account, text, entities, attachments, recipient_names)
+        self._last_campaign_send_options = (message_options, caption_limit)
         self._campaign_controls.set_report_available(True)
         self._results_export_button.setEnabled(True)
         self._save_report_button.setEnabled(True)
@@ -2602,6 +2756,7 @@ class MainWindow(QMainWindow):
             show_error(self, tr("main_window.dialogs.campaign_title"), tr("main_window.start_error.already_running"))
             return
         account, text, entities, attachments, recipient_names = self._last_campaign_context
+        message_options, caption_limit = self._last_campaign_send_options
         settings = self._service.settings_repository.load_app_settings()
         if not self._confirm_campaign_start(recipients, settings):
             return
@@ -2635,6 +2790,8 @@ class MainWindow(QMainWindow):
                 recipient_names,
                 delivered_chat_ids=delivered_chat_ids,
                 resume_steps=resume_steps,
+                message_options=message_options,
+                caption_limit=caption_limit,
             ),
             "запуск рассылки",
         )

@@ -39,9 +39,11 @@ from telethon.tl.functions.contacts import ResolvePhoneRequest
 from telethon.tl.functions.messages import (
     CheckChatInviteRequest,
     GetDialogFiltersRequest,
+    SendMediaRequest,
     SendMultiMediaRequest,
     UploadMediaRequest,
 )
+from telethon.tl.functions.help import GetAppConfigRequest
 from telethon.tl.types import (
     Channel,
     Chat,
@@ -51,6 +53,7 @@ from telethon.tl.types import (
     ChatInviteAlready,
     ChatInvitePeek,
     InputMediaPhoto,
+    InputMediaWebPage,
     Photo,
     User,
 )
@@ -264,6 +267,17 @@ class MockTelegramClient:
     # raises ValueError for them until the dialogs were fetched (like a
     # user picked by ID whose entity this session never stored).
     uncached_user_ids: set = field(default_factory=set)
+    # link_preview= of every send_message call, in order (False: sent
+    # explicitly without a preview).
+    link_preview_flags: List[Any] = field(default_factory=list)
+    # What help.GetAppConfigRequest returns (a help.AppConfig), or an
+    # exception to raise. None answers with an empty config.
+    app_config: Any = None
+    # What get_me() returns (premium flag for the caption limit).
+    me: Any = None
+
+    async def get_me(self, input_peer: bool = False):
+        return self.me
 
     async def connect(self) -> None:
         self.connected = True
@@ -332,11 +346,12 @@ class MockTelegramClient:
             return self.send_behavior.get(entity.id)
         return self.send_behavior.get(entity)
 
-    async def send_message(self, entity, text, formatting_entities=None):
+    async def send_message(self, entity, text, formatting_entities=None, link_preview=True):
         outcome = self._send_outcome(entity)
         if isinstance(outcome, BaseException):
             raise outcome
         self.sent_messages.append(("message", entity, text, formatting_entities))
+        self.link_preview_flags.append(link_preview)
         return None
 
     async def send_file(self, entity, files, caption=None, formatting_entities=None):
@@ -372,6 +387,18 @@ class MockTelegramClient:
             outcome = self._send_outcome(request.peer)
             if isinstance(outcome, BaseException):
                 raise outcome
+        if isinstance(request, SendMediaRequest) and isinstance(request.media, InputMediaWebPage):
+            # A text message with a chosen link preview (see
+            # app.telegram.media_sender._text_step).
+            outcome = self._send_outcome(request.peer)
+            if isinstance(outcome, BaseException):
+                raise outcome
+            self.sent_messages.append(("webpage", request.peer, request.message, request.entities))
+            return MagicMock()
+        if isinstance(request, GetAppConfigRequest):
+            if isinstance(self.app_config, BaseException):
+                raise self.app_config
+            return self.app_config
         if isinstance(request, GetDialogFiltersRequest):
             if isinstance(self.dialog_filters, BaseException):
                 raise self.dialog_filters

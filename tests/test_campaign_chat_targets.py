@@ -259,7 +259,7 @@ async def test_write_forbidden_reason_differs_for_chats_and_users(qapp):
     client = MockTelegramClient(chats={"some_group": group}, chat_send_behavior={-1000000000011: ChatWriteForbiddenError(request=None)})
     original_send = client.send_message
 
-    async def users_forbidden_too(entity, text, formatting_entities=None):
+    async def users_forbidden_too(entity, text, formatting_entities=None, link_preview=True):
         if entity is not group:
             raise ChatWriteForbiddenError(request=None)
         return await original_send(entity, text, formatting_entities)

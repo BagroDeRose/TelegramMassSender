@@ -57,11 +57,11 @@ from telethon.tl.types import (
 from app.i18n import tr
 from app.logging.logger import get_logger
 from app.telegram.media_sender import (
-    CAPTION_MAX_LENGTH,
     Attachment,
     AttachmentKind,
-    build_send_groups,
+    build_media_send_plan,
 )
+from app.telegram.message_options import DEFAULT_CAPTION_LIMIT, MessageOptions
 
 logger = get_logger()
 
@@ -127,20 +127,24 @@ class SendRequirements:
     message_count: int = 1
 
 
-def send_requirements(text: str, attachments: List[Attachment]) -> SendRequirements:
-    """Mirrors build_media_send_plan's leading-text-vs-caption decision
-    without validating the files (the campaign start already did, and the
-    send itself re-validates)."""
-    text = text or ""
+def send_requirements(
+    text: str,
+    attachments: List[Attachment],
+    options: Optional[MessageOptions] = None,
+    caption_limit: int = DEFAULT_CAPTION_LIMIT,
+) -> SendRequirements:
+    """Read off the send plan itself (build_media_send_plan, without
+    validating the files: the campaign start already did, and the send
+    itself re-validates) -- never a second copy of its caption rule."""
     attachments = attachments or []
-    groups = build_send_groups(attachments)
-    if not groups:
-        return SendRequirements(has_plain_text_message=bool(text), message_count=1 if text else 0)
-    leading_text = bool(text) and len(text) > CAPTION_MAX_LENGTH
+    plan = build_media_send_plan(attachments, text or "", [], options=options, caption_limit=caption_limit, validate=False)
+    separate_text = any(message.kind == "text" for message in plan.messages())
+    if not attachments:
+        return SendRequirements(has_plain_text_message=separate_text, message_count=1 if separate_text else 0)
     return SendRequirements(
-        has_plain_text_message=leading_text,
+        has_plain_text_message=separate_text,
         media_kinds=frozenset(a.kind for a in attachments),
-        message_count=len(attachments) + (1 if leading_text else 0),
+        message_count=len(attachments) + (1 if separate_text else 0),
     )
 
 

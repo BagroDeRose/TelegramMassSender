@@ -231,3 +231,59 @@ def test_presets_persist_across_a_restart(tmp_path):
         assert "Persisted" in names
     finally:
         db2.close()
+
+
+def test_save_and_load_round_trips_the_message_options(tmp_path):
+    from app.telegram.message_options import LinkPreviewOptions, MediaTextOrder, MessageOptions, PreviewSize
+
+    db = Database(db_path=tmp_path / "app.db")
+    try:
+        repo = PresetRepository(db)
+        options = MessageOptions(
+            order=MediaTextOrder.MEDIA_FIRST,
+            link_preview=LinkPreviewOptions(url="https://t.me/example", above_text=True, size=PreviewSize.SMALL),
+        )
+        saved = presets.save_preset(repo, "With options", "t.me/example", [], [], message_options=options)
+        assert presets.load_preset(repo.get_by_id(saved.id)).message_options == options
+    finally:
+        db.close()
+
+
+def test_a_template_saved_before_the_options_existed_has_no_preview(tmp_path):
+    # A database from v2.1.1: the presets table has no message_options
+    # column. Opening it adds the column; the old row keeps NULL there
+    # (nothing is rewritten) and loads with the defaults -- no preview,
+    # text first.
+    import sqlite3
+
+    from app.telegram.message_options import MessageOptions
+
+    path = tmp_path / "old.db"
+    old = sqlite3.connect(path)
+    old.executescript(
+        """CREATE TABLE presets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            message_text TEXT NOT NULL DEFAULT '',
+            message_entities TEXT NOT NULL DEFAULT '[]',
+            attachment_paths TEXT NOT NULL DEFAULT '[]',
+            min_delay_seconds INTEGER,
+            max_delay_seconds INTEGER
+        );
+        INSERT INTO presets (name, message_text) VALUES ('Old', 'Смотрите t.me/example');"""
+    )
+    old.commit()
+    old.close()
+
+    db = Database(db_path=path)
+    try:
+        repo = PresetRepository(db)
+        (row,) = repo.list_all()
+        assert row.message_options is None
+        loaded = presets.load_preset(row)
+        assert loaded.message_text == "Смотрите t.me/example"
+        assert loaded.message_options == MessageOptions()
+        assert loaded.message_options.link_preview.enabled is False
+    finally:
+        db.close()

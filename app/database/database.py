@@ -66,7 +66,11 @@ CREATE TABLE IF NOT EXISTS presets (
     message_entities TEXT NOT NULL DEFAULT '[]',
     attachment_paths TEXT NOT NULL DEFAULT '[]',
     min_delay_seconds INTEGER,
-    max_delay_seconds INTEGER
+    max_delay_seconds INTEGER,
+    -- JSON (app.telegram.message_options.MessageOptions): text/media order
+    -- and link preview. NULL in templates saved before v2.1.2 -- read as
+    -- the defaults (no preview).
+    message_options TEXT
 );
 
 -- Local recipient groups (see app.recipients.groups) -- a named, saved
@@ -119,6 +123,11 @@ class Database:
         existing_columns = {row[1] for row in self._connection.execute("PRAGMA table_info(accounts)")}
         if "local_alias" not in existing_columns:
             self._connection.execute("ALTER TABLE accounts ADD COLUMN local_alias TEXT")
+            self._connection.commit()
+        preset_columns = {row[1] for row in self._connection.execute("PRAGMA table_info(presets)")}
+        if "message_options" not in preset_columns:
+            # Added in v2.1.2. Existing rows keep NULL -- nothing is rewritten.
+            self._connection.execute("ALTER TABLE presets ADD COLUMN message_options TEXT")
             self._connection.commit()
 
     @contextmanager

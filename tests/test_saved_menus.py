@@ -32,8 +32,11 @@ def _action(menu, name):
 
 async def test_the_old_combo_rows_are_gone_and_the_menus_sit_in_the_card_headers(qapp, tmp_path):
     window = _make_window(tmp_path)
-    for card in (window._recipients_card, window._message_card):
-        assert card.findChildren(QComboBox) == []
+    assert window._recipients_card.findChildren(QComboBox) == []
+    # The Message card's only combo boxes are the message options block's
+    # (order, link preview), not the old template row.
+    options_block = window._message_options_widget
+    assert all(options_block.isAncestorOf(combo) for combo in window._message_card.findChildren(QComboBox))
     assert window._lists_menu.parentWidget() is window._recipients_card
     assert window._templates_menu.parentWidget() is window._message_card
     window.show()

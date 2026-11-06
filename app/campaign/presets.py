@@ -34,6 +34,7 @@ from telethon.tl.types import (
 
 from app.database.models import Preset
 from app.database.repositories import PresetRepository
+from app.telegram.message_options import MessageOptions
 from app.i18n import tr
 
 # Exactly the entity types app.ui.message_editor.extract_message_content
@@ -104,6 +105,9 @@ class LoadedPreset:
     missing_attachment_names: List[str] = field(default_factory=list)
     min_delay_seconds: Optional[int] = None
     max_delay_seconds: Optional[int] = None
+    # Order of text and media, link preview. A template saved before these
+    # existed loads with the defaults (no preview).
+    message_options: MessageOptions = field(default_factory=MessageOptions)
 
 
 def save_preset(
@@ -114,6 +118,7 @@ def save_preset(
     attachment_paths: List[Path],
     min_delay_seconds: Optional[int] = None,
     max_delay_seconds: Optional[int] = None,
+    message_options: Optional[MessageOptions] = None,
 ) -> Preset:
     display_name = name.strip() or tr("presets.untitled_name")
     return repo.create(
@@ -123,6 +128,7 @@ def save_preset(
         _serialize_paths(attachment_paths),
         min_delay_seconds,
         max_delay_seconds,
+        (message_options or MessageOptions()).to_json(),
     )
 
 
@@ -150,4 +156,5 @@ def load_preset(preset: Preset) -> LoadedPreset:
         missing_attachment_names=missing,
         min_delay_seconds=preset.min_delay_seconds,
         max_delay_seconds=preset.max_delay_seconds,
+        message_options=MessageOptions.from_json(preset.message_options),
     )

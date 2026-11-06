@@ -171,7 +171,7 @@ async def test_structured_flood_wait_event_fires(qapp, caplog):
 
     client = MockTelegramClient()
 
-    async def send_with_floodwait(entity, text, formatting_entities=None):
+    async def send_with_floodwait(entity, text, formatting_entities=None, link_preview=True):
         raise make_flood_wait(1)
 
     client.send_message = send_with_floodwait
@@ -209,7 +209,7 @@ async def test_all_permanent_error_categories_are_terminal_not_retried(qapp, beh
     # blocks the account, or a chat where writing is forbidden).
     client = MockTelegramClient()
 
-    async def failing_send(entity, text, formatting_entities=None):
+    async def failing_send(entity, text, formatting_entities=None, link_preview=True):
         raise PERMANENT_ERROR_FACTORIES[behavior]()
 
     client.send_message = failing_send
@@ -228,7 +228,7 @@ async def test_transient_error_retries_then_succeeds(qapp):
     manager, client = make_manager(["alice"], client=client, max_retries=3, delay=0.01)
 
     # Force the first send attempt to fail with a transient error, then succeed.
-    async def flaky_send_message(entity, text, formatting_entities=None):
+    async def flaky_send_message(entity, text, formatting_entities=None, link_preview=True):
         calls["n"] += 1
         if calls["n"] < 2:
             raise ConnectionError("blip")
@@ -245,7 +245,7 @@ async def test_transient_error_retries_then_succeeds(qapp):
 async def test_transient_error_exhausts_retries(qapp):
     client = MockTelegramClient()
 
-    async def always_fails(entity, text, formatting_entities=None):
+    async def always_fails(entity, text, formatting_entities=None, link_preview=True):
         raise ConnectionError("down")
 
     client.send_message = always_fails
@@ -262,7 +262,7 @@ async def test_floodwait_pauses_campaign_and_requeues_item(qapp):
     client = MockTelegramClient()
     calls = {"n": 0}
 
-    async def send_with_floodwait(entity, text, formatting_entities=None):
+    async def send_with_floodwait(entity, text, formatting_entities=None, link_preview=True):
         calls["n"] += 1
         if calls["n"] == 1:
             raise make_flood_wait(1)

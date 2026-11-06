@@ -16,7 +16,7 @@ A Windows desktop application that sends personal Telegram messages to a list of
 
 TelegramMassSender sends the *same message, personally, to each recipient in a list* — one Telegram message per recipient, from the user's own account, the way you'd write to each of them individually. Recipients are people, and optionally groups, supergroups and channels **the account is already a member of and allowed to post in** — it never joins a chat on its own, and Telegram's restrictions (permissions, slow mode, FloodWait) are respected, never worked around. It is not a bot and not a bulk-marketing tool. It integrates directly with Telegram's native **MTProto** protocol via **Telethon** — not the Bot API — and runs a real async event loop (**qasync**) bridging Qt's UI thread with `asyncio` network I/O.
 
-It supports multiple Telegram accounts, rich text formatting, media/album attachments, per-recipient `{name}` personalization (including from a CSV column), phone-number recipient resolution, a Telegram-style live message preview, saved recipient lists and message templates, an optional step-by-step Campaign Wizard, failed-recipient retry, structured diagnostics, a full Russian/English UI, and campaign reporting — all backed by a 1223-test automated regression suite and a real Windows-packaged build (PyInstaller).
+It supports multiple Telegram accounts, rich text formatting, media/album attachments, per-recipient `{name}` personalization (including from a CSV column), phone-number recipient resolution, a Telegram-style live message preview, saved recipient lists and message templates, an optional step-by-step Campaign Wizard, failed-recipient retry, structured diagnostics, a full Russian/English UI, and campaign reporting — all backed by a 1282-test automated regression suite and a real Windows-packaged build (PyInstaller).
 
 ## Key Features
 
@@ -27,6 +27,8 @@ It supports multiple Telegram accounts, rich text formatting, media/album attach
 - A **From my chats…** picker (Campaign page and Campaign Wizard) lists every dialog of the active account — people, bots, groups, supergroups, forums, channels — newest first, with type segments, a Telegram-folder filter, an archive toggle and search by name/title/@username. Dialogs it can't write to are shown muted with the reason; ones already in the list are marked and not added twice. Picked dialogs go in as `@username`, or as their ID when there is none (a person added by ID is found through the account's dialogs at send time). It only reads the dialog and folder lists — no joining, no avatars downloaded — once per session per account (Refresh and account changes read them again), and a campaign's dialogs warm-up starts from that same list.
 - Per-recipient name personalization via a `{name}` placeholder, including inside rich-text formatting; for a group/channel it becomes the chat's title; a CSV-supplied name takes priority over Telegram's own name for that recipient.
 - Rich text editor (bold/italic/underline/strikethrough/spoiler/monospace/code block/links/emoji) with a live Telegram-style message preview, including a personalization preview against an example name.
+- One send plan for the preview and the send: the preview draws every message that will actually go out, in order. A text longer than the account's caption limit (Telegram's own value for the account: 1024, more with Premium; counted in UTF-16 like Telegram) goes as its own message, with a calm notice and a choice of order (text first or the photo first); a hint appears when a long `{name}` could push it over.
+- Link previews under your control: off by default, so a mass send looks the same for everyone; for one link a switch, for several a list (plain URLs and links under text), above or below the text, large or small image. Unavailable, with the reason, when the text is a caption. The preview shows the card (title and description from Telegram when the account is connected).
 - Saved recipient lists and message templates (text, formatting, attachments, optionally the sending interval), each behind one compact **Lists ▾** / **Templates ▾** menu in its card's header — on the Campaign page and in the Campaign Wizard: save the current one by name, load or delete a saved one.
 - Recipient counts that use what the account's dialogs already told the app: an `@username` found among the dialogs read by **From my chats…** counts as a person, a bot or a group/channel; one not seen there yet gets its own "@username" count, since its type is only known when sending. The counts follow a refresh and an account change.
 - An optional step-by-step Campaign Wizard (Recipients → Message → Attachments → Sending options → Preview → Confirmation) alongside the existing fast single-page workflow.
@@ -61,6 +63,14 @@ It supports multiple Telegram accounts, rich text formatting, media/album attach
 Attachments are sent in the order shown, and that order can be changed by dragging a tile onto the slot it should occupy or with the explicit Move earlier / Move later controls (Ctrl+← / Ctrl+→ from the keyboard):
 
 ![Attachment ordering](docs/images/attachment-ordering.png)
+
+A text too long for a photo caption: the preview shows the two messages that will be sent, the notice says why, and the order can be chosen:
+
+![Caption limit and split](docs/images/caption-split.png)
+
+Link preview: chosen link, position and image size; the preview shows the card where it will be:
+
+![Link preview](docs/images/link-preview.png)
 
 *All screenshots use synthetic demo data — no real Telegram accounts, recipients, or personal information.*
 
@@ -112,7 +122,7 @@ A few parts of this project involved real engineering problems, not just wiring 
 1. **Qt + asyncio integration (`qasync`).** Qt owns its own event loop; Telethon needs `asyncio`. Running both in the same thread — without blocking the UI during a network call or a multi-minute FloodWait — is a real event-loop integration problem, not just `async def` syntax.
 2. **Telethon / MTProto integration.** Direct use of Telegram's native protocol client (not the simpler Bot API), including manual entity resolution and album/media construction.
 3. **UTF-16 entity offset handling.** Telegram's rich-text formatting offsets are defined in UTF-16 code units, not Python string indices. Splicing a variable-length `{name}` into already-formatted text — correctly, across astral-plane emoji, without corrupting bold/link boundaries — required working in UTF-16 surrogate-pair space.
-4. **Media/album batching under Telegram's constraints.** Photos/videos are grouped into albums of up to 10, and a message decides at the 1024-character boundary whether text becomes a caption or its own leading message — without ever silently dropping the user's text.
+4. **Media/album batching under Telegram's constraints.** Photos/videos are grouped into albums of up to 10, and the account's caption limit (help.getAppConfig, by Premium status, UTF-16 length) decides whether text becomes a caption or its own message — without ever silently dropping the user's text. One send plan is executed by the sender and drawn by the preview, so the two can't disagree.
 5. **FloodWait-aware campaign handling.** Telegram's own rate-limit signal pauses the queue, surfaces the wait time, and requires an explicit manual resume — the app never auto-retries around it.
 6. **Duplicate campaign-start race protection.** A synchronous guard closes a real TOCTOU gap between a button click and an awaited network call that could otherwise let two independent send loops run over the same recipient list. Found via code review, reproduced with a failing test, then fixed.
 7. **Windows DPAPI credential protection.** API credentials are encrypted at rest via the real Windows `CryptProtectData` API, tied to the OS user account — no custom cryptography, no key management burden.
@@ -136,7 +146,7 @@ Ordinary parts — not oversold: the settings page is a straightforward form bou
 pytest tests/ -v
 ```
 
-**1223 automated tests, 0 failures** (pytest + pytest-asyncio), run against a hand-built mock Telegram client (`tests/mocks/mock_telegram_client.py`) — no real Telegram account or network access needed. Coverage includes:
+**1282 automated tests, 0 failures** (pytest + pytest-asyncio), run against a hand-built mock Telegram client (`tests/mocks/mock_telegram_client.py`) — no real Telegram account or network access needed. Coverage includes:
 
 - Recipient parsing and import (all supported formats including phone numbers and malformed input, TXT import, and content-based CSV column/name detection).
 - Rich-text formatting and UTF-16 entity offset correctness, including the `{name}` placeholder (typed, CSV-supplied, and at message lengths well past Telegram's own text limit).
@@ -164,7 +174,7 @@ This is distinct from **manual packaged-build validation**: before each release,
 
 This project's requirements, architecture, and scope were defined and directed by the developer (BagroDeRose). Implementation was done with extensive AI assistance — primarily **Claude Code** — used for writing code, debugging, writing tests, code review, and documentation, always under human direction and verification rather than as unsupervised generation:
 
-- Every change is covered by the automated test suite (1223 tests, pytest/pytest-asyncio, mocked Telegram client).
+- Every change is covered by the automated test suite (1282 tests, pytest/pytest-asyncio, mocked Telegram client).
 - Bug fixes follow a reproduce → understand root cause → write a failing test → fix → regression test cycle, not guesswork.
 - A dedicated code review and security/privacy audit was performed before each public release (secret storage, log contents, session handling, git history sanitization).
 - The packaged Windows `.exe` is manually launched and validated before release — a successful build is not treated as sufficient on its own.
@@ -215,6 +225,7 @@ Latest release: **[v2.1.1](https://github.com/BagroDeRose/TelegramMassSender/rel
 - [Как добавить получателей](#как-добавить-получателей)
 - [Сохранённые списки получателей](#сохранённые-списки-получателей)
 - [Создание сообщения](#создание-сообщения)
+  - [Подпись к фото и превью ссылок](#подпись-к-фото-и-превью-ссылок)
 - [Автоматическая подстановка имени ({name})](#автоматическая-подстановка-имени-name)
 - [Шаблоны сообщений](#шаблоны-сообщений)
 - [Мастер кампании](#мастер-кампании)
@@ -586,6 +597,30 @@ https://t.me/user3
 
 > В текущей версии нет отдельной кнопки «Тестовая отправка». Чтобы заранее проверить, как сообщение и вложения будут выглядеть на практике, добавьте в список получателей свой второй Telegram-аккаунт (или доверенного знакомого) первым — и запустите обычную рассылку на этот единственный адрес, прежде чем вставлять в список всех остальных получателей.
 
+#### Подпись к фото и превью ссылок
+
+**Подпись к фото.** Текст к фото или файлу Telegram отправляет подписью, но у подписи есть предел — для обычного аккаунта 1 024 символа, у Premium больше (программа узнаёт лимит вашего аккаунта у самого Telegram; символы считаются так же, как в Telegram, — эмодзи может занимать два). Если текст длиннее:
+
+- в карточке «Сообщение» и в редакторе появляется спокойное предупреждение: *«Текст длиннее подписи к фото (1 487 из 1 024) — фото и текст уйдут двумя сообщениями»*;
+- там же можно выбрать порядок: **«Сначала текст, потом фото»** (как раньше) или **«Сначала фото, потом текст»**;
+- предпросмотр показывает ровно те сообщения, которые уйдут, и в том же порядке;
+- счётчик символов в редакторе при вложениях показывает лимит подписи.
+
+Если в тексте есть `{name}`, длина считается с примером имени; если с длинным именем получателя текст может не поместиться, программа подскажет об этом.
+
+![Подпись к фото и разделение](docs/images/caption-split.png)
+
+**Превью ссылки.** Когда в тексте есть ссылки (обычные адреса или ссылки под текстом, например «Канал» → `t.me/...`), в карточке «Сообщение» и в редакторе появляется блок **«Превью ссылки»**:
+
+- по умолчанию превью **выключено** — при рассылке сообщение выглядит одинаково у всех получателей;
+- одна ссылка — переключатель **«Показывать превью ссылки»**; несколько — список **«Без превью / ссылка 1 / ссылка 2…»** (виден текст ссылки и домен);
+- **«Положение: Под текстом / Над текстом»** и **«Изображение: Как решит Telegram / Крупное / Мелкое»**;
+- если текст уходит подписью к фото, превью невозможно — блок неактивен с пояснением «В подписи к фото превью ссылок не показываются».
+
+Предпросмотр показывает карточку превью там, где она будет: заголовок и описание страницы, если аккаунт подключён (картинки не загружаются), иначе — домен. Настройки порядка и превью сохраняются в шаблоне и используются при «Повторить ошибки». Шаблоны, сохранённые раньше, открываются с выключенным превью.
+
+![Превью ссылки](docs/images/link-preview.png)
+
 #### Добавление файлов, фото и видео
 
 Под текстовым полем — карточка **«Вложения»**:
@@ -606,7 +641,7 @@ https://t.me/user3
 
 С клавиатуры: перейдите на плитку клавишей Tab и нажимайте **Ctrl+←** или **Ctrl+→**. Обычные стрелки без Ctrl только перемещают фокус между плитками и порядок не меняют.
 
-**Пример подготовки сообщения:** в поле сообщения написан текст «Добрый день! Высылаю презентацию, ознакомьтесь, пожалуйста.», в карточке «Вложения» добавлен файл `presentation.pptx` — при отправке получатель увидит текст и файл вместе (если текст короткий) либо текст отдельным сообщением, а сразу за ним — файл (если текст слишком длинный для подписи к файлу — программа сама разделит их на два сообщения, но текст никогда не потеряется).
+**Пример подготовки сообщения:** в поле сообщения написан текст «Добрый день! Высылаю презентацию, ознакомьтесь, пожалуйста.», в карточке «Вложения» добавлен файл `presentation.pptx` — при отправке получатель увидит текст и файл вместе (если текст короткий) либо текст и файл двумя сообщениями (если текст длиннее подписи — программа сама разделит их и заранее покажет это в предпросмотре; порядок можно выбрать, см. [«Подпись к фото и превью ссылок»](#подпись-к-фото-и-превью-ссылок)). Текст никогда не теряется.
 
 ---
 
@@ -886,7 +921,7 @@ build_windows.bat
 .venv\Scripts\python -m pytest tests/ -v
 ```
 
-На момент подготовки этой версии README полный набор тестов проходит целиком: **1223 тестов, 0 ошибок** (pytest + pytest-asyncio). Тесты используют собственный мок Telegram-клиента (`tests/mocks/mock_telegram_client.py`) вместо настоящего сервера Telegram, поэтому для их запуска не нужен ни интернет, ни реальный Telegram-аккаунт. Тесты также запускаются автоматически в GitHub Actions при каждом push/PR — см. значок «Tests» в начале README.
+На момент подготовки этой версии README полный набор тестов проходит целиком: **1282 тестов, 0 ошибок** (pytest + pytest-asyncio). Тесты используют собственный мок Telegram-клиента (`tests/mocks/mock_telegram_client.py`) вместо настоящего сервера Telegram, поэтому для их запуска не нужен ни интернет, ни реальный Telegram-аккаунт. Тесты также запускаются автоматически в GitHub Actions при каждом push/PR — см. значок «Tests» в начале README.
 
 #### Технологический стек
 
@@ -912,7 +947,7 @@ Windows-приложение на **Python + PySide6** (Qt для интерфе
 
 #### Как разрабатывался этот проект
 
-Требования, архитектуру и объём функциональности этого проекта определял автор репозитория. AI-инструменты (Claude Code) активно использовались в реализации, отладке, написании тестов, ревью кода и подготовке документации — но под его руководством и с его проверкой на каждом шаге, а не как автономная генерация без контроля. Это не означает, что код не проверялся: каждое изменение сопровождается автоматическими тестами (сейчас это упомянутые выше 1223 тестов на pytest/pytest-asyncio с мок-клиентом Telegram), а исправление ошибок в проекте ведётся по принципу «сначала воспроизвести проблему → понять причину → написать тест → исправить → прогнать регрессионные тесты», а не «на глаз». Перед публикацией репозитория отдельно проведены обзор кода и проверка безопасности/приватности (хранение секретов, содержимое логов, работа с сессиями), а собранный Windows-EXE запускался и проверялся вручную, а не считался готовым сразу по факту успешной сборки.
+Требования, архитектуру и объём функциональности этого проекта определял автор репозитория. AI-инструменты (Claude Code) активно использовались в реализации, отладке, написании тестов, ревью кода и подготовке документации — но под его руководством и с его проверкой на каждом шаге, а не как автономная генерация без контроля. Это не означает, что код не проверялся: каждое изменение сопровождается автоматическими тестами (сейчас это упомянутые выше 1282 тестов на pytest/pytest-asyncio с мок-клиентом Telegram), а исправление ошибок в проекте ведётся по принципу «сначала воспроизвести проблему → понять причину → написать тест → исправить → прогнать регрессионные тесты», а не «на глаз». Перед публикацией репозитория отдельно проведены обзор кода и проверка безопасности/приватности (хранение секретов, содержимое логов, работа с сессиями), а собранный Windows-EXE запускался и проверялся вручную, а не считался готовым сразу по факту успешной сборки.
 
 #### Где на диске хранятся данные пользователя
 

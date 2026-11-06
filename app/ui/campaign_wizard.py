@@ -21,7 +21,7 @@ Campaign/Results pages, identical to what the fast workflow already shows.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import List, Optional
 
@@ -43,10 +43,13 @@ from telethon.tl.types import TypeMessageEntity
 from app.config.settings import MAX_ALLOWED_DELAY_SECONDS, MIN_ALLOWED_DELAY_SECONDS, SettingsValidationError
 from app.database.repositories import SettingsRepository
 from app.i18n import tr
+from app.telegram.media_sender import build_media_send_plan
+from app.telegram.message_options import DEFAULT_CAPTION_LIMIT, MessageOptions
 from app.telegram.template import expand_name_placeholder
 from app.ui.attachments_widget import AttachmentsWidget
 from app.ui.dialogs import show_error
 from app.ui.message_editor_dialog import MessageEditorDialog
+from app.ui.message_options_widget import MessageOptionsWidget
 from app.ui.message_preview import MessagePreviewWidget
 from app.ui.recipient_widget import RecipientWidget
 from app.ui import icons, theme
@@ -79,6 +82,7 @@ class WizardResult:
     message_text: str
     message_entities: List[TypeMessageEntity]
     attachment_paths: List[Path]
+    message_options: MessageOptions = field(default_factory=MessageOptions)
 
 
 class CampaignWizardDialog(QDialog):
@@ -87,6 +91,9 @@ class CampaignWizardDialog(QDialog):
         self._settings_repository = settings_repository
         self._message_text: str = ""
         self._message_entities: List[TypeMessageEntity] = []
+        self._message_options = MessageOptions()
+        # The active account's caption limit (MainWindow sets it).
+        self._caption_limit = DEFAULT_CAPTION_LIMIT
 
         self.setWindowTitle(tr("campaign_wizard.title"))
         self.resize(WIZARD_WIDTH, WIZARD_HEIGHT)
@@ -179,8 +186,27 @@ class CampaignWizardDialog(QDialog):
         self._message_actions = FlowLayout(spacing=SPACE_SM)
         self._message_actions.addWidget(open_button)
         layout.addLayout(self._message_actions)
+        self._message_options_widget = MessageOptionsWidget(page)
+        self._message_options_widget.options_changed.connect(self._on_message_options_changed)
+        layout.addWidget(self._message_options_widget)
         layout.addStretch(1)
         return page
+
+    def message_options(self) -> MessageOptions:
+        return self._message_options
+
+    def set_message_options(self, options: MessageOptions) -> None:
+        self._message_options = options
+        self._message_options_widget.set_options(options)
+        self._update_message_summary()
+
+    def set_caption_limit(self, limit: int) -> None:
+        self._caption_limit = limit
+        self._update_message_summary()
+
+    def _on_message_options_changed(self) -> None:
+        self._message_options = self._message_options_widget.options()
+        self._update_message_summary()
 
     def add_message_action(self, widget: QWidget) -> None:
         """Another control next to "Open editor" (the window's Templates menu)."""
@@ -316,9 +342,19 @@ class CampaignWizardDialog(QDialog):
     # ---- step behavior ---------------------------------------------------------
 
     def _on_open_editor_clicked(self) -> None:
-        dialog = MessageEditorDialog(self._message_text, self._message_entities, self)
+        dialog = MessageEditorDialog(
+            self._message_text,
+            self._message_entities,
+            self,
+            attachments=self._attachments_widget.get_attachments(),
+            caption_limit=self._caption_limit,
+            options=self._message_options,
+            example_name=self._preview_name_edit.text(),
+        )
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self._message_text, self._message_entities = dialog.result_content()
+            self._message_options = dialog.result_options()
+            self._message_options_widget.set_options(self._message_options)
             self._update_message_summary()
 
     def _update_message_summary(self) -> None:
@@ -327,6 +363,19 @@ class CampaignWizardDialog(QDialog):
             self._message_summary_label.setText(snippet)
         else:
             self._message_summary_label.setText(tr("campaign_wizard.message.empty"))
+        # The preview step (and its example name) is built after this one.
+        name_edit = getattr(self, "_preview_name_edit", None)
+        example_text, example_entities = expand_name_placeholder(
+            self._message_text, self._message_entities, name_edit.text() if name_edit is not None else ""
+        )
+        self._message_options_widget.set_context(
+            self._message_text,
+            self._message_entities,
+            self._attachments_widget.get_attachments(),
+            self._caption_limit,
+            example_text,
+            example_entities,
+        )
 
     def _save_sending_options(self) -> bool:
         settings = self._settings_repository.load_app_settings()
@@ -340,14 +389,23 @@ class CampaignWizardDialog(QDialog):
         return True
 
     def _update_preview(self, *_args) -> None:
-        attachment_names = [a.file_name for a in self._attachments_widget.get_attachments()]
-        # Same expand_name_placeholder() the real send path and the
-        # Campaign page's inline preview both call -- never a second,
-        # wizard-only formatting implementation.
+        attachments = self._attachments_widget.get_attachments()
+        attachment_names = [a.file_name for a in attachments]
+        # Same expand_name_placeholder() and send plan the real send path
+        # and the Campaign page's inline preview both use -- never a
+        # second, wizard-only formatting or splitting implementation.
         preview_text, preview_entities = expand_name_placeholder(
             self._message_text, self._message_entities, self._preview_name_edit.text()
         )
-        self._preview_widget.update_preview(preview_text, preview_entities, attachment_names)
+        plan = build_media_send_plan(
+            attachments,
+            preview_text,
+            preview_entities,
+            options=self._message_options,
+            caption_limit=self._caption_limit,
+            validate=False,
+        )
+        self._preview_widget.update_preview(preview_text, preview_entities, attachment_names, attachments, plan=plan)
 
     def _update_confirmation(self) -> None:
         self._confirmation_label.setText(
@@ -372,4 +430,5 @@ class CampaignWizardDialog(QDialog):
             message_text=self._message_text,
             message_entities=self._message_entities,
             attachment_paths=[a.path for a in self._attachments_widget.get_attachments()],
+            message_options=self._message_options,
         )
