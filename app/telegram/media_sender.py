@@ -19,21 +19,31 @@ from typing import Awaitable, Callable, Dict, List, Optional, Tuple
 
 from telethon import TelegramClient
 from telethon import utils as telethon_utils
-from telethon.tl.functions.messages import SendMultiMediaRequest, UploadMediaRequest
+from telethon.tl.functions.messages import SendMediaRequest, SendMultiMediaRequest, UploadMediaRequest
 from telethon.tl.types import (
     InputMediaPhotoExternal,
     InputMediaUploadedDocument,
     InputMediaUploadedPhoto,
+    InputMediaWebPage,
     InputSingleMedia,
     TypeMessageEntity,
 )
 
 from app.logging.logger import get_logger
 from app.telegram.exceptions import AttachmentNotFoundError, AttachmentUnreadableError
+from app.telegram.message_options import (
+    DEFAULT_CAPTION_LIMIT,
+    LinkPreviewOptions,
+    MediaTextOrder,
+    MessageOptions,
+    PreviewSize,
+    effective_link_preview,
+    utf16_len,
+)
 
 logger = get_logger()
 
-CAPTION_MAX_LENGTH = 1024
+CAPTION_MAX_LENGTH = DEFAULT_CAPTION_LIMIT
 TEXT_MESSAGE_MAX_LENGTH = 4096
 MAX_ALBUM_SIZE = 10
 
@@ -194,54 +204,110 @@ def build_send_groups(attachments: List[Attachment]) -> List[SendGroup]:
     return groups
 
 
+@dataclass(frozen=True)
+class PlannedMessage:
+    """One Telegram message the plan sends: a text message ("text") or one
+    attachment group ("media", with its caption if it carries the text)."""
+
+    kind: str
+    text: str = ""
+    entities: Tuple[TypeMessageEntity, ...] = ()
+    group: Optional[SendGroup] = None
+    # Text messages only; None = sent without a preview.
+    link_preview: Optional[LinkPreviewOptions] = None
+
+
 @dataclass
 class MediaSendPlan:
     groups: List[SendGroup] = field(default_factory=list)
     # (text, entities) sent as its own message before any attachment
     # groups -- used when there is no media at all, or when the message
-    # text is too long to fit as a caption.
+    # text is too long to fit as a caption (MediaTextOrder.TEXT_FIRST).
     leading_text: Optional[Tuple[str, List[TypeMessageEntity]]] = None
     # group index -> (caption text, entities) attached to that group's send_file call.
     group_captions: Dict[int, Tuple[str, List[TypeMessageEntity]]] = field(default_factory=dict)
+    # Too long for a caption and MediaTextOrder.MEDIA_FIRST: after the media.
+    trailing_text: Optional[Tuple[str, List[TypeMessageEntity]]] = None
+    # The preview the separate text message gets (None: none, or no such message).
+    text_link_preview: Optional[LinkPreviewOptions] = None
+    caption_limit: int = DEFAULT_CAPTION_LIMIT
+    text_length: int = 0  # UTF-16 units, as Telegram counts
+    caption_overflow: bool = False  # there is media and the text didn't fit as its caption
+    # The text goes as a message of its own, so a link preview can be shown.
+    link_preview_possible: bool = False
+
+    def messages(self) -> List[PlannedMessage]:
+        """Every message, in the order it is sent."""
+        out: List[PlannedMessage] = []
+
+        def text_message(pair) -> PlannedMessage:
+            text, entities = pair
+            return PlannedMessage("text", text, tuple(entities or ()), link_preview=self.text_link_preview)
+
+        if self.leading_text is not None:
+            out.append(text_message(self.leading_text))
+        for index, group in enumerate(self.groups):
+            caption, caption_entities = self.group_captions.get(index, ("", []))
+            out.append(PlannedMessage("media", caption, tuple(caption_entities or ()), group=group))
+        if self.trailing_text is not None:
+            out.append(text_message(self.trailing_text))
+        return out
 
 
 def build_media_send_plan(
     attachments: List[Attachment],
     message_text: str,
     message_entities: List[TypeMessageEntity],
+    options: Optional[MessageOptions] = None,
+    caption_limit: int = DEFAULT_CAPTION_LIMIT,
+    validate: bool = True,
 ) -> MediaSendPlan:
-    for attachment in attachments:
-        attachment.validate_exists()
-        attachment.validate_readable()
+    """The send plan. `validate=False` is for the preview, which draws the
+    plan even for files that have since moved -- the send itself always
+    validates."""
+    if validate:
+        for attachment in attachments:
+            attachment.validate_exists()
+            attachment.validate_readable()
 
+    options = options or MessageOptions()
     groups = build_send_groups(attachments)
     message_text = message_text or ""
     message_entities = message_entities or []
-
-    if not groups:
-        leading = (message_text, message_entities) if message_text else None
-        return MediaSendPlan(groups=[], leading_text=leading, group_captions={})
+    length = utf16_len(message_text)
+    plan = MediaSendPlan(groups=groups, caption_limit=caption_limit, text_length=length)
 
     if not message_text:
-        return MediaSendPlan(groups=groups, leading_text=None, group_captions={})
+        return plan
 
-    if len(message_text) <= CAPTION_MAX_LENGTH:
-        return MediaSendPlan(
-            groups=groups,
-            leading_text=None,
-            group_captions={0: (message_text, message_entities)},
-        )
+    if not groups:
+        plan.leading_text = (message_text, message_entities)
+        plan.link_preview_possible = True
+        plan.text_link_preview = effective_link_preview(message_text, message_entities, options)
+        return plan
 
-    # Too long for a caption: the text is sent as its own message first,
-    # so it is never silently dropped (spec item 20); the media follows
-    # without a caption.
+    if length <= caption_limit:
+        # A caption: Telegram shows no link preview there.
+        plan.group_captions = {0: (message_text, message_entities)}
+        return plan
+
+    # Too long for a caption: the text goes as its own message, never
+    # silently dropped (spec item 20) -- before the media unless the user
+    # chose the media first; the media then carries no caption.
     logger.info(
         "Текст сообщения (%d симв.) превышает лимит подписи (%d) -- "
         "отправляется отдельным сообщением",
-        len(message_text),
-        CAPTION_MAX_LENGTH,
+        length,
+        caption_limit,
     )
-    return MediaSendPlan(groups=groups, leading_text=(message_text, message_entities), group_captions={})
+    plan.caption_overflow = True
+    plan.link_preview_possible = True
+    plan.text_link_preview = effective_link_preview(message_text, message_entities, options)
+    if options.order == MediaTextOrder.MEDIA_FIRST:
+        plan.trailing_text = (message_text, message_entities)
+    else:
+        plan.leading_text = (message_text, message_entities)
+    return plan
 
 
 async def _send_album_with_entities(
@@ -320,17 +386,12 @@ def build_send_steps(client: TelegramClient, entity, plan: MediaSendPlan) -> Lis
     entirely internal to that group's single step and safe to redo."""
     steps: List[SendStep] = []
 
-    if plan.leading_text is not None:
-        text, entities = plan.leading_text
-
-        async def _send_leading_text(text=text, entities=entities) -> None:
-            await client.send_message(entity, text, formatting_entities=entities or None)
-
-        steps.append(_send_leading_text)
-
-    for index, group in enumerate(plan.groups):
-        caption_text, caption_entities = plan.group_captions.get(index, ("", []))
-        files = [str(a.path) for a in group.attachments]
+    for message in plan.messages():
+        if message.kind == "text":
+            steps.append(_text_step(client, entity, message))
+            continue
+        caption_text, caption_entities = message.text, list(message.entities)
+        files = [str(a.path) for a in message.group.attachments]
 
         if len(files) > 1:
 
@@ -354,6 +415,41 @@ def build_send_steps(client: TelegramClient, entity, plan: MediaSendPlan) -> Lis
         steps.append(_send_group)
 
     return steps
+
+
+def _text_step(client: TelegramClient, entity, message: PlannedMessage) -> SendStep:
+    text, entities, preview = message.text, list(message.entities), message.link_preview
+    if preview is None:
+
+        async def _send_text() -> None:
+            # Explicitly without a preview: left to itself, Telegram would
+            # pick the first link and show a preview nobody chose.
+            await client.send_message(entity, text, formatting_entities=entities or None, link_preview=False)
+
+        return _send_text
+
+    async def _send_text_with_preview() -> None:
+        # The chosen link's preview, wherever it is in the text: the text
+        # is sent with an InputMediaWebPage (layer 167+). optional=True
+        # still sends the text if Telegram can't build that page.
+        peer = await client.get_input_entity(entity)
+        media = InputMediaWebPage(
+            url=preview.url,
+            force_large_media=True if preview.size == PreviewSize.LARGE else None,
+            force_small_media=True if preview.size == PreviewSize.SMALL else None,
+            optional=True,
+        )
+        await client(
+            SendMediaRequest(
+                peer=peer,
+                media=media,
+                message=text,
+                entities=entities or None,
+                invert_media=True if preview.above_text else None,
+            )
+        )
+
+    return _send_text_with_preview
 
 
 async def send_media_plan(

@@ -289,13 +289,23 @@ class PresetRepository:
         attachment_paths_json: str,
         min_delay_seconds: Optional[int],
         max_delay_seconds: Optional[int],
+        message_options_json: Optional[str] = None,
     ) -> Preset:
         with self._db.cursor() as cur:
             cur.execute(
                 """INSERT INTO presets
-                   (name, message_text, message_entities, attachment_paths, min_delay_seconds, max_delay_seconds)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (name, message_text, message_entities_json, attachment_paths_json, min_delay_seconds, max_delay_seconds),
+                   (name, message_text, message_entities, attachment_paths, min_delay_seconds, max_delay_seconds,
+                    message_options)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    name,
+                    message_text,
+                    message_entities_json,
+                    attachment_paths_json,
+                    min_delay_seconds,
+                    max_delay_seconds,
+                    message_options_json,
+                ),
             )
             preset_id = cur.lastrowid
         preset = self.get_by_id(preset_id)
@@ -333,6 +343,7 @@ class PresetRepository:
             attachment_paths=row["attachment_paths"],
             min_delay_seconds=row["min_delay_seconds"],
             max_delay_seconds=row["max_delay_seconds"],
+            message_options=row["message_options"],
         )
 
 

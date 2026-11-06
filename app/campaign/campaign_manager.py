@@ -61,6 +61,7 @@ from app.telegram.chat_targets import (
 )
 from app.telegram.media_sender import Attachment, SendProgress
 from app.telegram.recipient_resolver import RecipientResolver, ResolvedRecipient
+from app.telegram.message_options import DEFAULT_CAPTION_LIMIT, MessageOptions
 from app.telegram.sender import send_to_recipient
 from app.telegram.template import expand_name_placeholder
 
@@ -129,6 +130,8 @@ class CampaignManager(QObject):
         delivered_chat_ids: Optional[Iterable[int]] = None,
         resume_steps: Optional[Dict[str, int]] = None,
         dialog_snapshot: Optional[DialogSnapshot] = None,
+        message_options: Optional[MessageOptions] = None,
+        caption_limit: int = DEFAULT_CAPTION_LIMIT,
         parent: Optional[QObject] = None,
     ) -> None:
         super().__init__(parent)
@@ -151,7 +154,12 @@ class CampaignManager(QObject):
         # Marked ids of chats this campaign (or, for a Retry, the campaign
         # it retries) already delivered to.
         self._delivered_chat_ids = set(delivered_chat_ids or ())
-        self._send_requirements = send_requirements(message_text, attachments)
+        # Order of text and media, link preview, and the account's caption
+        # limit: the same plan the preview showed (Retry passes the same
+        # snapshot, so a resumed message keeps its steps).
+        self._options = message_options or MessageOptions()
+        self._caption_limit = caption_limit
+        self._send_requirements = send_requirements(message_text, attachments, self._options, caption_limit)
 
         self._state = CampaignStateMachine()
         self._pause_event = asyncio.Event()
@@ -448,6 +456,8 @@ class CampaignManager(QObject):
                     self._attachments,
                     start_step=item.next_step,
                     progress=progress,
+                    options=self._options,
+                    caption_limit=self._caption_limit,
                 )
             except FloodWaitError as exc:
                 return await self._handle_flood_wait(item, exc)

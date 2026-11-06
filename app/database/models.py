@@ -46,6 +46,8 @@ class Preset:
     attachment_paths: str
     min_delay_seconds: Optional[int]
     max_delay_seconds: Optional[int]
+    # JSON MessageOptions, or None for a template saved before v2.1.2.
+    message_options: Optional[str] = None
 
 
 @dataclass

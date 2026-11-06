@@ -316,7 +316,9 @@ class DemoTelegramClient:
     async def get_input_entity(self, entity: Any) -> Any:
         return entity
 
-    async def send_message(self, entity: Any, text: str, formatting_entities: Optional[list] = None) -> None:
+    async def send_message(
+        self, entity: Any, text: str, formatting_entities: Optional[list] = None, link_preview: bool = True
+    ) -> None:
         if _is_demo_chat(entity):
             self._post_to_chat(entity)
         elif random.random() < FAILURE_RATE:
