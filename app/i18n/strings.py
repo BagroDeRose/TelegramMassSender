@@ -670,6 +670,10 @@ STRINGS: Dict[str, Dict[str, str]] = {
     # ---- message_editor_dialog --------------------------------------------
     "message_editor_dialog.title": {"ru": "Редактор сообщения", "en": "Message editor"},
     "message_editor_dialog.char_count": {"ru": "Символов: {count}", "en": "Characters: {count}"},
+    "message_editor_dialog.char_count_caption": {
+        "ru": "Символов: {count} из {limit} (подпись к медиа)",
+        "en": "{count} of {limit} characters (media caption)",
+    },
     "message_editor_dialog.cancel_button": {"ru": "Отмена", "en": "Cancel"},
     "message_editor_dialog.apply_button": {"ru": "Применить", "en": "Apply"},
     "message_editor_dialog.unsaved_title": {"ru": "Несохранённые изменения", "en": "Unsaved changes"},
@@ -682,6 +686,58 @@ STRINGS: Dict[str, Dict[str, str]] = {
 
     # ---- message_preview ----------------------------------------------------
     "message_preview.placeholder": {"ru": "Текст сообщения появится здесь…", "en": "Your message text will appear here…"},
+    "message_preview.link_card_unknown": {
+        "ru": "Заголовок и описание страницы Telegram покажет при отправке",
+        "en": "Telegram adds the page title and description when sending",
+    },
+
+    # ---- app/ui/message_options_widget.py -----------------------------------
+    "message_options.overflow_photo_two": {
+        "ru": "Текст длиннее подписи к фото ({length} из {limit}) — фото и текст уйдут двумя сообщениями",
+        "en": "The text is longer than a photo caption ({length} of {limit}) — the photo and the text will go as two messages",
+    },
+    "message_options.overflow_file_two": {
+        "ru": "Текст длиннее подписи к файлу ({length} из {limit}) — файл и текст уйдут двумя сообщениями",
+        "en": "The text is longer than a file caption ({length} of {limit}) — the file and the text will go as two messages",
+    },
+    "message_options.overflow_photo_many": {
+        "ru": "Текст длиннее подписи к фото ({length} из {limit}) — текст уйдёт отдельным сообщением, всего сообщений: {count}",
+        "en": "The text is longer than a photo caption ({length} of {limit}) — it will go as a separate message, {count} messages in all",
+    },
+    "message_options.overflow_file_many": {
+        "ru": "Текст длиннее подписи к файлу ({length} из {limit}) — текст уйдёт отдельным сообщением, всего сообщений: {count}",
+        "en": "The text is longer than a file caption ({length} of {limit}) — it will go as a separate message, {count} messages in all",
+    },
+    "message_options.name_may_overflow": {
+        "ru": "С примером имени текст помещается в подпись ({length} из {limit}), но с длинным именем получателя может не поместиться — тогда он уйдёт отдельным сообщением",
+        "en": "With the example name the text fits in a caption ({length} of {limit}), but with a long recipient name it may not — then it goes as a separate message",
+    },
+    "message_options.order_label": {"ru": "Порядок:", "en": "Order:"},
+    "message_options.order_text_first": {"ru": "Сначала текст, потом фото", "en": "Text first, then the photo"},
+    "message_options.order_media_first": {"ru": "Сначала фото, потом текст", "en": "Photo first, then the text"},
+    "message_options.link_title": {"ru": "Превью ссылки", "en": "Link preview"},
+    "message_options.link_tooltip": {
+        "ru": "Карточка страницы (заголовок, описание, картинка) рядом с текстом. По умолчанию выключена: в рассылке сообщение выглядит одинаково у всех получателей.",
+        "en": "A card for the page (title, description, image) next to the text. Off by default, so the message looks the same for every recipient.",
+    },
+    "message_options.link_show_one": {"ru": "Показывать превью ссылки", "en": "Show link preview"},
+    "message_options.link_none": {"ru": "Без превью", "en": "No preview"},
+    "message_options.link_item": {"ru": "{label} — {domain}", "en": "{label} — {domain}"},
+    "message_options.position_label": {"ru": "Положение:", "en": "Position:"},
+    "message_options.position_below": {"ru": "Под текстом", "en": "Below the text"},
+    "message_options.position_above": {"ru": "Над текстом", "en": "Above the text"},
+    "message_options.size_label": {"ru": "Изображение:", "en": "Image:"},
+    "message_options.size_auto": {"ru": "Как решит Telegram", "en": "As Telegram decides"},
+    "message_options.size_large": {"ru": "Крупное", "en": "Large"},
+    "message_options.size_small": {"ru": "Мелкое", "en": "Small"},
+    "message_options.size_unavailable_tooltip": {
+        "ru": "У этой страницы нет крупного изображения",
+        "en": "This page has no large image",
+    },
+    "message_options.caption_note": {
+        "ru": "В подписи к фото превью ссылок не показываются",
+        "en": "Link previews aren't shown in a photo caption",
+    },
 
     # ---- login_dialog -------------------------------------------------------
     "login_dialog.title": {"ru": "Подключение Telegram", "en": "Connect Telegram"},

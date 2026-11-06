@@ -1001,6 +1001,44 @@ QLabel#bubbleMeta {
     font-size: ${font_caption}px;
 }
 
+/* A link preview inside a bubble: an accent rule on the left, like a quote. */
+QFrame#linkPreviewCard {
+    background: transparent;
+    border: none;
+    border-left: 2px solid $accent;
+}
+
+QLabel#linkPreviewSite {
+    color: $accent;
+    font-weight: 600;
+    background: transparent;
+}
+
+QLabel#linkPreviewTitle {
+    color: $bubble_text;
+    font-weight: 600;
+    background: transparent;
+}
+
+QLabel#linkPreviewDescription {
+    color: $bubble_text;
+    background: transparent;
+}
+
+/* A calm note about how the message will go out (text too long for a
+   caption, ...): a soft warning tint, not an alarm. */
+QFrame#sendNotice {
+    background-color: $warning_soft;
+    border: none;
+    border-left: 2px solid $warning;
+    border-radius: ${radius_sm}px;
+}
+
+QLabel#sendNoticeText {
+    color: $text_primary;
+    background: transparent;
+}
+
 /* ==== journal ================================================================== */
 
 QFrame#journalPanel {

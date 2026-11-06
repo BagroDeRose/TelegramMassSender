@@ -1,7 +1,10 @@
-"""Message preview that reads like a chat: an outgoing bubble with a tail on
-a calm background, photos/videos as an album grid, other files as rows,
-the formatted text, and a time stamp. Recognisable as a Telegram message
-without copying Telegram's UI.
+"""Message preview that reads like a chat: outgoing bubbles with a tail on a
+calm background -- one per message that will actually be sent, in the
+send order (the send plan from app.telegram.media_sender, the one the
+sender executes): photos/videos as an album grid, other files as rows,
+the text as a caption or a message of its own, a link preview card above
+or below it, and a time stamp. Recognisable as Telegram without copying
+Telegram's UI.
 
 The text is rendered with the same entities -> HTML mapping as before
 (bold/italic/underline/strike/code/pre/spoiler/links); colours inside that
@@ -42,7 +45,16 @@ from telethon.tl.types import (
 )
 
 from app.i18n import tr
-from app.telegram.media_sender import AttachmentCategory, Attachment, MAX_ALBUM_SIZE
+from app.telegram.media_sender import (
+    MAX_ALBUM_SIZE,
+    Attachment,
+    AttachmentCategory,
+    MediaSendPlan,
+    PlannedMessage,
+    build_media_send_plan,
+)
+from app.telegram.message_options import LinkPreviewOptions, PreviewSize, link_domain
+from app.telegram.server_info import LinkPreviewInfo
 from app.ui import icons, theme
 from app.ui.theme import (
     FONT_FAMILY_MONO,
@@ -244,7 +256,70 @@ class _Bubble(QFrame):
         super().paintEvent(event)
 
 
+class _ImagePlaceholder(QWidget):
+    """Where a link preview's large image would be. Nothing is downloaded
+    for the preview, so it is a calm block with an image icon."""
+
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+    def hasHeightForWidth(self) -> bool:  # noqa: N802 - Qt override
+        return True
+
+    def heightForWidth(self, width: int) -> int:  # noqa: N802 - Qt override
+        return int(width * 0.45)
+
+    def sizeHint(self) -> QSize:  # noqa: N802 - Qt override
+        return QSize(PREVIEW_BUBBLE_MAX_WIDTH, self.heightForWidth(PREVIEW_BUBBLE_MAX_WIDTH))
+
+    def paintEvent(self, _event) -> None:  # noqa: N802 - Qt override
+        tokens = theme.current_tokens()
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        rect = QRectF(self.rect())
+        path = QPainterPath()
+        path.addRoundedRect(rect, RADIUS_SM, RADIUS_SM)
+        painter.fillPath(path, theme.qcolor(tokens.thumbnail_bg))
+        icon_rect = QRectF(0, 0, ICON_SIZE, ICON_SIZE)
+        icon_rect.moveCenter(rect.center())
+        icons.themed("image", "text_muted").paint(painter, icon_rect.toRect())
+        painter.end()
+
+
+class _LinkCard(QFrame):
+    """A link preview inside the bubble: site, title and description from
+    messages.getWebPagePreview when the account could read them, otherwise
+    just the domain."""
+
+    def __init__(self, preview: LinkPreviewOptions, info: Optional[LinkPreviewInfo], parent: QWidget) -> None:
+        super().__init__(parent)
+        self.setObjectName("linkPreviewCard")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(SPACE_SM, SPACE_XS, 0, SPACE_XS)
+        layout.setSpacing(SPACE_XS)
+        site = QLabel((info.site_name if info and info.site_name else link_domain(preview.url)), self)
+        site.setObjectName("linkPreviewSite")
+        layout.addWidget(site)
+        self.title_label = QLabel(info.title if info else "", self)
+        self.title_label.setObjectName("linkPreviewTitle")
+        self.title_label.setWordWrap(True)
+        self.title_label.setVisible(bool(info and info.title))
+        layout.addWidget(self.title_label)
+        description = QLabel(info.description if info else tr("message_preview.link_card_unknown"), self)
+        description.setObjectName("linkPreviewDescription")
+        description.setWordWrap(True)
+        layout.addWidget(description)
+        large = preview.size == PreviewSize.LARGE or (preview.size == PreviewSize.AUTO and bool(info and info.has_large_media))
+        if large:
+            layout.addWidget(_ImagePlaceholder(self))
+
+
 class MessagePreviewWidget(QFrame):
+    """One bubble per message that will actually be sent, in the send
+    order: it draws app.telegram.media_sender's send plan -- the same plan
+    the sender executes -- never its own idea of how text and files go."""
+
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setObjectName("chatPreview")
@@ -252,6 +327,9 @@ class MessagePreviewWidget(QFrame):
         self._text = ""
         self._entities: List[TypeMessageEntity] = []
         self._html = ""
+        self._plan: Optional[MediaSendPlan] = None
+        self._link_info: Optional[LinkPreviewInfo] = None
+        self._bubbles: List[_Bubble] = []
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -261,32 +339,21 @@ class MessagePreviewWidget(QFrame):
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         outer.addWidget(scroll)
+        # Like a chat: the latest message stays in view, so a long text
+        # doesn't hide the photo sent after it.
+        scroll.verticalScrollBar().rangeChanged.connect(lambda _low, high: scroll.verticalScrollBar().setValue(high))
+        self._scroll = scroll
 
-        canvas = QWidget()
-        canvas_layout = QVBoxLayout(canvas)
-        canvas_layout.setContentsMargins(SPACE_MD, SPACE_MD, SPACE_MD, SPACE_MD)
-        canvas_layout.addStretch(1)
-        row = QHBoxLayout()
-        row.addStretch(1)
-        self._bubble = _Bubble(canvas)
-        row.addWidget(self._bubble)
-        canvas_layout.addLayout(row)
-        scroll.setWidget(canvas)
+        self._canvas = QWidget()
+        self._canvas_layout = QVBoxLayout(self._canvas)
+        self._canvas_layout.setContentsMargins(SPACE_MD, SPACE_MD, SPACE_MD, SPACE_MD)
+        self._canvas_layout.setSpacing(SPACE_XS)
+        self._canvas_layout.addStretch(1)
+        scroll.setWidget(self._canvas)
 
-        bubble_layout = QVBoxLayout(self._bubble)
-        pad = PREVIEW_BUBBLE_PADDING
-        bubble_layout.setContentsMargins(pad, pad, pad + PREVIEW_TAIL, pad - SPACE_XS)
-        bubble_layout.setSpacing(SPACE_SM)
-
-        self._album = _AlbumGrid(self._bubble)
-        self._album.setVisible(False)
-        bubble_layout.addWidget(self._album)
-
-        self._files_box = QVBoxLayout()
-        self._files_box.setSpacing(SPACE_XS)
-        bubble_layout.addLayout(self._files_box)
-
-        self._browser = QTextBrowser(self._bubble)
+        # The one text view, moved into whichever bubble carries the text
+        # (a caption or a message of its own).
+        self._browser = QTextBrowser(self._canvas)
         self._browser.setObjectName("bubbleBrowser")
         self._browser.setReadOnly(True)
         self._browser.setOpenExternalLinks(True)
@@ -295,24 +362,16 @@ class MessagePreviewWidget(QFrame):
         self._browser.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._browser.document().setDocumentMargin(0)
         self._browser.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        bubble_layout.addWidget(self._browser)
-
-        meta_row = QHBoxLayout()
-        meta_row.addStretch(1)
-        self._time_label = QLabel(self._bubble)
-        self._time_label.setObjectName("bubbleMeta")
-        meta_row.addWidget(self._time_label)
-        bubble_layout.addLayout(meta_row)
 
         # Kept for callers that list attachment names under the preview
-        # (e.g. the wizard); the bubble itself shows them visually.
+        # (e.g. the wizard); the bubbles themselves show them visually.
         self._attachments_label = QLabel(self)
         self._attachments_label.setObjectName("attachmentsPreviewLabel")
         self._attachments_label.setWordWrap(True)
         self._attachments_label.setVisible(False)
         outer.addWidget(self._attachments_label)
 
-        self._render()
+        self._rebuild()
         theme.on_theme_changed(self, self._on_theme_changed)
 
     # ---- public API ------------------------------------------------------------
@@ -323,64 +382,114 @@ class MessagePreviewWidget(QFrame):
         entities: List[TypeMessageEntity],
         attachment_names: Sequence[str] = (),
         attachments: Optional[Sequence[Attachment]] = None,
+        plan: Optional[MediaSendPlan] = None,
+        link_info: Optional[LinkPreviewInfo] = None,
     ) -> None:
+        """`plan`: the send plan for this text (with the account's caption
+        limit and the message options); without one, the default plan for
+        a regular account and no preview."""
         self._text = text
         self._entities = list(entities)
         self._attachments_label.setText(", ".join(attachment_names))
-        self._set_attachments(list(attachments or []), list(attachment_names))
-        self._render()
+        if plan is None:
+            plan = build_media_send_plan(list(attachments or []), text, self._entities, validate=False)
+        self._plan = plan
+        self._link_info = link_info
+        self._rebuild()
+
+    def planned_messages(self) -> List[PlannedMessage]:
+        return self._plan.messages() if self._plan is not None else []
+
+    def bubble_count(self) -> int:
+        return len(self._bubbles)
 
     def rendered_html(self) -> str:
-        """The HTML currently shown (as built, before QTextDocument
-        normalises it) -- lets callers check what colours it uses."""
+        """The HTML of the message text currently shown (as built, before
+        QTextDocument normalises it) -- lets callers check its colours."""
         return self._html
 
     # ---- internals --------------------------------------------------------------
 
-    def _set_attachments(self, attachments: List[Attachment], names: List[str]) -> None:
-        while self._files_box.count():
-            item = self._files_box.takeAt(0)
-            if item.widget() is not None:
-                item.widget().deleteLater()
-        album = [a.path for a in attachments if a.category == AttachmentCategory.ALBUM_ELIGIBLE]
-        self._album.set_paths(album)
-        file_names = [a.file_name for a in attachments if a.category != AttachmentCategory.ALBUM_ELIGIBLE]
-        if not attachments:
-            file_names = names  # names only (no paths): show them as files
-        for name in file_names:
-            self._files_box.addWidget(self._file_row(name))
+    def _on_theme_changed(self, _name: str) -> None:
+        self._rebuild()
 
-    def _file_row(self, name: str) -> QWidget:
-        row = QWidget(self._bubble)
+    def _rebuild(self) -> None:
+        self._browser.setParent(self._canvas)
+        self._browser.hide()
+        for bubble in self._bubbles:
+            bubble.hide()
+            bubble.deleteLater()
+        self._bubbles = []
+        while self._canvas_layout.count() > 1:
+            item = self._canvas_layout.takeAt(1)
+            if item.layout() is not None:
+                item.layout().deleteLater()
+
+        messages = self.planned_messages()
+        if not messages:
+            # Nothing to send yet: one bubble with the placeholder text.
+            messages = [PlannedMessage("text")]
+        self._html = ""
+        for message in messages:
+            bubble = self._make_bubble(message)
+            row = QHBoxLayout()
+            row.addStretch(1)
+            row.addWidget(bubble)
+            self._canvas_layout.addLayout(row)
+            self._bubbles.append(bubble)
+        self._fit_browser()
+
+    def _make_bubble(self, message: PlannedMessage) -> _Bubble:
+        bubble = _Bubble(self._canvas)
+        layout = QVBoxLayout(bubble)
+        pad = PREVIEW_BUBBLE_PADDING
+        layout.setContentsMargins(pad, pad, pad + PREVIEW_TAIL, pad - SPACE_XS)
+        layout.setSpacing(SPACE_SM)
+
+        if message.kind == "media" and message.group is not None:
+            attachments = message.group.attachments
+            if attachments[0].category == AttachmentCategory.ALBUM_ELIGIBLE:
+                album = _AlbumGrid(bubble)
+                album.set_paths([a.path for a in attachments])
+                layout.addWidget(album)
+            else:
+                for attachment in attachments:
+                    layout.addWidget(self._file_row(bubble, attachment.file_name))
+
+        preview = message.link_preview if message.kind == "text" else None
+        if preview is not None and preview.above_text:
+            layout.addWidget(_LinkCard(preview, self._link_info, bubble))
+        if message.text or message.kind == "text":
+            self._html = entities_to_preview_html(message.text, list(message.entities))
+            tokens = theme.current_tokens()
+            self._browser.setHtml(f'<div style="color:{tokens.bubble_text};">{self._html}</div>')
+            self._browser.setParent(bubble)
+            layout.addWidget(self._browser)
+            self._browser.show()
+        if preview is not None and not preview.above_text:
+            layout.addWidget(_LinkCard(preview, self._link_info, bubble))
+
+        meta_row = QHBoxLayout()
+        meta_row.addStretch(1)
+        time_label = QLabel(datetime.now().strftime("%H:%M"), bubble)
+        time_label.setObjectName("bubbleMeta")
+        meta_row.addWidget(time_label)
+        layout.addLayout(meta_row)
+        return bubble
+
+    def _file_row(self, parent: QWidget, name: str) -> QWidget:
+        row = QWidget(parent)
         layout = QHBoxLayout(row)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(SPACE_SM)
         icon = QLabel(row)
         icon.setObjectName("fileIcon")
-        icon.setProperty("iconName", "document")
+        icon.setPixmap(icons.themed_pixmap("document", "accent", ICON_SIZE, icon.devicePixelRatioF()))
         layout.addWidget(icon)
         label = QLabel(name, row)
         label.setObjectName("bubbleText")
         layout.addWidget(label, 1)
-        self._paint_file_icon(icon)
         return row
-
-    def _paint_file_icon(self, label: QLabel) -> None:
-        label.setPixmap(icons.themed_pixmap("document", "accent", ICON_SIZE, label.devicePixelRatioF()))
-
-    def _on_theme_changed(self, _name: str) -> None:
-        for label in self._bubble.findChildren(QLabel, "fileIcon"):
-            self._paint_file_icon(label)
-        self._render()
-
-    def _render(self) -> None:
-        self._html = entities_to_preview_html(self._text, self._entities)
-        tokens = theme.current_tokens()
-        self._browser.setHtml(f'<div style="color:{tokens.bubble_text};">{self._html}</div>')
-        self._time_label.setText(datetime.now().strftime("%H:%M"))
-        self._fit_browser()
-        self._bubble.update()
-        self._album.update()
 
     def _fit_browser(self) -> None:
         document = self._browser.document()

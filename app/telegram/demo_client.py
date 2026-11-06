@@ -47,9 +47,12 @@ from unittest.mock import MagicMock
 from telethon import utils as telethon_utils
 from telethon.errors import SlowModeWaitError, UserIsBlockedError, UsernameNotOccupiedError
 from telethon.tl.functions.contacts import ResolvePhoneRequest
+from telethon.tl.functions.help import GetAppConfigRequest
 from telethon.tl.functions.messages import (
     CheckChatInviteRequest,
     GetDialogFiltersRequest,
+    GetWebPagePreviewRequest,
+    SendMediaRequest,
     SendMultiMediaRequest,
     UploadMediaRequest,
 )
@@ -62,13 +65,22 @@ from telethon.tl.types import (
     ChatInviteAlready,
     DialogFilter,
     InputMediaPhoto,
+    InputMediaWebPage,
     InputPeerChannel,
     InputPeerChat,
     InputPeerUser,
+    JsonNumber,
+    JsonObject,
+    JsonObjectValue,
+    MessageMediaWebPage,
     Photo,
     User,
+    WebPage,
 )
+from telethon.tl.types.help import AppConfig
 from telethon.tl.types.messages import DialogFilters
+
+from app.telegram.message_options import link_domain
 
 # Simulated failure rate for resolving/sending to a demo recipient --
 # high enough to realistically exercise retry/results/diagnostics (the
@@ -334,6 +346,10 @@ class DemoTelegramClient:
             raise UserIsBlockedError(request=None)
         self.sent_messages.append(("file", entity, files, caption, formatting_entities))
 
+    async def get_me(self, input_peer: bool = False) -> Any:
+        # A regular (non-Premium) account: Telegram's default caption limit.
+        return make_demo_user(DEMO_ACCOUNT_PHONE)
+
     async def _file_to_media(self, file: Any, **kwargs: Any) -> Tuple[None, Any, None]:
         # Matches MockTelegramClient's approach: a stand-in good enough
         # for the calling code's isinstance checks, not a faithful
@@ -348,6 +364,40 @@ class DemoTelegramClient:
             if request.hash == DEMO_INVITE_HASH:
                 return ChatInviteAlready(chat=self._chat_by_identifier("demo_team_chat"))
             return ChatInvite(title="Demo Private Club", photo=None, participants_count=12, color=0)
+        if isinstance(request, GetAppConfigRequest):
+            # Telegram's real limits: 1024 / 4096 (Premium).
+            return AppConfig(
+                hash=1,
+                config=JsonObject(
+                    [
+                        JsonObjectValue("caption_length_limit_default", JsonNumber(1024)),
+                        JsonObjectValue("caption_length_limit_premium", JsonNumber(4096)),
+                    ]
+                ),
+            )
+        if isinstance(request, GetWebPagePreviewRequest):
+            # A plausible card for any link, built locally -- nothing is fetched.
+            domain = link_domain(request.message.strip()) or "example.org"
+            return MessageMediaWebPage(
+                webpage=WebPage(
+                    id=random.getrandbits(48),
+                    url=request.message.strip(),
+                    display_url=domain,
+                    hash=0,
+                    has_large_media=True,
+                    site_name=domain,
+                    title=f"Demo page — {domain}",
+                    description="A simulated link preview: in a real account Telegram builds it from the page.",
+                )
+            )
+        if isinstance(request, SendMediaRequest) and isinstance(request.media, InputMediaWebPage):
+            # A text with a chosen link preview (see media_sender._text_step).
+            if _is_demo_chat(request.peer):
+                self._post_to_chat(request.peer)
+            elif random.random() < FAILURE_RATE:
+                raise UserIsBlockedError(request=None)
+            self.sent_messages.append(("webpage", request.peer, request.message, request.entities))
+            return MagicMock()
         if isinstance(request, SendMultiMediaRequest) and _is_demo_chat(request.peer):
             self._post_to_chat(request.peer)
             self.sent_messages.append(("album", request.peer, request.multi_media, None, None))
