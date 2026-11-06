@@ -12,7 +12,7 @@ fatal -- a failure (offline, FloodWait) only means the defaults.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Hashable, Optional
+from typing import Any, Dict, Hashable, Optional, Tuple
 
 from telethon.tl.functions.help import GetAppConfigRequest
 from telethon.tl.functions.messages import GetWebPagePreviewRequest
@@ -78,11 +78,15 @@ async def fetch_link_preview(client, url: str) -> Optional[LinkPreviewInfo]:
 
 
 class ServerInfoCache:
-    """For one app session: caption limit per account, card per URL."""
+    """For one app session, per account: its caption limit and the link
+    cards read through it. Kept per account, not shared: a Premium limit
+    must not apply to a regular account, and a card that failed to load
+    under one account (offline, FloodWait) is asked for again under
+    another."""
 
     def __init__(self) -> None:
         self._caption_limits: Dict[Hashable, int] = {}
-        self._previews: Dict[str, Optional[LinkPreviewInfo]] = {}
+        self._previews: Dict[Tuple[Hashable, str], Optional[LinkPreviewInfo]] = {}
 
     async def caption_limit(self, account_key: Hashable, client) -> int:
         if account_key not in self._caption_limits:
@@ -92,16 +96,16 @@ class ServerInfoCache:
     def known_caption_limit(self, account_key: Hashable) -> Optional[int]:
         return self._caption_limits.get(account_key)
 
-    async def link_preview(self, client, url: str) -> Optional[LinkPreviewInfo]:
-        if url not in self._previews:
-            self._previews[url] = await fetch_link_preview(client, url)
-        return self._previews[url]
+    async def link_preview(self, account_key: Hashable, client, url: str) -> Optional[LinkPreviewInfo]:
+        if (account_key, url) not in self._previews:
+            self._previews[(account_key, url)] = await fetch_link_preview(client, url)
+        return self._previews[(account_key, url)]
 
-    def known_link_preview(self, url: str) -> Optional[LinkPreviewInfo]:
-        return self._previews.get(url)
+    def known_link_preview(self, account_key: Hashable, url: str) -> Optional[LinkPreviewInfo]:
+        return self._previews.get((account_key, url))
 
-    def has_link_preview(self, url: str) -> bool:
-        return url in self._previews
+    def has_link_preview(self, account_key: Hashable, url: str) -> bool:
+        return (account_key, url) in self._previews
 
     def clear(self) -> None:
         self._caption_limits.clear()

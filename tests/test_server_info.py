@@ -97,10 +97,11 @@ async def test_no_card_when_telegram_has_none_or_fails():
         assert await fetch_link_preview(_PreviewClient(media), "https://t.me/example") is None
 
 
-async def test_link_preview_cache_is_per_url():
+async def test_link_preview_cache_is_per_account_and_url():
     cache = ServerInfoCache()
     client = _PreviewClient(MessageMediaWebPage(webpage=_page(title="Example")))
-    assert (await cache.link_preview(client, "https://t.me/example")).title == "Example"
-    await cache.link_preview(client, "https://t.me/example")
+    assert (await cache.link_preview("account-1", client, "https://t.me/example")).title == "Example"
+    await cache.link_preview("account-1", client, "https://t.me/example")
     assert sum(isinstance(r, GetWebPagePreviewRequest) for r in client.raw_requests) == 1
-    assert cache.known_link_preview("https://t.me/example").title == "Example"
+    assert cache.known_link_preview("account-1", "https://t.me/example").title == "Example"
+    assert cache.has_link_preview("account-2", "https://t.me/example") is False

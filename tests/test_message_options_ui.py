@@ -320,3 +320,46 @@ async def test_wizard_options_reach_the_campaign_page(qapp, tmp_path):
         assert window._message_options_widget.preview_check.isChecked()
     finally:
         wizard.reject()
+
+
+async def test_caption_limit_and_link_cards_follow_the_active_account(qapp, tmp_path):
+    # Switching accounts (or Demo Mode in/out, or deleting one) must not
+    # carry one account's caption limit or link cards over to another: a
+    # Premium limit would split nothing for a regular account, and a card
+    # that failed to load under one account would never be asked for again.
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from telethon.errors import FloodWaitError
+    from telethon.tl.functions.messages import GetWebPagePreviewRequest
+
+    window = _make_window(tmp_path)
+    premium = SimpleNamespace(id=1, session_name="account_premium")
+    regular = SimpleNamespace(id=2, session_name="account_regular")
+    window._server_info._caption_limits[window._server_info_key(premium)] = 4096
+
+    with patch.object(window, "_active_account", return_value=premium):
+        assert window._current_caption_limit() == 4096
+    with patch.object(window, "_active_account", return_value=regular):
+        assert window._current_caption_limit() == 1024
+
+    class _Offline(MockTelegramClient):
+        async def __call__(self, request):
+            if isinstance(request, GetWebPagePreviewRequest):
+                raise FloodWaitError(request=None, capture=30)
+            return await super().__call__(request)
+
+    url = "https://t.me/example"
+    offline = _Offline()
+    with patch.object(window, "_active_account", return_value=premium), patch.object(
+        window, "_connected_client", return_value=offline
+    ):
+        await window._server_info.link_preview(window._server_info_key(premium), offline, url)
+        assert window._known_link_preview(url) is None
+
+    with patch.object(window, "_active_account", return_value=regular), patch.object(
+        window, "_connected_client", return_value=MockTelegramClient()
+    ), patch.object(window, "_spawn", new=MagicMock()) as spawn:
+        window._ensure_link_preview(url)
+    assert spawn.called, "the other account asks Telegram for the card itself"
+    spawn.call_args.args[0].close()
