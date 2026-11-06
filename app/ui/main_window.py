@@ -1562,17 +1562,30 @@ class MainWindow(QMainWindow):
 
         self._spawn(load(), "лимит подписи")
 
+    def _known_link_preview(self, url: str):
+        """The active account's card for `url` (None: not read, or none)."""
+        account = self._active_account()
+        return self._server_info.known_link_preview(self._server_info_key(account), url) if account else None
+
+    def _has_link_preview(self, url: str) -> bool:
+        account = self._active_account()
+        return account is not None and self._server_info.has_link_preview(self._server_info_key(account), url)
+
     def _ensure_link_preview(self, url: str) -> None:
+        account = self._active_account()
         client = self._connected_client()
-        if client is None or self._server_info.has_link_preview(url) or ("preview", url) in self._server_info_pending:
+        if account is None or client is None or self._has_link_preview(url):
             return
-        self._server_info_pending.add(("preview", url))
+        key = self._server_info_key(account)
+        if ("preview", key, url) in self._server_info_pending:
+            return
+        self._server_info_pending.add(("preview", key, url))
 
         async def load() -> None:
             try:
-                await self._server_info.link_preview(client, url)
+                await self._server_info.link_preview(key, client, url)
             finally:
-                self._server_info_pending.discard(("preview", url))
+                self._server_info_pending.discard(("preview", key, url))
             self._update_message_preview()
 
         self._spawn(load(), "превью ссылки")
@@ -1610,12 +1623,12 @@ class MainWindow(QMainWindow):
         link_info = None
         if plan.text_link_preview is not None:
             url = plan.text_link_preview.url
-            link_info = self._server_info.known_link_preview(url)
-            if not self._server_info.has_link_preview(url):
+            link_info = self._known_link_preview(url)
+            if not self._has_link_preview(url):
                 self._ensure_link_preview(url)
         chosen = self._message_options.link_preview.url
-        if chosen and self._server_info.has_link_preview(chosen):
-            info = self._server_info.known_link_preview(chosen)
+        if chosen and self._has_link_preview(chosen):
+            info = self._known_link_preview(chosen)
             self._message_options_widget.set_large_media_supported(info.has_large_media if info else None)
         else:
             self._message_options_widget.set_large_media_supported(None)
