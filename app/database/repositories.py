@@ -55,6 +55,10 @@ class AccountRepository:
                 (telegram_user_id, username, display_name, account_id),
             )
 
+    def update_phone(self, account_id: int, phone: str) -> None:
+        with self._db.cursor() as cur:
+            cur.execute("UPDATE accounts SET phone = ? WHERE id = ?", (phone, account_id))
+
     def touch_last_used(self, account_id: int) -> None:
         with self._db.cursor() as cur:
             cur.execute(

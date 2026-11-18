@@ -17,7 +17,8 @@ from app.database.repositories import AccountRepository
 from app.i18n import tr
 from app.logging.logger import get_logger
 from app.telegram.client_manager import ClientManager
-from app.telegram.exceptions import AccountDeletionError, AccountSwitchBlockedError
+from app.telegram.authentication import mask_phone
+from app.telegram.exceptions import AccountAlreadyAddedError, AccountDeletionError, AccountSwitchBlockedError
 
 # Bounded, deliberately small: this covers a session file that Windows
 # still reports as open for a moment after Telethon closed it, not a file
@@ -89,11 +90,17 @@ class AccountManager:
             return existing
         session_name = self.new_session_name()
         account = self._repository.create(phone, session_name)
-        logger.info("Добавлен новый аккаунт: %s", phone)
+        logger.info("Добавлен новый аккаунт: %s", mask_phone(phone))
         return account
 
     def get_client(self, account: Account):
         return self._client_manager.get_or_create(account.session_name)
+
+    def drop_client(self, account: Account) -> None:
+        """Forget this account's client (closing its session file) so the
+        next get_client builds a new one -- after a log_out() the old
+        client can't be reused."""
+        self._client_manager.remove(account.session_name)
 
     def get_active_client(self, account_session_name: str):
         """Read-only lookup for Diagnostics -- unlike get_client,
@@ -117,6 +124,23 @@ class AccountManager:
         assert refreshed is not None
         return refreshed
 
+    def adopt_phone(self, account: Account, phone: str) -> Account:
+        """Make the row's phone the one Telegram reports for the account
+        that actually signed in. A QR code can be scanned from any account,
+        not necessarily the number typed into the dialog; keeping the typed
+        number would leave the row describing the wrong account. Raises
+        AccountAlreadyAddedError if another row already has that phone."""
+        if phone == account.phone:
+            return account
+        existing = self._repository.get_by_phone(phone)
+        if existing is not None and existing.id != account.id:
+            raise AccountAlreadyAddedError(phone)
+        self._repository.update_phone(account.id, phone)
+        logger.info("Номер аккаунта уточнён по данным Telegram: %s", mask_phone(phone))
+        refreshed = self._repository.get_by_id(account.id)
+        assert refreshed is not None
+        return refreshed
+
     async def check_status(self, account: Account) -> AccountStatus:
         """Never treat a transient connectivity failure as "needs
         re-authorization" -- those are different problems with different
@@ -125,10 +149,10 @@ class AccountManager:
         try:
             authorized = await self._client_manager.is_authorized(account.session_name)
         except _TRANSIENT_ERROR_TYPES as exc:
-            logger.warning("Проблема с подключением для аккаунта %s: %s", account.phone, exc)
+            logger.warning("Проблема с подключением для аккаунта %s: %s", mask_phone(account.phone), exc)
             return AccountStatus(account=account, is_authorized=False, needs_reauth=False, connection_error=True)
         except Exception as exc:  # noqa: BLE001 - genuine auth/session failure, surfaced as needs_reauth
-            logger.warning("Не удалось проверить статус аккаунта %s: %s", account.phone, exc)
+            logger.warning("Не удалось проверить статус аккаунта %s: %s", mask_phone(account.phone), exc)
             return AccountStatus(account=account, is_authorized=False, needs_reauth=True)
         return AccountStatus(account=account, is_authorized=authorized, needs_reauth=not authorized)
 
@@ -169,7 +193,7 @@ class AccountManager:
         self._repository.delete(account.id)
         if self._active_account_id == account.id:
             self._active_account_id = None
-        logger.info("Аккаунт удалён: %s", account.phone)
+        logger.info("Аккаунт удалён: %s", mask_phone(account.phone))
 
     async def _unlink_session_file(self, candidate: Path) -> None:
         """Delete one session file, tolerating the brief window in which

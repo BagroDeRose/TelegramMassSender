@@ -779,7 +779,12 @@ STRINGS: Dict[str, Dict[str, str]] = {
     "login_dialog.api_id_label": {"ru": "API ID:", "en": "API ID:"},
     "login_dialog.api_hash_label": {"ru": "API Hash:", "en": "API Hash:"},
     "login_dialog.phone_label": {"ru": "Телефон:", "en": "Phone:"},
-    "login_dialog.connect_button": {"ru": "Подключить", "en": "Connect"},
+    "login_dialog.connect_button": {"ru": "Получить код", "en": "Send code"},
+    "login_dialog.qr_button": {"ru": "Войти по QR-коду", "en": "Sign in with QR code"},
+    "login_dialog.qr_hint": {
+        "ru": "Код не приходит? Войдите по QR-коду: его сканируют в Telegram на телефоне, код подтверждения не нужен.",
+        "en": "Code not arriving? Sign in with a QR code: you scan it with Telegram on your phone, no confirmation code needed.",
+    },
     "login_dialog.error.api_id_not_a_number": {"ru": "API ID должен быть числом.", "en": "API ID must be a number."},
     "login_dialog.error.invalid_api_hash": {"ru": "Введите корректный API Hash.", "en": "Enter a valid API Hash."},
     "login_dialog.error.invalid_phone_format": {
@@ -811,6 +816,94 @@ STRINGS: Dict[str, Dict[str, str]] = {
     "login_dialog.summary_name": {"ru": "Имя:\n{name}", "en": "Name:\n{name}"},
     "login_dialog.summary_username": {"ru": "Username:\n@{username}", "en": "Username:\n@{username}"},
     "login_dialog.summary_username_none": {"ru": "Username:\n-", "en": "Username:\n-"},
+    "login_dialog.code_sent.app": {
+        "ru": "Код отправлен в Telegram на другом вашем устройстве — в чат «Telegram» с синей галочкой (проверьте и архив).",
+        "en": "The code was sent to Telegram on another of your devices — the \"Telegram\" chat with a blue check mark (check the archive too).",
+    },
+    "login_dialog.code_sent.sms": {"ru": "Код отправлен по SMS на {phone}.", "en": "The code was sent by SMS to {phone}."},
+    "login_dialog.code_sent.call": {
+        "ru": "Telegram позвонит на {phone} и продиктует код.",
+        "en": "Telegram will call {phone} and read out the code.",
+    },
+    "login_dialog.code_sent.flash_call": {
+        "ru": "Telegram сделает короткий звонок на {phone}: код — номер, с которого звонят.",
+        "en": "Telegram will make a short call to {phone}: the code is the calling number.",
+    },
+    "login_dialog.code_sent.missed_call": {
+        "ru": "Telegram сделает звонок-сброс на {phone}: код — последние {length} цифр номера, с которого звонят.",
+        "en": "Telegram will make a missed call to {phone}: the code is the last {length} digits of the calling number.",
+    },
+    "login_dialog.code_sent.email": {"ru": "Код отправлен на почту {email}.", "en": "The code was sent to {email}."},
+    "login_dialog.code_sent.email_setup_required": {
+        "ru": "Telegram требует сначала привязать к аккаунту почту для входа, а из этой программы это сделать нельзя. Войдите по QR-коду.",
+        "en": "Telegram first requires a login email on the account, which can't be set up from this program. Sign in with a QR code.",
+    },
+    "login_dialog.code_sent.fragment": {
+        "ru": "Код отправлен через Fragment: {url}",
+        "en": "The code was sent via Fragment: {url}",
+    },
+    "login_dialog.code_sent.firebase_sms": {
+        "ru": "Telegram отправляет это SMS только после проверки, доступной лишь официальным приложениям. Войдите по QR-коду.",
+        "en": "Telegram only sends this SMS after a check that only official apps can pass. Sign in with a QR code.",
+    },
+    "login_dialog.code_sent.unknown": {"ru": "Код отправлен.", "en": "The code was sent."},
+    "login_dialog.code_next.sms": {"ru": "При повторной отправке код придёт по SMS.", "en": "A resent code will come by SMS."},
+    "login_dialog.code_next.call": {"ru": "При повторной отправке Telegram позвонит.", "en": "A resent code will come by phone call."},
+    "login_dialog.code_next.flash_call": {
+        "ru": "При повторной отправке будет короткий звонок.",
+        "en": "A resent code will come as a short call.",
+    },
+    "login_dialog.code_next.missed_call": {
+        "ru": "При повторной отправке будет звонок-сброс.",
+        "en": "A resent code will come as a missed call.",
+    },
+    "login_dialog.code_next.fragment": {
+        "ru": "При повторной отправке код придёт через Fragment.",
+        "en": "A resent code will come via Fragment.",
+    },
+    "login_dialog.code_next.unknown": {"ru": "Код можно отправить повторно.", "en": "The code can be resent."},
+    "login_dialog.code_not_arriving": {
+        "ru": "Telegram иногда не доставляет коды сторонним программам, даже когда сообщает, что отправил. Если кода нет, войдите по QR-коду.",
+        "en": "Telegram sometimes doesn't deliver codes to third-party programs, even when it reports them sent. If no code comes, sign in with a QR code.",
+    },
+    "login_dialog.resend_button": {"ru": "Отправить код ещё раз", "en": "Resend code"},
+    "login_dialog.resend_button_wait": {"ru": "Отправить ещё раз через {seconds} с", "en": "Resend in {seconds} s"},
+    "login_dialog.error.resend_unavailable": {
+        "ru": "Telegram больше не может отправить код другим способом. Войдите по QR-коду.",
+        "en": "Telegram can't send the code another way. Sign in with a QR code.",
+    },
+    "login_dialog.error.resend_failed": {
+        "ru": "Не удалось отправить код повторно: {error}",
+        "en": "Couldn't resend the code: {error}",
+    },
+    "login_dialog.error.phone_banned": {"ru": "Telegram заблокировал этот номер.", "en": "Telegram has banned this phone number."},
+    "login_dialog.error.phone_flood": {
+        "ru": "Слишком много попыток входа с этим номером. Подождите несколько часов или войдите по QR-коду.",
+        "en": "Too many sign-in attempts for this number. Wait a few hours or sign in with a QR code.",
+    },
+    "login_dialog.qr_instructions": {
+        "ru": "Откройте Telegram на телефоне: Настройки > Устройства > Подключить устройство, и наведите камеру на этот код.",
+        "en": "Open Telegram on your phone: Settings > Devices > Link Desktop Device, and point the camera at this code.",
+    },
+    "login_dialog.qr_loading": {"ru": "Получение QR-кода…", "en": "Getting a QR code…"},
+    "login_dialog.qr_waiting": {
+        "ru": "Ожидание сканирования. Код обновляется сам каждые полминуты.",
+        "en": "Waiting for the scan. The code refreshes by itself every half minute.",
+    },
+    "login_dialog.qr_expired": {
+        "ru": "Код так и не отсканировали. Нажмите «Обновить QR-код», чтобы попробовать снова.",
+        "en": "The code wasn't scanned. Press \"Refresh QR code\" to try again.",
+    },
+    "login_dialog.qr_refresh_button": {"ru": "Обновить QR-код", "en": "Refresh QR code"},
+    "login_dialog.back_button": {"ru": "Назад", "en": "Back"},
+    "login_dialog.error.qr_failed": {
+        "ru": "Не удалось войти по QR-коду: {error}",
+        "en": "Couldn't sign in with the QR code: {error}",
+    },
+    "login_dialog.error.account_already_added": {
+        "ru": "Код отсканирован в аккаунте {phone}, который уже добавлен в программу. Отсканируйте его в нужном аккаунте.",
+        "en": "The code was scanned in account {phone}, which is already added. Scan it in the account you want to add.",
+    },
 
     # ---- dialogs.py -----------------------------------------------------
     "dialogs.delete_account.title": {"ru": "Удалить аккаунт?", "en": "Delete account?"},
