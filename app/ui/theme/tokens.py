@@ -123,6 +123,12 @@ PREVIEW_BUBBLE_PADDING = 12
 PREVIEW_TAIL = 8
 PREVIEW_ALBUM_GAP = 2
 PREVIEW_MIN_HEIGHT = 220
+QR_IMAGE_SIZE = 240
+
+# The login QR code is dark on light in both themes: phone cameras don't
+# reliably read an inverted code.
+QR_DARK = "#000000"
+QR_LIGHT = "#ffffff"
 
 # Motion: short ease-out only, nothing that loops.
 MOTION_FAST_MS = 120

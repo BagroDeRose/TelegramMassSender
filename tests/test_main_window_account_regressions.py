@@ -432,6 +432,28 @@ async def test_demo_mode_is_blocked_while_a_campaign_is_active(qapp, tmp_path):
 
 
 @pytest.mark.asyncio
+async def test_an_account_from_a_cancelled_sign_in_shows_up_without_a_restart(qapp, tmp_path):
+    # Reported: accounts the user tried to sign in to appeared only after
+    # restarting. A code request already saves the account row, but the
+    # list was refreshed only when the dialog was accepted -- and a code
+    # that never arrives means the dialog is closed, not accepted.
+    window = _make_window(tmp_path)
+    await _drain(window)
+
+    def code_never_arrived():
+        window._service.account_manager.register_account("+70001112233")
+        return 0  # QDialog.Rejected
+
+    with patch("app.ui.main_window.LoginDialog") as dialog_cls:
+        dialog_cls.return_value.exec.side_effect = code_never_arrived
+        window._on_add_account_requested()
+    await _drain(window)
+
+    phones = [status.account.phone for status in window._account_statuses.values()]
+    assert "+70001112233" in phones
+
+
+@pytest.mark.asyncio
 async def test_adding_an_account_is_refused_while_in_demo_mode(qapp, tmp_path):
     # Demo Mode swaps in a client manager that fabricates everything, so
     # the login dialog would "authorize" an invented account -- while

@@ -2019,9 +2019,13 @@ class MainWindow(QMainWindow):
         dialog = LoginDialog(self._service, self)
         result_holder: dict = {}
         dialog.account_ready.connect(lambda acc: result_holder.__setitem__("account", acc))
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            account = result_holder.get("account")
-            self._spawn(self._refresh_accounts(select_id=account.id if account else None), "обновление списка аккаунтов")
+        dialog.exec()
+        # Refresh however the dialog closed: a code request already saved
+        # the account (and its session file) before any sign-in, so an
+        # attempt that was cancelled -- e.g. a code that never arrived --
+        # is still in the list, and it used to show up only after a restart.
+        account = result_holder.get("account")
+        self._spawn(self._refresh_accounts(select_id=account.id if account else None), "обновление списка аккаунтов")
 
     def _on_account_selected(self, account_id: int) -> None:
         if self._account_switch_in_progress:

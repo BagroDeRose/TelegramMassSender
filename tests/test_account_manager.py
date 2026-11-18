@@ -46,6 +46,59 @@ def test_register_account_is_idempotent_by_phone(repo):
     assert len(repo.list_all()) == 1
 
 
+def test_adopt_phone_takes_the_number_telegram_reports(repo):
+    # A QR code can be scanned from any account, not necessarily the
+    # number typed into the login dialog.
+    manager = make_manager(repo)
+    account = manager.register_account("+70001112233")
+    adopted = manager.adopt_phone(account, "+70009998877")
+    assert adopted.id == account.id
+    assert adopted.phone == "+70009998877"
+    assert repo.get_by_phone("+70001112233") is None
+
+
+def test_adopt_phone_with_the_same_number_changes_nothing(repo):
+    manager = make_manager(repo)
+    account = manager.register_account("+70001112233")
+    assert manager.adopt_phone(account, "+70001112233") is account
+
+
+def test_adopt_phone_refuses_a_number_another_account_has(repo):
+    from app.telegram.exceptions import AccountAlreadyAddedError
+
+    manager = make_manager(repo)
+    existing = manager.register_account("+70009998877")
+    attempt = manager.register_account("+70001112233")
+    with pytest.raises(AccountAlreadyAddedError) as info:
+        manager.adopt_phone(attempt, existing.phone)
+    assert info.value.phone == existing.phone
+    assert repo.get_by_id(attempt.id).phone == "+70001112233"
+
+
+def test_drop_client_removes_only_the_client(repo):
+    fake = FakeClientManager()
+    manager = make_manager(repo, fake)
+    account = manager.register_account("+70001112233")
+    manager.drop_client(account)
+    assert fake.removed == [account.session_name]
+    assert repo.get_by_id(account.id) is not None
+
+
+def test_phones_are_masked_in_the_log(repo):
+    # The rotating log goes into the Diagnostic Bundle, which otherwise
+    # never contains the phone.
+    from unittest.mock import patch
+
+    from app.telegram import account_manager as account_manager_module
+
+    manager = make_manager(repo)
+    with patch.object(account_manager_module.logger, "info") as info:
+        manager.register_account("+70001112233")
+    logged = " ".join(str(arg) for call in info.call_args_list for arg in call.args)
+    assert "+70*******33" in logged
+    assert "+70001112233" not in logged
+
+
 def test_rename_account_sets_local_alias(repo):
     manager = make_manager(repo)
     account = manager.register_account("+70001112233")

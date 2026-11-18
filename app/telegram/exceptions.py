@@ -31,6 +31,15 @@ class AccountDeletionError(TelegramMassSenderError):
     still there rather than seeing a list that silently did not change."""
 
 
+class AccountAlreadyAddedError(TelegramMassSenderError):
+    """A sign-in authorized an account whose phone another account row
+    already has (a QR code scanned in an account that is already added)."""
+
+    def __init__(self, phone: str) -> None:
+        super().__init__(phone)
+        self.phone = phone
+
+
 class InvalidRecipientError(TelegramMassSenderError):
     """Raised when a recipient identifier cannot be parsed."""
 
