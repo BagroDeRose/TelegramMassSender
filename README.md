@@ -16,7 +16,7 @@ A Windows desktop application that sends personal Telegram messages to a list of
 
 TelegramMassSender sends the *same message, personally, to each recipient in a list* — one Telegram message per recipient, from the user's own account, the way you'd write to each of them individually. Recipients are people, and optionally groups, supergroups and channels **the account is already a member of and allowed to post in** — it never joins a chat on its own, and Telegram's restrictions (permissions, slow mode, FloodWait) are respected, never worked around. It is not a bot and not a bulk-marketing tool. It integrates directly with Telegram's native **MTProto** protocol via **Telethon** — not the Bot API — and runs a real async event loop (**qasync**) bridging Qt's UI thread with `asyncio` network I/O.
 
-It supports multiple Telegram accounts, rich text formatting, media/album attachments, per-recipient `{name}` personalization (including from a CSV column), phone-number recipient resolution, a Telegram-style live message preview, saved recipient lists and message templates, an optional step-by-step Campaign Wizard, failed-recipient retry, structured diagnostics, a full Russian/English UI, and campaign reporting — all backed by a 1283-test automated regression suite and a real Windows-packaged build (PyInstaller).
+It supports multiple Telegram accounts, rich text formatting, media/album attachments, per-recipient `{name}` personalization (including from a CSV column), phone-number recipient resolution, sign-in by code or QR code, a Telegram-style live message preview, saved recipient lists and message templates, an optional step-by-step Campaign Wizard, failed-recipient retry, structured diagnostics, a full Russian/English UI, and campaign reporting — all backed by a 1377-test automated regression suite and a real Windows-packaged build (PyInstaller).
 
 ## Key Features
 
@@ -33,7 +33,7 @@ It supports multiple Telegram accounts, rich text formatting, media/album attach
 - Recipient counts that use what the account's dialogs already told the app: an `@username` found among the dialogs read by **From my chats…** counts as a person, a bot or a group/channel; one not seen there yet gets its own "@username" count, since its type is only known when sending. The counts follow a refresh and an account change.
 - An optional step-by-step Campaign Wizard (Recipients → Message → Attachments → Sending options → Preview → Confirmation) alongside the existing fast single-page workflow.
 - Photo, video, and document attachments, with automatic album batching, image thumbnails, and reordering by drag or by explicit Move earlier/Move later controls (also Ctrl+←/Ctrl+→).
-- Multiple Telegram accounts with persistent sessions and live switching.
+- Multiple Telegram accounts with persistent sessions and live switching. Sign in by code (the dialog says where Telegram sent it and offers its resend) or by scanning a QR code with Telegram on the phone, which needs no code at all.
 - Configurable randomized send interval with FloodWait-aware pausing (Telegram's own rate limits are respected, never bypassed), a pre-start duration estimate, and a live elapsed/remaining-time display while a campaign runs. A chat in slow mode fails with a "wait N sec" reason and the campaign moves on — slow mode is never waited out or bypassed.
 - Retry failed recipients (selected or all) after a campaign finishes, without resending anyone who already succeeded.
 - Live campaign statistics, failure-reason breakdowns, a filterable per-recipient results list, an event journal, and CSV report export/saving (including an export-failures-only option).
@@ -146,7 +146,7 @@ Ordinary parts — not oversold: the settings page is a straightforward form bou
 pytest tests/ -v
 ```
 
-**1283 automated tests, 0 failures** (pytest + pytest-asyncio), run against a hand-built mock Telegram client (`tests/mocks/mock_telegram_client.py`) — no real Telegram account or network access needed. Coverage includes:
+**1377 automated tests, 0 failures** (pytest + pytest-asyncio), run against a hand-built mock Telegram client (`tests/mocks/mock_telegram_client.py`) — no real Telegram account or network access needed. Coverage includes:
 
 - Recipient parsing and import (all supported formats including phone numbers and malformed input, TXT import, and content-based CSV column/name detection).
 - Rich-text formatting and UTF-16 entity offset correctness, including the `{name}` placeholder (typed, CSV-supplied, and at message lengths well past Telegram's own text limit).
@@ -174,7 +174,7 @@ This is distinct from **manual packaged-build validation**: before each release,
 
 This project's requirements, architecture, and scope were defined and directed by the developer (BagroDeRose). Implementation was done with extensive AI assistance — primarily **Claude Code** — used for writing code, debugging, writing tests, code review, and documentation, always under human direction and verification rather than as unsupervised generation:
 
-- Every change is covered by the automated test suite (1283 tests, pytest/pytest-asyncio, mocked Telegram client).
+- Every change is covered by the automated test suite (1377 tests, pytest/pytest-asyncio, mocked Telegram client).
 - Bug fixes follow a reproduce → understand root cause → write a failing test → fix → regression test cycle, not guesswork.
 - A dedicated code review and security/privacy audit was performed before each public release (secret storage, log contents, session handling, git history sanitization).
 - The packaged Windows `.exe` is manually launched and validated before release — a successful build is not treated as sufficient on its own.
@@ -183,7 +183,7 @@ This is not a claim that every line was hand-typed, and it is not an unsupervise
 
 ## Download
 
-Latest release: **[v2.1.2](https://github.com/BagroDeRose/TelegramMassSender/releases/latest)** — download `TelegramMassSender-Windows.zip`, extract, and run `TelegramMassSender.exe`. No installation required. Full setup instructions (including obtaining a Telegram API ID/Hash) are in the [Russian user documentation](#документация-на-русском-языке) below.
+Latest release: **[v2.1.3](https://github.com/BagroDeRose/TelegramMassSender/releases/latest)** — download `TelegramMassSender-Windows.zip`, extract, and run `TelegramMassSender.exe`. No installation required. Full setup instructions (including obtaining a Telegram API ID/Hash) are in the [Russian user documentation](#документация-на-русском-языке) below.
 
 ## Limitations
 
@@ -407,9 +407,13 @@ https://my.telegram.org/apps
 - **API Hash:** — строка, полученная там же;
 - **Телефон:** — номер вашего Telegram-аккаунта в международном формате, например `+79991234567` (обязательно со знаком `+` и кодом страны).
 
-Нажмите **«Подключить»**.
+Дальше есть два способа войти.
 
-**4.** В Telegram (на телефоне или в другом уже открытом Telegram) придёт код подтверждения. Введите его в поле **«Введите код из Telegram»** и нажмите **«Подтвердить»**.
+**4а. По коду.** Нажмите **«Получить код»**. Над полем для кода программа напишет, куда Telegram отправил код: в чат «Telegram» на другом вашем устройстве, по SMS, звонком или на почту. Введите код в поле **«Введите код из Telegram»** и нажмите **«Подтвердить»**. Если Telegram предлагает другой способ доставки, через указанное время станет доступна кнопка **«Отправить код ещё раз»**.
+
+**4б. По QR-коду** (если код не приходит). Нажмите **«Войти по QR-коду»** — на первом экране или на экране ввода кода. На телефоне, где этот аккаунт уже открыт, откройте Telegram: **Настройки > Устройства > Подключить устройство** и наведите камеру на QR-код в окне программы. Код подтверждения не нужен. QR-код обновляется сам каждые полминуты. Если отсканировать код в другом аккаунте, программа сохранит тот аккаунт, который вы на самом деле отсканировали. Если этот аккаунт уже добавлен, программа об этом скажет.
+
+> С января 2026 года Telegram иногда не доставляет коды входа сторонним программам: сообщает, что код отправлен, но он не приходит ни в Telegram, ни по SMS, ни на почту. Это происходит на стороне Telegram, у всех сторонних клиентов. Вход по QR-коду от этого не зависит. Не запрашивайте код много раз подряд: после нескольких попыток Telegram на время перестаёт отправлять коды на этот номер.
 
 **5.** Если на вашем аккаунте включена **двухфакторная аутентификация** (дополнительный пароль при входе) — появится ещё один экран: **«Введите пароль двухфакторной аутентификации»**. Введите этот пароль и нажмите **«Подтвердить»**.
 
@@ -418,6 +422,8 @@ https://my.telegram.org/apps
 **6.** После успешного входа появится экран **«Telegram-аккаунт подключён»** с номером телефона, именем и username аккаунта. Нажмите **«Готово»**.
 
 Аккаунт появится отдельной карточкой на странице «Аккаунты», а внизу окна, в строке состояния, будет видно, какой аккаунт сейчас активен — программа готова к работе.
+
+Если закрыть окно, не завершив вход, аккаунт всё равно появится на странице «Аккаунты» со статусом «Требуется повторная авторизация»: программа сохраняет его, как только запрашивает код. Такую карточку можно удалить кнопкой (×) или подключить аккаунт заново.
 
 ---
 
@@ -837,6 +843,16 @@ https://t.me/user3
 
 Это означает, что ваша веб-сессия на сайте `my.telegram.org` устарела или не была подтверждена до конца. Решение — обновить страницу и войти заново по номеру телефона и коду подтверждения.
 
+#### Код для входа в программу не приходит
+
+1. Посмотрите, что программа написала над полем для кода: туда Telegram и отправил код (чат «Telegram» на другом устройстве, включая архив; SMS; звонок; почта).
+2. Если там написано, что код в Telegram, а его нет ни на одном устройстве, войдите по QR-коду (кнопка **«Войти по QR-коду»**, см. [«Подключение Telegram-аккаунта в программе»](#подключение-telegram-аккаунта-в-программе)). С начала 2026 года Telegram иногда не доставляет коды сторонним программам, и ни программа, ни вы на это повлиять не можете.
+3. Не запрашивайте код много раз подряд. Если программа пишет «Слишком много попыток входа с этим номером», подождите несколько часов или войдите по QR-коду.
+
+#### «Не удалось подключиться: no running event loop»
+
+Это ошибка версий до 2.1.3: она появлялась, если добавлять аккаунт кнопкой «Начать» в приветственном окне при первом запуске. В версии 2.1.3 исправлено. В старой версии аккаунт можно добавить кнопкой **«+ Добавить аккаунт»** на странице «Аккаунты».
+
 #### «Telegram временно ограничил отправку» (FloodWait)
 
 Это не ошибка программы — Telegram сам временно ограничил частоту действий вашего аккаунта. Программа покажет, сколько именно нужно подождать. **Обходить это ограничение не нужно и не следует** — просто дождитесь указанного времени и нажмите «▶ Продолжить».
@@ -921,7 +937,7 @@ build_windows.bat
 .venv\Scripts\python -m pytest tests/ -v
 ```
 
-На момент подготовки этой версии README полный набор тестов проходит целиком: **1283 тестов, 0 ошибок** (pytest + pytest-asyncio). Тесты используют собственный мок Telegram-клиента (`tests/mocks/mock_telegram_client.py`) вместо настоящего сервера Telegram, поэтому для их запуска не нужен ни интернет, ни реальный Telegram-аккаунт. Тесты также запускаются автоматически в GitHub Actions при каждом push/PR — см. значок «Tests» в начале README.
+На момент подготовки этой версии README полный набор тестов проходит целиком: **1377 тестов, 0 ошибок** (pytest + pytest-asyncio). Тесты используют собственный мок Telegram-клиента (`tests/mocks/mock_telegram_client.py`) вместо настоящего сервера Telegram, поэтому для их запуска не нужен ни интернет, ни реальный Telegram-аккаунт. Тесты также запускаются автоматически в GitHub Actions при каждом push/PR — см. значок «Tests» в начале README.
 
 #### Технологический стек
 
@@ -947,7 +963,7 @@ Windows-приложение на **Python + PySide6** (Qt для интерфе
 
 #### Как разрабатывался этот проект
 
-Требования, архитектуру и объём функциональности этого проекта определял автор репозитория. AI-инструменты (Claude Code) активно использовались в реализации, отладке, написании тестов, ревью кода и подготовке документации — но под его руководством и с его проверкой на каждом шаге, а не как автономная генерация без контроля. Это не означает, что код не проверялся: каждое изменение сопровождается автоматическими тестами (сейчас это упомянутые выше 1283 тестов на pytest/pytest-asyncio с мок-клиентом Telegram), а исправление ошибок в проекте ведётся по принципу «сначала воспроизвести проблему → понять причину → написать тест → исправить → прогнать регрессионные тесты», а не «на глаз». Перед публикацией репозитория отдельно проведены обзор кода и проверка безопасности/приватности (хранение секретов, содержимое логов, работа с сессиями), а собранный Windows-EXE запускался и проверялся вручную, а не считался готовым сразу по факту успешной сборки.
+Требования, архитектуру и объём функциональности этого проекта определял автор репозитория. AI-инструменты (Claude Code) активно использовались в реализации, отладке, написании тестов, ревью кода и подготовке документации — но под его руководством и с его проверкой на каждом шаге, а не как автономная генерация без контроля. Это не означает, что код не проверялся: каждое изменение сопровождается автоматическими тестами (сейчас это упомянутые выше 1377 тестов на pytest/pytest-asyncio с мок-клиентом Telegram), а исправление ошибок в проекте ведётся по принципу «сначала воспроизвести проблему → понять причину → написать тест → исправить → прогнать регрессионные тесты», а не «на глаз». Перед публикацией репозитория отдельно проведены обзор кода и проверка безопасности/приватности (хранение секретов, содержимое логов, работа с сессиями), а собранный Windows-EXE запускался и проверялся вручную, а не считался готовым сразу по факту успешной сборки.
 
 #### Где на диске хранятся данные пользователя
 
